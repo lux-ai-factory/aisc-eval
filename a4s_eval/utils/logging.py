@@ -1,3 +1,11 @@
+"""Logging configuration and utilities for A4S evaluation.
+
+This module provides custom logging configuration for the A4S evaluation system,
+including JSON formatting, filtering capabilities, and queue-based logging setup.
+It supports structured logging with custom attributes and asynchronous logging
+through a queue handler.
+"""
+
 import atexit
 import datetime as dt
 import json
@@ -10,10 +18,13 @@ from typing import override
 
 import yaml
 
+# Main application logger instances
 app_logger = logging.getLogger("a4s-eval")
 root_logger = logging.getLogger()
 
 
+# Set of built-in attributes in LogRecord objects
+# Used to identify custom attributes when formatting log records
 LOG_RECORD_BUILTIN_ATTRS = {
     "args",
     "asctime",
@@ -42,20 +53,50 @@ LOG_RECORD_BUILTIN_ATTRS = {
 
 
 class JSONFormatter(logging.Formatter):
+    """Custom formatter that outputs log records as JSON objects.
+
+    This formatter converts log records into JSON format, allowing for structured
+    logging with custom fields. It handles both standard LogRecord attributes
+    and custom attributes added during logging.
+    """
+
     def __init__(
         self,
         *,
         fmt_keys: dict[str, str] | None = None,
     ):
+        """Initialize the JSON formatter.
+
+        Args:
+            fmt_keys (dict[str, str] | None): Mapping of output keys to LogRecord
+                attributes. If None, uses default mapping.
+        """
         super().__init__()
         self.fmt_keys = fmt_keys if fmt_keys is not None else {}
 
     @override
     def format(self, record: logging.LogRecord) -> str:
+        """Format the log record as a JSON string.
+
+        Args:
+            record (logging.LogRecord): The log record to format
+
+        Returns:
+            str: JSON-formatted log message
+        """
         message = self._prepare_log_dict(record)
         return json.dumps(message, default=str)
 
     def _prepare_log_dict(self, record: logging.LogRecord) -> dict[str, str]:
+        """Prepare a dictionary representation of the log record.
+
+        Args:
+            record (logging.LogRecord): The log record to convert
+
+        Returns:
+            dict[str, str]: Dictionary containing all log record fields
+        """
+        # Add standard fields that should always be present
         always_fields = {
             "message": record.getMessage(),
             "timestamp": dt.datetime.fromtimestamp(
@@ -68,6 +109,7 @@ class JSONFormatter(logging.Formatter):
         if record.stack_info is not None:
             always_fields["stack_info"] = self.formatStack(record.stack_info)
 
+        # Map custom keys according to fmt_keys configuration
         message = {
             key: msg_val
             if (msg_val := always_fields.pop(val, None)) is not None
@@ -76,6 +118,7 @@ class JSONFormatter(logging.Formatter):
         }
         message.update(always_fields)
 
+        # Add any custom attributes from the log record
         for key, val in record.__dict__.items():
             if key not in LOG_RECORD_BUILTIN_ATTRS:
                 message[key] = val
@@ -84,17 +127,39 @@ class JSONFormatter(logging.Formatter):
 
 
 class NonErrorFilter(logging.Filter):
+    """Filter that only allows non-error log records to pass.
+
+    This filter is used to separate error logs from non-error logs,
+    typically used to route different severity levels to different handlers.
+    """
+
     @override
     def filter(self, record: logging.LogRecord) -> bool | logging.LogRecord:
+        """Check if the record should be logged.
+
+        Args:
+            record (logging.LogRecord): The log record to check
+
+        Returns:
+            bool | logging.LogRecord: True if the record's level is INFO or lower
+        """
         return record.levelno <= logging.INFO
 
 
 def setup_logging() -> None:
+    """Set up logging configuration from the YAML config file.
+
+    This function reads the logging configuration from config/logging.yaml
+    and sets up the logging system accordingly. It also handles the setup
+    of queue-based logging if configured.
+    """
     config_file = pathlib.Path("config/logging.yaml")
     with open(config_file) as f_in:
         logger_config = yaml.safe_load(f_in)
 
     logging.config.dictConfig(logger_config)
+
+    # Start the queue handler's listener if it exists
     queue_handler = logging.getHandlerByName("queue_handler")
     if (
         (queue_handler is not None)
@@ -106,6 +171,11 @@ def setup_logging() -> None:
 
 
 def get_logger() -> Logger:
+    """Get the application logger, setting it up if necessary.
+
+    Returns:
+        Logger: The configured application logger instance
+    """
     if not root_logger.handlers:
         setup_logging()
 
