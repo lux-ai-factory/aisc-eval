@@ -1,30 +1,58 @@
-# The builder image, used to build the virtual environment
-FROM python:3.12-bookworm AS builder
-
-RUN pip install poetry==1.8.2
-
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=1 \
-    POETRY_VIRTUALENVS_CREATE=1 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
-
-WORKDIR /project
-
-COPY pyproject.toml poetry.lock ./
+# Production Dockerfile for A4S Eval
 
 
-RUN touch README.md
+# ----- BASE
+# Base stage with common components
+FROM python:3.12-slim-bookworm AS base
 
-RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
+# Install uv package manager
+COPY --from=ghcr.io/astral-sh/uv:0.7.13 /uv /bin/uv
 
-# The runtime image, used to just run the code provided its virtual environment
-FROM python:3.12-slim-bookworm AS runtime
 
-WORKDIR /project
+# ----- Builder
+FROM base AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.4.9 /uv /bin/uv
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+WORKDIR /app
+COPY uv.lock pyproject.toml /app/
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv sync --frozen --no-install-project --no-dev
+COPY . /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv sync --frozen --no-dev
 
-ENV VIRTUAL_ENV=/project/.venv \
-    PATH="/project/.venv/bin:$PATH"
 
-COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
+# ----- Test
+FROM base AS test
+COPY --from=builder /app /app
+ENV PATH="/app/.venv/bin:$PATH"
+WORKDIR /app
 
-COPY . /project
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv sync --frozen
+CMD ["pytest", "--maxfail=1", "--disable-warnings"]
+
+
+# ----- Production
+# Final stage for runtime
+FROM builder AS prod
+
+# Copy built application from builder
+COPY --from=builder /app /app
+
+WORKDIR /app
+
+# Add virtual environment to PATH
+ENV PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+
+# # Set up entrypoint script
+# RUN chmod +x entrypoint.sh
+# ENTRYPOINT ["./entrypoint.sh"]
+
+# Expose API port
+EXPOSE 8000
+
+# Start FastAPI application
+CMD ["uvicorn", "a4s_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
