@@ -18,6 +18,7 @@ else
   echo ".env.dev is missing or empty"
 fi
 
+uv run python -m celery_worker &
 # Start uvicorn development server:
 # - UV package manager to run uvicorn
 # - Host on all interfaces (0.0.0.0)

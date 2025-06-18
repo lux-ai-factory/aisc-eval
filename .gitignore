@@ -149,7 +149,7 @@ cython_debug/
 
 # Temp and data folder
 tmp/
-data/
+./data/
 
 # Comet
 .cometml-runs/

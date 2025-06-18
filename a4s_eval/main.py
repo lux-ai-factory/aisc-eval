@@ -1,24 +1,54 @@
-"""Main entry point for the A4S Evaluation API service.
+"""Main FastAPI application module for the A4S Evaluation module.
 
-This module initializes and configures the FastAPI application that serves
-as the main entry point for the A4S (AI Audit as a Service) evaluation service.
+This module initializes and configures the FastAPI application, sets up CORS middleware,
+and includes all router modules. It provides the main entry point for the A4S Evaluation module.
 """
 
-from fastapi import FastAPI
+import os
 
-# Initialize FastAPI application instance
+from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from a4s_eval.routers import evaluation
+
+# Initialize the FastAPI application
 app = FastAPI(
-    title="A4S Evaluation API",
-    description="API service for evaluation module of A4S",
-    version="0.0.1"
+    title="A4S Evaluation",
+    description="AI Audit as a Service API",
+    version="0.0.1",
+)
+
+# Configure CORS middleware to allow requests from the frontend
+allowed_origins = os.getenv("CORS_ORIGINS", "localhost").split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
 @app.get("/")
-def read_root():
-    """Root endpoint that returns a simple health check response.
+async def root() -> dict[str, str]:
+    """Root endpoint for API health check.
 
     Returns:
-        dict: A simple hello world response indicating the service is running.
+        dict[str, str]: A simple hello world message.
     """
-    return {"Hello": "World"}
+    return {"message": "Hello World"}
+
+
+# Set up versioned routing
+v1_router = APIRouter(prefix="/v1")
+
+# Include all feature routers under v1
+v1_router.include_router(evaluation.router)
+
+# Group all versions under /api prefix
+api_router = APIRouter(prefix="/api")
+api_router.include_router(v1_router)
+
+# Add versioned routes to main application
+app.include_router(api_router)

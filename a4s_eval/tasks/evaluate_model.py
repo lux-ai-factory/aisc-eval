@@ -13,7 +13,7 @@ import requests
 
 from a4s_eval.data_model.metric import Metric
 from a4s_eval.data_model.project import Project
-from a4s_eval.models.metrics import prediction_test
+from a4s_eval.evaluations.model_evaluation.metrics import prediction_test
 from a4s_eval.utils.env import API_URL
 from a4s_eval.utils.files import auto_get_read_dataset_file
 from a4s_eval.utils.logging import get_logger

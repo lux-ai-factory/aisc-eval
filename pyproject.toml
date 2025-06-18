@@ -20,6 +20,7 @@ dependencies = [
     "skl2onnx>=1.18.0,<2",
     "onnxruntime>=1.21.0,<2",
     "fastapi[standard]>=0.115.12",
+    "celery[redis]>=5.5.3",
 ]
 
 [dependency-groups]

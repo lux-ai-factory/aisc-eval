@@ -6,12 +6,12 @@ and associations between datasets, models, and their evaluation settings.
 
 from pydantic import BaseModel
 
-from a4s_eval.data_model.dataset import Dataset
+from a4s_eval.data_model. import Dataset
 
 
 class Project(BaseModel):
     """Represents a machine learning project with its evaluation configuration.
-    
+
     This class defines the settings for how a dataset should be evaluated over time,
     including the frequency of evaluations and the size of the time window to analyze.
     It also maintains a reference to the associated dataset.
