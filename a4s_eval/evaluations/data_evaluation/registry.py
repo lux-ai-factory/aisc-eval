@@ -2,14 +2,11 @@ from abc import ABC
 from typing import Callable, Iterator, List, Protocol
 
 from a4s_eval.data_model.evaluation import Dataset
-
-
-class Metrics(ABC):
-    pass
+from a4s_eval.data_model.metric import Metric
 
 
 class DataEvaluator(Protocol):
-    def __call__(self, reference: Dataset, evaluated: Dataset) -> List[Metrics]:
+    def __call__(self, reference: Dataset, evaluated: Dataset) -> List[Metric]:
         """Run a specific data evaluation.
 
         Args:
@@ -34,16 +31,26 @@ class DataEvaluatorRegistry:
 data_evaluator_registry = DataEvaluatorRegistry()
 
 
-def data_evaluator() -> Callable[[DataEvaluator], list[Metrics]]:
+def data_evaluator(name: str) -> Callable[[DataEvaluator], list[Metric]]:
     """Decorator to register a function as a data evaluator for A4S.
 
+    Args:INSERT INTO model (id, pid, name, data, project_id, dataset_id)
+    VALUES (
+        id:integer,
+        'pid:uuid',
+        'name:character varying',
+        'data:character varying',
+        project_id:integer,
+        dataset_id:integer
+      );
+        name: The name to register the evaluator under.
 
     Returns:
-        Callable[[Evaluator], list[Metrics]]: A decorator function that register the evaluation function as data evaluator for A4S
+        Callable[[Evaluator], list[Metrics]]: A decorator function that registers the evaluation function as a data evaluator for A4S.
     """
 
     def func_decorator(func: DataEvaluator) -> None:
-        data_evaluator_registry.register("Test", func)
+        data_evaluator_registry.register(name, func)
         return func
 
     return func_decorator

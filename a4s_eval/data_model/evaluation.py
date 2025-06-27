@@ -3,7 +3,7 @@ import uuid
 from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 
 class FeatureType(str, enum.Enum):
@@ -37,6 +37,7 @@ class Feature(BaseModel):
     """
 
     # Feature attributes
+    pid: uuid.UUID
     name: str
     feature_type: FeatureType
     min_value: float | Any
@@ -59,6 +60,8 @@ class Dataset(BaseModel):
 class Model(BaseModel):
     pid: uuid.UUID
     model: pd.DataFrame | None = None
+
+    dataset: Dataset
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

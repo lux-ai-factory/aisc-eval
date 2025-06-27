@@ -6,7 +6,7 @@ and associations between datasets, models, and their evaluation settings.
 
 from pydantic import BaseModel
 
-from a4s_eval.data_model. import Dataset
+from a4s_eval.data_model.evaluation import Dataset
 
 
 class Project(BaseModel):

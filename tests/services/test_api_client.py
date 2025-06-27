@@ -22,7 +22,7 @@ def mock_evaluation_data():
     )
 
     for record in metadata:
-        record["uuid"] = uuid.uuid4()
+        record["pid"] = uuid.uuid4()
 
     data_shape = {
         "features": [
@@ -66,7 +66,7 @@ def test_get_dataset():
     mock_resp = MagicMock()
     mock_resp.headers = {"Content-Type": "text/csv"}
     mock_resp.status_code = 200
-    mock_resp.raw = io.StringIO(csv_data)
+    mock_resp.content = csv_data.encode("utf-8")
     # mock_resp.raise_for_status = MagicMock()
 
     # Set the mock return value

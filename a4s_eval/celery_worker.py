@@ -1,9 +1,3 @@
-from a4s_eval.celery_tasks import celery_app
-
-
-
-def main():
-    celery_app.worker_main()
-
-if __name__ == "__main__":
-    main()
+from a4s_eval.celery_app import celery_app
+from a4s_eval.celery_tasks import poll_and_run_evaluation
+from a4s_eval.tasks.evaluation_tasks import dataset_evaluation_task

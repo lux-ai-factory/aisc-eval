@@ -1,9 +1,6 @@
 default:
   tags:
     - a4s-runner
-  image: docker:24.0.5
-  before_script:
-    - docker info
 
 stages:
   - test
@@ -11,6 +8,9 @@ stages:
 
 test:
   stage: test
+  image: docker:24.0.5
+  before_script:
+    - docker info
   script:
     - docker build --target=test -t $CI_REGISTRY_IMAGE:test .
     - docker run --rm $CI_REGISTRY_IMAGE:test

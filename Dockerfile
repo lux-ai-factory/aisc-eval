@@ -28,8 +28,9 @@ COPY --from=builder /app /app
 ENV PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-  uv sync --frozen
+# RUN --mount=type=cache,target=/root/.cache/uv \
+#   uv sync --frozen
+RUN uv pip install --system --group dev .
 CMD ["pytest", "--maxfail=1", "--disable-warnings"]
 
 
