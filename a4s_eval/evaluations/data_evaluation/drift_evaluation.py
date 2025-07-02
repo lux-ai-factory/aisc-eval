@@ -37,15 +37,15 @@ def categorical_drift_test(x_ref: pd.Series, x_new: pd.Series) -> float:
     """
     # Get all unique values from both series
     all_categories = pd.Index(x_ref.unique()).union(pd.Index(x_new.unique()))
-    
+
     # Compute normalized value counts for both distributions
     ref_counts = x_ref.value_counts(normalize=True)
     new_counts = x_new.value_counts(normalize=True)
-    
+
     # Reindex to ensure both have the same categories (fill missing with 0)
     ref_dist = ref_counts.reindex(all_categories, fill_value=0.0)
     new_dist = new_counts.reindex(all_categories, fill_value=0.0)
-    
+
     return jensenshannon(ref_dist.values, new_dist.values)
 
 
