@@ -1,25 +1,37 @@
 #!/bin/bash
 # Script to start the development server for A4S Evaluation Service
 # This script:
-# 1. Loads environment variables from .env.dev file if it exists
+# 1. Validates and loads environment variables (priority: .env.dev-local > .env.dev)
 # 2. Starts the uvicorn development server with hot-reloading
 
-# Check if .env.dev exists and is not empty
-if [[ -f ".env.dev" && -s ".env.dev" ]]; then
-  # Check if file contains valid environment variable definitions
+# Load and validate environment variables
+# Priority: .env.dev-local > .env.dev
+if [ -f ".env.dev-local" ] && [ -s ".env.dev-local" ]; then
+  if grep -qE '^[a-zA-Z_][a-zA-Z0-9_]*=.*' .env.dev-local; then
+    # Export non-comment lines as environment variables
+    export $(grep -v '^#' .env.dev-local | xargs)
+    echo "Loaded environment from .env.dev-local"
+  else
+    echo "Malformed lines in .env.dev-local"
+    exit 1
+  fi
+elif [ -f ".env.dev" ] && [ -s ".env.dev" ]; then
   if grep -qE '^[a-zA-Z_][a-zA-Z0-9_]*=.*' .env.dev; then
-    # Export all non-comment lines as environment variables
+    # Export non-comment lines as environment variables
     export $(grep -v '^#' .env.dev | xargs)
+    echo "Loaded environment from .env.dev"
   else
     echo "Malformed lines in .env.dev"
     exit 1
   fi
 else
-  echo ".env.dev is missing or empty"
+  echo "Neither .env.dev-local nor .env.dev found or empty"
 fi
 
 # uv run python -m a4s_eval.celery_worker
+touch celery_worker.log
 
+# Start Celery worker in background, redirect logs to /tmp to avoid permission issues
 uv run celery -A a4s_eval.celery_worker worker --loglevel=info  &> celery_worker.log &
 
 # Start uvicorn development server:
