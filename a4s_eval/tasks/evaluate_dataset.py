@@ -17,7 +17,7 @@ from a4s_eval.utils.files import auto_get_read_dataset_file
 
 def post_metrics(project_id: int, metrics: list[Metric]) -> None:
     """Post computed metrics to the API endpoint.
-    
+
     Args:
         project_id: ID of the project these metrics belong to
         metrics: List of computed metrics to post
@@ -35,13 +35,13 @@ def post_metrics(project_id: int, metrics: list[Metric]) -> None:
 
 def evaluate_dataset(project_id: int) -> None:
     """Evaluate data drift for a project's dataset.
-    
+
     This function:
     1. Retrieves project configuration from the API
     2. Loads reference and test datasets
     3. Computes drift metrics over time windows
     4. Posts results back to the API
-    
+
     Args:
         project_id: ID of the project to evaluate
     """

@@ -26,6 +26,15 @@ def get_date_batches(
     Returns:
         list[tuple[pd.Timestamp, pd.Timestamp]]: List of (start, end) timestamp pairs
     """
+    # Special case: if start_date equals end_date, create a single batch
+    if start_date == end_date:
+        # Create a batch that includes all data from that single date
+        batch_start = start_date
+        batch_end = start_date + pd.Timedelta(
+            days=1
+        )  # Next day to include all data from start_date
+        return [(batch_start, batch_end)]
+
     # Round dates if specified
     start_date_round = start_date
     end_date_round = end_date
@@ -34,9 +43,7 @@ def get_date_batches(
         end_date_round = end_date.ceil(date_round)
 
     # Generate the date ranges at specified frequency
-    date_ranges = pd.date_range(
-        start_date_round, end_date_round, freq=freq
-    )
+    date_ranges = pd.date_range(start_date_round, end_date_round, freq=freq)
     # Calculate window ends by adding the window size to each start date
     windows = date_ranges.to_series().add(pd.Timedelta(window))
 

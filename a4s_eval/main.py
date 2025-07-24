@@ -6,7 +6,7 @@ and includes all router modules. It provides the main entry point for the A4S Ev
 
 import os
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from a4s_eval.routers import evaluation
@@ -38,6 +38,16 @@ async def root() -> dict[str, str]:
         dict[str, str]: A simple hello world message.
     """
     return {"message": "Hello World"}
+
+
+@app.get("/favicon.ico")
+async def favicon() -> Response:
+    """Handle favicon requests to prevent 404 errors.
+
+    Returns:
+        Response: Empty response with 204 status code.
+    """
+    return Response(status_code=204)
 
 
 # Set up versioned routing

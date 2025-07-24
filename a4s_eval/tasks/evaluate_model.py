@@ -21,7 +21,7 @@ from a4s_eval.utils.logging import get_logger
 
 def post_metrics(project_id: int, metrics: list[Metric]) -> None:
     """Post computed metrics to the API endpoint.
-    
+
     Args:
         project_id: ID of the project these metrics belong to
         metrics: List of computed metrics to post
@@ -38,17 +38,17 @@ def post_metrics(project_id: int, metrics: list[Metric]) -> None:
 
 def evaluate_dataset(project_id: int) -> None:
     """Evaluate model performance on a project's dataset.
-    
+
     This function:
     1. Retrieves project configuration from the API
     2. Loads the model and test dataset
     3. Makes predictions using the model
     4. Computes performance metrics over time windows
     5. Posts results back to the API
-    
+
     Args:
         project_id: ID of the project to evaluate
-    
+
     Note:
         The model is expected to be in ONNX format and available as 'random_forest.onnx'
     """

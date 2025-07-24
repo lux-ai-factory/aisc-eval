@@ -13,22 +13,33 @@ from a4s_eval.tasks.evaluation_tasks import dataset_evaluation_task
 
 @celery_app.task
 def poll_and_run_evaluation() -> None:
+    print("Polling for pending evaluations...")
     eval_ids = fetch_pending_evaluations()
+    print(f"Found {len(eval_ids)} pending evaluations: {eval_ids}")
+
     if not eval_ids:
-        eval_ids = []  # Default evaluation ID if none are pending
+        print("No pending evaluations found")
+        return
 
     # Create a group for each evaluation ID
-    print(eval_ids)
+    print(f"Creating tasks for {len(eval_ids)} evaluations...")
     groups = [group(dataset_evaluation_task.s(eval_id)) for eval_id in eval_ids]
 
     # Apply each group in parallel
     for eval_id, g in zip(eval_ids, groups):
+        print(f"Launching evaluation task for {eval_id}")
         (g | finalize_evaluation.si(eval_id)).apply_async()
+        print(f"Task launched for {eval_id}")
 
 
 @celery_app.task
 def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
+    print(f"Finalizing evaluation {evaluation_id}")
     try:
-        mark_completed(evaluation_id)
-    except Exception:
+        response = mark_completed(evaluation_id)
+        print(
+            f"Evaluation {evaluation_id} marked as completed, status: {response.status_code}"
+        )
+    except Exception as e:
+        print(f"Failed to mark evaluation {evaluation_id} as completed: {e}")
         mark_failed(evaluation_id)

@@ -1,4 +1,3 @@
-import io
 import uuid
 from unittest.mock import MagicMock, Mock, patch
 
@@ -47,6 +46,7 @@ def mock_evaluation_data():
         "project": {"name": "LCLD", "frequency": "1 day", "window_size": "1 month"},
     }
 
+
 def test_get_evaluation(mock_evaluation_data):
     mock_response = Mock()
     mock_response.status_code = 200
@@ -75,4 +75,3 @@ def test_get_dataset():
         df = get_dataset_data(TEST_UUIDS["train_dataset"])
 
         assert len(df) == 800
-

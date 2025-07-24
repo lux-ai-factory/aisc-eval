@@ -1,4 +1,3 @@
-from abc import ABC
 from typing import Callable, Iterator, List, Protocol
 
 from a4s_eval.data_model.evaluation import Dataset
