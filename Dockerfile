@@ -1,59 +1,38 @@
-# Production Dockerfile for A4S Eval
+# First, build the application in the `/app` directory.
+# See `Dockerfile` for details.
 
-
-# ----- BASE
-# Base stage with common components
-FROM python:3.12-slim-bookworm AS base
-
-# Install uv package manager
-COPY --from=ghcr.io/astral-sh/uv:0.7.13 /uv /bin/uv
-
-
-# ----- Builder
-FROM base AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.4.9 /uv /bin/uv
+# ---- Build and dependencies
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+
+# Disable Python downloads, because we want to use the system interpreter
+# across both images. If using a managed Python version, it needs to be
+# copied from the build image into the final image; see `standalone.Dockerfile`
+# for an example.
+ENV UV_PYTHON_DOWNLOADS=0
+
 WORKDIR /app
-COPY uv.lock pyproject.toml /app/
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv sync --frozen --no-install-project --no-dev
-COPY . /app
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev
+ADD . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv sync --frozen --no-dev
+    uv sync --frozen --no-dev
 
+# ---- Production image
 
-# ----- Test
-FROM base AS test
-COPY --from=builder /app /app
-ENV PATH="/app/.venv/bin:$PATH"
-WORKDIR /app
+# Then, use a final image without uv
+FROM python:3.12-slim-bookworm
+# It is important to use the image that matches the builder, as the path to the
+# Python executable must be the same, e.g., using `python:3.11-slim-bookworm`
+# will fail.
 
-# RUN --mount=type=cache,target=/root/.cache/uv \
-#   uv sync --frozen
-RUN uv pip install --system --group dev .
-CMD ["pytest", "--maxfail=1", "--disable-warnings"]
+# Copy the application from the builder
+COPY --from=builder --chown=app:app /app /app
 
-
-# ----- Production
-# Final stage for runtime
-FROM builder AS prod
-
-# Copy built application from builder
-COPY --from=builder /app /app
-
-WORKDIR /app
-
-# Add virtual environment to PATH
+# Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
-WORKDIR /app
-
-# # Set up entrypoint script
-# RUN chmod +x entrypoint.sh
-# ENTRYPOINT ["./entrypoint.sh"]
-
-# Expose API port
-EXPOSE 8000
-
-# Start FastAPI application
-CMD ["uvicorn", "a4s_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the FastAPI application by default
+CMD ["uvicorn", "a4s_eval.main:app", "--host", "0.0.0.0", "--port", "8000"]
