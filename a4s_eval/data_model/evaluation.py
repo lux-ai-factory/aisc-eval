@@ -3,6 +3,7 @@ import uuid
 from typing import Any
 
 import pandas as pd
+from onnxruntime.capi.onnxruntime_inference_collection import InferenceSession
 from pydantic import BaseModel, ConfigDict
 
 
@@ -60,7 +61,7 @@ class Dataset(BaseModel):
 
 class Model(BaseModel):
     pid: uuid.UUID
-    model: pd.DataFrame | None = None
+    model: InferenceSession | None = None
 
     dataset: Dataset
 

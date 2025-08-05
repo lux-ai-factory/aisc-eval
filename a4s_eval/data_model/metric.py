@@ -25,5 +25,5 @@ class Metric(BaseModel):
         return dt.isoformat()
 
     @field_serializer("feature_pid")
-    def serialize_pid(self, pid: uuid.UUID, _info) -> str:
-        return str(pid)
+    def serialize_pid(self, pid: uuid.UUID | None, _info) -> str | None:
+        return str(pid) if pid is not None else None

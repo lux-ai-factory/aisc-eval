@@ -17,7 +17,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from a4s_eval.data_model.dataset import Feature
+from a4s_eval.data_model.evaluation import Feature
 from a4s_eval.data_model.metric import Metric
 from a4s_eval.data_model.project import Project
 from a4s_eval.utils.dates import DateIterator

@@ -8,7 +8,10 @@ from a4s_eval.service.api_client import (
     mark_completed,
     mark_failed,
 )
-from a4s_eval.tasks.evaluation_tasks import dataset_evaluation_task
+from a4s_eval.tasks.evaluation_tasks import (
+    dataset_evaluation_task,
+    model_evaluation_task,
+)
 
 
 @celery_app.task
@@ -23,7 +26,15 @@ def poll_and_run_evaluation() -> None:
 
     # Create a group for each evaluation ID
     print(f"Creating tasks for {len(eval_ids)} evaluations...")
-    groups = [group(dataset_evaluation_task.s(eval_id)) for eval_id in eval_ids]
+    groups = [
+        group(
+            [
+                dataset_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
+                model_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
+            ]
+        )
+        for eval_id in eval_ids
+    ]
 
     # Apply each group in parallel
     for eval_id, g in zip(eval_ids, groups):
@@ -43,3 +54,13 @@ def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
     except Exception as e:
         print(f"Failed to mark evaluation {evaluation_id} as completed: {e}")
         mark_failed(evaluation_id)
+
+
+@celery_app.task
+def handle_error(evaluation_id, request, exc, traceback) -> None:
+    print(f"Error in evaluation {evaluation_id}:")
+
+    print(f"--\n\n{request} {exc} {traceback}")
+
+    mark_failed(evaluation_id)
+    print(f"Evaluation {evaluation_id} marked as failed due to error.")
