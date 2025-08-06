@@ -32,7 +32,7 @@ fi
 
 # Start Celery worker in background, redirect logs to /tmp to avoid permission issues
 # Use --pool=solo to avoid multiprocessing issues that cause segmentation faults
-uv run celery -A a4s_eval.celery_worker worker --loglevel=info --pool=solo --concurrency=1 &> /tmp/celery_worker.log &
+# uv run celery -A a4s_eval.celery_worker worker --loglevel=info --pool=solo --concurrency=1 &> /tmp/celery_worker.log &
 
 # Start uvicorn development server:
 # - UV package manager to run uvicorn

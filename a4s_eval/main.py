@@ -10,6 +10,7 @@ from fastapi import APIRouter, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from a4s_eval.routers import evaluation
+from a4s_eval.utils.logging import get_logger
 
 # Initialize the FastAPI application
 app = FastAPI(
@@ -37,6 +38,7 @@ async def root() -> dict[str, str]:
     Returns:
         dict[str, str]: A simple hello world message.
     """
+    get_logger().info("Hello world called.")
     return {"message": "Hello World"}
 
 
