@@ -77,6 +77,7 @@ class DateIterator:
             df (pd.DataFrame): The DataFrame to iterate over
             date_feature (str): The column name containing dates
         """
+        df[date_feature] = pd.to_datetime(df[date_feature])
         self.start_date = df[date_feature].min()
         self.end_date = df[date_feature].max()
         self.date_round = date_round
