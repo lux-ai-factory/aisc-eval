@@ -7,12 +7,12 @@ from a4s_eval.data_model.evaluation import DataShape
 from a4s_eval.tasks.datashape_tasks import auto_discover_datashape
 
 
-def put_datashape(datashape_pid: uuid, datashape: DataShape) -> None:
+def patch_datashape(datashape_pid: uuid, datashape: DataShape) -> None:
     for f in datashape.features:
         assert f.min_value <= f.max_value
 
 
-def put_datashape_status(datashape_pid: uuid.UUID, status: str) -> None:
+def patch_datashape_status(datashape_pid: uuid.UUID, status: str) -> None:
     assert status == "auto"
 
 
@@ -27,7 +27,10 @@ def test_auto_discover_datashape() -> None:
         return_value=mock_datashape,
     ), patch(
         "a4s_eval.tasks.datashape_tasks.get_dataset_data", return_value=mock_data
-    ), patch("a4s_eval.tasks.datashape_tasks.put_datashape", new=put_datashape), patch(
-        "a4s_eval.tasks.datashape_tasks.put_datashape_status", new=put_datashape_status
+    ), patch(
+        "a4s_eval.tasks.datashape_tasks.patch_datashape", new=patch_datashape
+    ), patch(
+        "a4s_eval.tasks.datashape_tasks.patch_datashape_status",
+        new=patch_datashape_status,
     ):
         auto_discover_datashape(mock_datashape.pid)

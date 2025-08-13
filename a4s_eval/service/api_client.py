@@ -137,16 +137,18 @@ def get_datashape_request(datashape_pid: uuid.UUID) -> dict[str, Any]:
     return resp.json()
 
 
-def put_datashape(datashape_pid: uuid.UUID, datashape: DataShape) -> requests.Response:
-    resp = requests.put(
+def patch_datashape(
+    datashape_pid: uuid.UUID, datashape: DataShape
+) -> requests.Response:
+    resp = requests.patch(
         f"{API_URL_PREFIX}/datashape/{datashape_pid}", json=datashape.model_dump()
     )
     resp.raise_for_status()
     return resp
 
 
-def put_datashape_status(datashape_pid: uuid.UUID, status: str) -> requests.Response:
-    resp = requests.put(
+def patch_datashape_status(datashape_pid: uuid.UUID, status: str) -> requests.Response:
+    resp = requests.patch(
         f"{API_URL_PREFIX}/datashape/{datashape_pid}/status?status={status}",
     )
     resp.raise_for_status()
