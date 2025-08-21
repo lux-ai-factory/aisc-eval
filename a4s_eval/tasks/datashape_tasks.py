@@ -51,7 +51,7 @@ def auto_discover_datashape(datashape_pid: uuid.UUID) -> None:
         datashape = DataShape(features=features, date=date, target=None)
 
         get_logger().debug(datashape.model_dump_json())
-        patch_datashape(datashape_pid, datashape)
+        patch_datashape(dataset_pid, datashape)
         patch_datashape_status(datashape_pid, "auto")
     except Exception as e:
         get_logger().error(

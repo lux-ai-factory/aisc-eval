@@ -2,9 +2,9 @@ import uuid
 from io import BytesIO
 from typing import Any
 
+import onnxruntime as ort
 import pandas as pd
 import requests
-import onnxruntime as ort
 from pydantic import BaseModel
 
 from a4s_eval.data_model.evaluation import DataShape, Evaluation
@@ -137,11 +137,10 @@ def get_datashape_request(datashape_pid: uuid.UUID) -> dict[str, Any]:
     return resp.json()
 
 
-def patch_datashape(
-    datashape_pid: uuid.UUID, datashape: DataShape
-) -> requests.Response:
+def patch_datashape(dataset_pid: uuid.UUID, datashape: DataShape) -> requests.Response:
     resp = requests.patch(
-        f"{API_URL_PREFIX}/datashape/{datashape_pid}", json=datashape.model_dump()
+        f"{API_URL_PREFIX}/datasets/{dataset_pid}/datashape",
+        json=datashape.model_dump(),
     )
     resp.raise_for_status()
     return resp
@@ -149,7 +148,7 @@ def patch_datashape(
 
 def patch_datashape_status(datashape_pid: uuid.UUID, status: str) -> requests.Response:
     resp = requests.patch(
-        f"{API_URL_PREFIX}/datashape/{datashape_pid}/status?status={status}",
+        f"{API_URL_PREFIX}/datashapes/{datashape_pid}/status?status={status}",
     )
     resp.raise_for_status()
     return resp
