@@ -1,6 +1,5 @@
-import pandas as pd
 import numpy as np
-
+import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -10,7 +9,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from a4s_eval.data_model.evaluation import Dataset, Model
+from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
 from a4s_eval.data_model.metric import Metric
 from a4s_eval.evaluations.model_evaluation.registry import model_pred_proba_evaluator
 
@@ -34,18 +33,18 @@ def robust_roc_auc_score(y_true: np.ndarray, y_pred_proba: np.ndarray) -> np.nda
 
 @model_pred_proba_evaluator(name="Empty model pred proba evaluator")
 def empty_model_evaluator(
-    model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Metric]:
     return []
 
 
 @model_pred_proba_evaluator(name="Classification Performance evaluator: Accuracy")
 def classification_accuracy_evaluator(
-    model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Metric]:
-    date = pd.to_datetime(dataset.data[dataset.shape.date.name]).max()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
     date = date.to_pydatetime()
-    y_true = dataset.data[dataset.shape.target.name].to_numpy()
+    y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
     metric = Metric(
@@ -59,11 +58,11 @@ def classification_accuracy_evaluator(
 
 @model_pred_proba_evaluator(name="Classification Performance evaluator: F1 Score")
 def classification_f1_score_evaluator(
-    model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Metric]:
-    date = pd.to_datetime(dataset.data[dataset.shape.date.name]).max()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
     date = date.to_pydatetime()
-    y_true = dataset.data[dataset.shape.target.name].to_numpy()
+    y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
     metric = Metric(
@@ -77,11 +76,11 @@ def classification_f1_score_evaluator(
 
 @model_pred_proba_evaluator(name="Classification Performance evaluator: Precision")
 def classification_precision_evaluator(
-    model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Metric]:
-    date = pd.to_datetime(dataset.data[dataset.shape.date.name]).max()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
     date = date.to_pydatetime()
-    y_true = dataset.data[dataset.shape.target.name].to_numpy()
+    y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
     metric = Metric(
@@ -95,11 +94,11 @@ def classification_precision_evaluator(
 
 @model_pred_proba_evaluator(name="Classification Performance evaluator: Recall")
 def classification_recall_evaluator(
-    model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Metric]:
-    date = pd.to_datetime(dataset.data[dataset.shape.date.name]).max()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
     date = date.to_pydatetime()
-    y_true = dataset.data[dataset.shape.target.name].to_numpy()
+    y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
     metric = Metric(
@@ -115,11 +114,11 @@ def classification_recall_evaluator(
     name="Classification Performance evaluator: Matthews Correlation Coefficient"
 )
 def classification_matthews_corrcoef_evaluator(
-    model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Metric]:
-    date = pd.to_datetime(dataset.data[dataset.shape.date.name]).max()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
     date = date.to_pydatetime()
-    y_true = dataset.data[dataset.shape.target.name].to_numpy()
+    y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
     metric = Metric(
@@ -133,11 +132,11 @@ def classification_matthews_corrcoef_evaluator(
 
 @model_pred_proba_evaluator(name="Classification Performance evaluator: RROCAUC")
 def classification_roc_auc_evaluator(
-    model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Metric]:
-    date = pd.to_datetime(dataset.data[dataset.shape.date.name]).max()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
     date = date.to_pydatetime()
-    y_true = dataset.data[dataset.shape.target.name].to_numpy()
+    y_true = dataset.data[datashape.target.name].to_numpy()
 
     metric = Metric(
         name="ROCAUC",

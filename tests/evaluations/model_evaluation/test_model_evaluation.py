@@ -1,20 +1,20 @@
-import uuid
 import datetime
-import pytest
+import uuid
 
 import numpy as np
-import pandas as pd
 import onnxruntime as ort
+import pandas as pd
+import pytest
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
 from a4s_eval.evaluations.model_evaluation.perf_evaluation import (
-    empty_model_evaluator,
     classification_accuracy_evaluator,
-    classification_roc_auc_evaluator,
     classification_f1_score_evaluator,
+    classification_matthews_corrcoef_evaluator,
     classification_precision_evaluator,
     classification_recall_evaluator,
-    classification_matthews_corrcoef_evaluator,
+    classification_roc_auc_evaluator,
+    empty_model_evaluator,
 )
 
 
@@ -81,15 +81,25 @@ def y_pred_proba(ref_model: Model, test_dataset: Dataset) -> np.ndarray:
     return y_pred_proba
 
 
-def test_smoke(ref_model: Model, test_dataset: Dataset, y_pred_proba: np.ndarray):
-    metrics = empty_model_evaluator(ref_model, test_dataset, y_pred_proba)
+def test_smoke(
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
+) -> None:
+    metrics = empty_model_evaluator(data_shape, ref_model, test_dataset, y_pred_proba)
     assert len(metrics) == 0
 
 
 def test_model_accuracy_evaluation(
-    ref_model: Model, test_dataset: Dataset, y_pred_proba: np.ndarray
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
 ):
-    metrics = classification_accuracy_evaluator(ref_model, test_dataset, y_pred_proba)
+    metrics = classification_accuracy_evaluator(
+        data_shape, ref_model, test_dataset, y_pred_proba
+    )
     assert len(metrics) == 1
     assert metrics[0].name == "Accuracy"
     assert isinstance(metrics[0].score, float)
@@ -97,9 +107,14 @@ def test_model_accuracy_evaluation(
 
 
 def test_model_f1_score_evaluation(
-    ref_model: Model, test_dataset: Dataset, y_pred_proba: np.ndarray
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
 ):
-    metrics = classification_f1_score_evaluator(ref_model, test_dataset, y_pred_proba)
+    metrics = classification_f1_score_evaluator(
+        data_shape, ref_model, test_dataset, y_pred_proba
+    )
     assert len(metrics) == 1
     assert metrics[0].name == "F1"
     assert isinstance(metrics[0].score, float)
@@ -107,9 +122,14 @@ def test_model_f1_score_evaluation(
 
 
 def test_model_precision_evaluation(
-    ref_model: Model, test_dataset: Dataset, y_pred_proba: np.ndarray
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
 ):
-    metrics = classification_precision_evaluator(ref_model, test_dataset, y_pred_proba)
+    metrics = classification_precision_evaluator(
+        data_shape, ref_model, test_dataset, y_pred_proba
+    )
     assert len(metrics) == 1
     assert metrics[0].name == "Precision"
     assert isinstance(metrics[0].score, float)
@@ -117,9 +137,14 @@ def test_model_precision_evaluation(
 
 
 def test_model_recall_evaluation(
-    ref_model: Model, test_dataset: Dataset, y_pred_proba: np.ndarray
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
 ):
-    metrics = classification_recall_evaluator(ref_model, test_dataset, y_pred_proba)
+    metrics = classification_recall_evaluator(
+        data_shape, ref_model, test_dataset, y_pred_proba
+    )
     assert len(metrics) == 1
     assert metrics[0].name == "Recall"
     assert isinstance(metrics[0].score, float)
@@ -127,10 +152,13 @@ def test_model_recall_evaluation(
 
 
 def test_model_matthews_corrcoef_evaluation(
-    ref_model: Model, test_dataset: Dataset, y_pred_proba: np.ndarray
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
 ):
     metrics = classification_matthews_corrcoef_evaluator(
-        ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba
     )
     assert len(metrics) == 1
     assert metrics[0].name == "MCC"
@@ -139,9 +167,14 @@ def test_model_matthews_corrcoef_evaluation(
 
 
 def test_model_roc_auc_evaluation(
-    ref_model: Model, test_dataset: Dataset, y_pred_proba: np.ndarray
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
 ):
-    metrics = classification_roc_auc_evaluator(ref_model, test_dataset, y_pred_proba)
+    metrics = classification_roc_auc_evaluator(
+        data_shape, ref_model, test_dataset, y_pred_proba
+    )
     assert len(metrics) == 1
     assert metrics[0].name == "ROCAUC"
     assert isinstance(metrics[0].score, float)

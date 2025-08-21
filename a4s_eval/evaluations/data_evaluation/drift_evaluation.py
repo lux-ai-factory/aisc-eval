@@ -2,13 +2,15 @@ import pandas as pd
 from scipy.spatial.distance import jensenshannon
 from scipy.stats import wasserstein_distance
 
-from a4s_eval.data_model.evaluation import Dataset, FeatureType
+from a4s_eval.data_model.evaluation import Dataset, DataShape, FeatureType
 from a4s_eval.data_model.metric import Metric
 from a4s_eval.evaluations.data_evaluation.registry import data_evaluator
 
 
 @data_evaluator(name="Empty data evaluator")
-def empty_data_evaluator(reference: Dataset, evaluated: Dataset) -> list[Metric]:
+def empty_data_evaluator(
+    datashape: DataShape, reference: Dataset, evaluated: Dataset
+) -> list[Metric]:
     return []
 
 
@@ -89,7 +91,9 @@ def feature_drift_test(
 
 
 @data_evaluator(name="Data drift")
-def data_drift_evaluator(reference: Dataset, evaluated: Dataset) -> list[Metric]:
+def data_drift_evaluator(
+    datashape: DataShape, reference: Dataset, evaluated: Dataset
+) -> list[Metric]:
     """Calculate drift for all features between reference and evaluated datasets.
 
     This evaluator compares the reference dataset against the evaluated dataset
@@ -105,11 +109,15 @@ def data_drift_evaluator(reference: Dataset, evaluated: Dataset) -> list[Metric]
     """
 
     # Get the current date from the evaluated dataset
-    date = pd.to_datetime(evaluated.data[reference.shape.date.name]).max()
+    date_feature = datashape.date.name
+    date = pd.to_datetime(evaluated.data[date_feature]).max()
 
     metrics = []
 
-    for feature in reference.shape.features:
+    for feature in evaluated.shape.features:
+        if feature.name == date_feature:
+            continue
+
         feature_type = feature.feature_type
         x_ref_feature = reference.data[feature.name]
         x_new_feature = evaluated.data[feature.name]

@@ -2,13 +2,17 @@ from typing import Callable, Iterator, List, Protocol
 
 import numpy as np
 
-from a4s_eval.data_model.evaluation import Dataset, Model
+from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
 from a4s_eval.data_model.metric import Metric
 
 
 class ModelPredProbaEvaluator(Protocol):
     def __call__(
-        self, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+        self,
+        datashape: DataShape,
+        model: Model,
+        dataset: Dataset,
+        y_pred_proba: np.ndarray,
     ) -> List[Metric]:
         """Run a specific model evaluation.
 

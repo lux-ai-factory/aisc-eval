@@ -77,6 +77,7 @@ class Model(BaseModel):
 
 
 class Project(BaseModel):
+    pid: uuid.UUID
     name: str
     frequency: str
     window_size: str

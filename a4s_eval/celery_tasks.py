@@ -9,7 +9,6 @@ from a4s_eval.service.api_client import (
     mark_failed,
 )
 from a4s_eval.tasks.evaluation_tasks import (
-    dataset_evaluation_task,
     model_evaluation_task,
 )
 
@@ -29,7 +28,7 @@ def poll_and_run_evaluation() -> None:
     groups = [
         group(
             [
-                dataset_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
+                # dataset_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
                 model_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
             ]
         )

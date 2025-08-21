@@ -17,7 +17,7 @@ from a4s_eval.evaluations.data_evaluation.drift_evaluation import (
 )
 
 
-def test_empty_evaluator():
+def test_empty_evaluator() -> None:
     """Test that empty evaluator returns empty metrics."""
     from a4s_eval.data_model.evaluation import Dataset, DataShape, Feature, FeatureType
 
@@ -50,7 +50,7 @@ def test_empty_evaluator():
     ref_dataset = Dataset(pid=uuid.uuid4(), shape=data_shape, data=test_data)
     test_dataset = Dataset(pid=uuid.uuid4(), shape=data_shape, data=test_data)
 
-    metrics = empty_data_evaluator(ref_dataset, test_dataset)
+    metrics = empty_data_evaluator(data_shape, ref_dataset, test_dataset)
     assert len(metrics) == 0
 
 

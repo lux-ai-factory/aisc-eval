@@ -51,24 +51,26 @@ def ref_dataset(data_shape: DataShape) -> Dataset:
     )
 
 
-def test_smoke(ref_dataset: Dataset, test_dataset: Dataset):
-    metrics = empty_data_evaluator(ref_dataset, test_dataset)
+def test_smoke(
+    data_shape: DataShape, ref_dataset: Dataset, test_dataset: Dataset
+) -> None:
+    metrics = empty_data_evaluator(data_shape, ref_dataset, test_dataset)
     assert len(metrics) == 0
 
 
 def test_data_drift_evaluator_generates_metrics(
-    ref_dataset: Dataset, test_dataset: Dataset
+    data_shape: DataShape, ref_dataset: Dataset, test_dataset: Dataset
 ):
     """
     # This function tests the data drift evaluator to ensure it generates some metrics.
     """
 
-    metrics = data_drift_evaluator(ref_dataset, test_dataset)
+    metrics = data_drift_evaluator(data_shape, ref_dataset, test_dataset)
     assert len(metrics) == len(ref_dataset.shape.features)
 
 
 def test_data_drift_evaluator_metrics_not_nan(
-    ref_dataset: Dataset, test_dataset: Dataset
+    data_shape: DataShape, ref_dataset: Dataset, test_dataset: Dataset
 ):
-    metrics = data_drift_evaluator(ref_dataset, test_dataset)
+    metrics = data_drift_evaluator(data_shape, ref_dataset, test_dataset)
     assert all(not np.isnan(metric.score) for metric in metrics)

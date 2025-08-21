@@ -59,7 +59,7 @@ def mark_failed(evaluation_pid: uuid.UUID) -> None:
     return requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}", json=payload)
 
 
-def get_dataset_data(dataset_pid: str) -> pd.DataFrame:
+def get_dataset_data(dataset_pid: uuid.UUID) -> pd.DataFrame:
     resp = requests.get(f"{API_URL_PREFIX}/datasets/{dataset_pid}/data", stream=True)
     resp.raise_for_status()
     content_type = resp.headers.get("Content-Type", "")
@@ -152,3 +152,9 @@ def patch_datashape_status(datashape_pid: uuid.UUID, status: str) -> requests.Re
     )
     resp.raise_for_status()
     return resp
+
+
+def get_project_datashape(project_pid: uuid.UUID) -> DataShape:
+    resp = requests.get(f"{API_URL_PREFIX}/projects/{project_pid}/datashape")
+    resp.raise_for_status()
+    return DataShape.model_validate(resp.json())

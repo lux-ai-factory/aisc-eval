@@ -1,14 +1,17 @@
 from typing import Callable, Iterator, List, Protocol
 
-from a4s_eval.data_model.evaluation import Dataset
+from a4s_eval.data_model.evaluation import Dataset, DataShape
 from a4s_eval.data_model.metric import Metric
 
 
 class DataEvaluator(Protocol):
-    def __call__(self, reference: Dataset, evaluated: Dataset) -> List[Metric]:
+    def __call__(
+        self, datashape: DataShape, reference: Dataset, evaluated: Dataset
+    ) -> List[Metric]:
         """Run a specific data evaluation.
 
         Args:
+            datashape: The datashape of the proejct
             reference: The reference dataset to run the evaluation.
             evaluated: The evaluated dataset.
 
