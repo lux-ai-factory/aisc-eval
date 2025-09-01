@@ -17,4 +17,5 @@ celery_app.conf.update(
     broker_connection_max_retries=10,
     task_soft_time_limit=1800,  # 30 minutes soft limit
     task_time_limit=2100,  # 35 minutes hard limit (buffer for cleanup)
+    worker_hijack_root_logger=False,
 )

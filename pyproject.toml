@@ -6,7 +6,7 @@ authors = [
     { name = "Thibault Simonetto", email = "thibault.simonetto@uni.lu" },
     { name = "Maxime Cordy", email = "maxime.cordy@uni.lu" },
 ]
-requires-python = "~=3.12"
+requires-python = "~=3.12.0"
 readme = "README.md"
 dependencies = [
     "pydantic>=2.10.0,<3",

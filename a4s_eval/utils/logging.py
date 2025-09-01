@@ -19,7 +19,7 @@ from typing import override
 import yaml
 
 # Main application logger instances
-app_logger = logging.getLogger("a4s-eval")
+app_logger = logging.getLogger("a4s_eval")
 root_logger = logging.getLogger()
 
 
@@ -50,6 +50,25 @@ LOG_RECORD_BUILTIN_ATTRS = {
     "threadName",
     "taskName",
 }
+
+COLORS = {
+    "DEBUG": "\033[36m",  # Cyan
+    "INFO": "\033[32m",  # Green
+    "WARNING": "\033[33m",  # Yellow
+    "ERROR": "\033[31m",  # Red
+    "CRITICAL": "\033[41m",  # Red background
+}
+RESET = "\033[0m"
+
+
+class ColoredFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        levelname = record.levelname
+        if levelname in COLORS:
+            record.colored_levelname = f"{COLORS[levelname]}{levelname}{RESET}"
+        else:
+            record.colored_levelname = levelname
+        return super().format(record)
 
 
 class JSONFormatter(logging.Formatter):

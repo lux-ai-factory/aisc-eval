@@ -54,3 +54,25 @@ To run the unit tests, you can use the following command:
 uv sync --frozen --group test
 uv run pytest tests/
 ```
+
+### How to log and customise logs
+
+We use a single package-wide logger named as the main package: `a4s_api`.
+
+To log, simply import the logger and use it:
+
+```python
+from a4s_api.utils import get_logger
+
+get_logger().info("This is an info message")
+get_logger().error("This is an error message")
+```
+
+You can customize the logging configuration by modifying the `./config/logging.yaml` file.
+
+For instance, in the loggers section, you can customize the level of logging for different loggers, such as the `a4s_api` logger (containing our messages) or the `uvicorn` and `sqlalchemy` loggers.
+
+You can also customize the message format by modifying the `formatters.colored.format` field in the loggers section.
+See [official Python documentation on LogRecord attributes](https://docs.python.org/3/library/logging.html#logrecord-attributes) for a full list of available fields.
+
+Please do not push your local changes, except if necessary. For instance, DEBUG log in `logging.yaml` should not be pushed.

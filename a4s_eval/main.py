@@ -9,7 +9,7 @@ import os
 from fastapi import APIRouter, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from a4s_eval.routers import evaluation, datashape
+from a4s_eval.routers import datashape, evaluation
 from a4s_eval.utils.logging import get_logger
 
 # Initialize the FastAPI application
@@ -65,3 +65,5 @@ api_router.include_router(v1_router)
 
 # Add versioned routes to main application
 app.include_router(api_router)
+
+get_logger().info("Application started.")
