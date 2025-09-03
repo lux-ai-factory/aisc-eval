@@ -12,47 +12,77 @@ from a4s_eval.tasks.evaluation_tasks import (
     dataset_evaluation_task,
     model_evaluation_task,
 )
+from a4s_eval.utils.logging import get_logger
+
+logger = get_logger()
 
 
 @celery_app.task
 def poll_and_run_evaluation() -> None:
-    print("Polling for pending evaluations...")
-    eval_ids = fetch_pending_evaluations()
-    print(f"Found {len(eval_ids)} pending evaluations: {eval_ids}")
+    try:
+        logger.debug("=== POLL_AND_RUN_EVALUATION START ===")
+        logger.debug("1. Starting poll_and_run_evaluation task")
 
-    if not eval_ids:
-        print("No pending evaluations found")
-        return
-
-    # Create a group for each evaluation ID
-    print(f"Creating tasks for {len(eval_ids)} evaluations...")
-    groups = [
-        group(
-            [
-                dataset_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
-                model_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
-            ]
+        logger.debug("2. About to call fetch_pending_evaluations()")
+        eval_ids = fetch_pending_evaluations()
+        logger.debug(
+            f"3. fetch_pending_evaluations() completed. Found {len(eval_ids)} evaluations: {eval_ids}"
         )
-        for eval_id in eval_ids
-    ]
 
-    # Apply each group in parallel
-    for eval_id, g in zip(eval_ids, groups):
-        print(f"Launching evaluation task for {eval_id}")
-        (g | finalize_evaluation.si(eval_id)).apply_async()
-        print(f"Task launched for {eval_id}")
+        if not eval_ids:
+            logger.debug("4. No pending evaluations found, returning")
+            return
+
+        logger.debug(f"5. Creating groups for {len(eval_ids)} evaluations...")
+        groups = [
+            group(
+                [
+                    dataset_evaluation_task.s(eval_id).on_error(
+                        handle_error.s(eval_id)
+                    ),
+                    model_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
+                ]
+            )
+            for eval_id in eval_ids
+        ]
+        logger.debug(f"6. Groups created: {len(groups)} groups")
+
+        logger.debug("7. Starting to apply groups...")
+        # Apply each group in parallel
+        for i, (eval_id, g) in enumerate(zip(eval_ids, groups)):
+            logger.debug(f"8.{i + 1} About to launch evaluation task for {eval_id}")
+            try:
+                (g | finalize_evaluation.si(eval_id)).apply_async()
+                logger.debug(f"9.{i + 1} Task launched successfully for {eval_id}")
+            except Exception as e:
+                logger.error(f"ERROR launching task for {eval_id}: {str(e)}")
+                import traceback
+
+                logger.error(f"Traceback: {traceback.format_exc()}")
+
+        logger.debug("10. All tasks processed")
+
+    except Exception as e:
+        logger.error(f"ERROR in poll_and_run_evaluation: {str(e)}")
+        logger.error(f"Exception type: {type(e)}")
+        import traceback
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise
+    finally:
+        logger.debug("=== POLL_AND_RUN_EVALUATION END ===")
 
 
 @celery_app.task
 def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
-    print(f"Finalizing evaluation {evaluation_id}")
+    logger.debug(f"Finalizing evaluation {evaluation_id}")
     try:
         response = mark_completed(evaluation_id)
-        print(
+        logger.debug(
             f"Evaluation {evaluation_id} marked as completed, status: {response.status_code}"
         )
     except Exception as e:
-        print(f"Failed to mark evaluation {evaluation_id} as completed: {e}")
+        logger.error(f"Failed to mark evaluation {evaluation_id} as completed: {e}")
         mark_failed(evaluation_id)
 
 
@@ -64,3 +94,13 @@ def handle_error(evaluation_id, request, exc, traceback) -> None:
 
     mark_failed(evaluation_id)
     print(f"Evaluation {evaluation_id} marked as failed due to error.")
+
+
+# @celery_app.task
+# def test_simple_task() -> str:
+#     """Simple test task to debug Celery"""
+#     logger.debug("=== TEST SIMPLE TASK START ===")
+#     logger.debug("This is a simple test task")
+#     logger.debug("=== TEST SIMPLE TASK END ===")
+
+#     return "Test task completed successfully"

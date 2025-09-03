@@ -21,6 +21,9 @@ from a4s_eval.data_model.evaluation import Feature
 from a4s_eval.data_model.metric import Metric
 from a4s_eval.data_model.project import Project
 from a4s_eval.utils.dates import DateIterator
+from a4s_eval.utils.logging import get_logger
+
+logger = get_logger()
 
 
 def robust_roc_auc_score(y_true: np.ndarray, y_pred_proba: np.ndarray) -> np.ndarray:
@@ -33,11 +36,21 @@ def robust_roc_auc_score(y_true: np.ndarray, y_pred_proba: np.ndarray) -> np.nda
     Returns:
         np.ndarray: ROC AUC score
     """
+    logger.debug(
+        f"Computing ROC AUC score - y_true shape: {y_true.shape}, y_pred_proba shape: {y_pred_proba.shape}"
+    )
+
     if y_pred_proba.shape[1] == 2:
+        logger.debug(
+            "Binary classification detected, using positive class probabilities"
+        )
         y_pred_proba = y_pred_proba[
             :, 1
         ]  # Use probability of positive class for binary classification
-    return roc_auc_score(y_true, y_pred_proba)
+
+    score = roc_auc_score(y_true, y_pred_proba)
+    logger.debug(f"ROC AUC score computed: {score}")
+    return score
 
 
 # Dictionary mapping metric names to their sklearn implementations
@@ -68,31 +81,43 @@ def prediction_metric_test(
     Returns:
         list[Metric]: List of computed metrics
     """
+    logger.debug(
+        f"Starting prediction metric test - y_true shape: {y_true.shape}, y_pred_proba shape: {y_pred_proba.shape}"
+    )
+
     out = []
     y_pred = np.argmax(
         y_pred_proba, axis=1
     )  # Convert probabilities to class predictions
+    logger.debug(
+        f"Converted probabilities to predictions - y_pred shape: {y_pred.shape}"
+    )
 
     # Calculate prediction-based metrics
+    logger.debug("Computing prediction-based metrics")
     for name, score_f in pred_classification_metric.items():
-        out.append(
-            Metric(
-                name=name,
-                score=score_f(y_true, y_pred),
-                time=current_time,
-            )
+        score = score_f(y_true, y_pred)
+        metric = Metric(
+            name=name,
+            score=score,
+            time=current_time,
         )
+        out.append(metric)
+        logger.debug(f"Computed {name} metric: {score}")
 
     # Calculate probability-based metrics
+    logger.debug("Computing probability-based metrics")
     for name, score_f in str2proba_classification_metric.items():
-        out.append(
-            Metric(
-                name=name,
-                score=score_f(y_true, y_pred_proba),
-                time=current_time,
-            )
+        score = score_f(y_true, y_pred_proba)
+        metric = Metric(
+            name=name,
+            score=score,
+            time=current_time,
         )
+        out.append(metric)
+        logger.debug(f"Computed {name} metric: {score}")
 
+    logger.debug(f"Prediction metric test completed - Generated {len(out)} metrics")
     return out
 
 
@@ -115,7 +140,16 @@ def prediction_test(
     Returns:
         list[Metric]: List of evaluation metrics for each time window
     """
+    logger.debug(
+        f"Starting prediction test - x_new shape: {x_new.shape}, y_new_pred_proba shape: {y_new_pred_proba.shape}"
+    )
+    logger.debug(
+        f"Project window size: {project.window_size}, frequency: {project.frequency}"
+    )
+
     metrics = []
+    iteration_count = 0
+
     for end_date, x_curr in DateIterator(
         date_round="1 D",
         window=project.window_size,
@@ -123,10 +157,25 @@ def prediction_test(
         df=x_new,
         date_feature=date_feature.name,
     ):
+        iteration_count += 1
+        logger.debug(
+            f"Processing time window {iteration_count} - date: {end_date}, data shape: {x_curr.shape}"
+        )
+
         y_curr = x_curr[target_feature.name].to_numpy()
         y_curr_pred_proba = y_new_pred_proba[x_curr.index]
 
+        logger.debug(
+            f"Current window - y_curr shape: {y_curr.shape}, y_curr_pred_proba shape: {y_curr_pred_proba.shape}"
+        )
+
         metrics_curr = prediction_metric_test(y_curr, y_curr_pred_proba, end_date)
         metrics.extend(metrics_curr)
+        logger.debug(
+            f"Generated {len(metrics_curr)} metrics for time window {iteration_count}"
+        )
 
+    logger.debug(
+        f"Prediction test completed - Processed {iteration_count} time windows, generated {len(metrics)} total metrics"
+    )
     return metrics

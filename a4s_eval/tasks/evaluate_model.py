@@ -31,7 +31,7 @@ def post_metrics(project_id: int, metrics: list[Metric]) -> None:
         json=[m.model_dump(mode="json") for m in metrics],
     )
     if response.status_code == 201:
-        get_logger().info("Metrics sent successfully")
+        get_logger().debug("Metrics sent successfully")
     else:
         get_logger().error(f"Failed to send metrics {response.status_code}")
 
@@ -52,7 +52,7 @@ def evaluate_dataset(project_id: int) -> None:
     Note:
         The model is expected to be in ONNX format and available as 'random_forest.onnx'
     """
-    get_logger().info(f"Starting evaluation for project {project_id}")
+    get_logger().debug(f"Starting evaluation for project {project_id}")
 
     # Get project configuration from API
     response = requests.get(f"{API_URL}/api/projects/{project_id}")
@@ -97,7 +97,7 @@ def evaluate_dataset(project_id: int) -> None:
         # Add dataset ID to metrics and save
         for m in metrics:
             m.dataset_id = project.dataset.id
-        get_logger().info(f"Saving {len(metrics)} metrics.")
+        get_logger().debug(f"Saving {len(metrics)} metrics.")
 
         post_metrics(project_id, metrics)
     else:
@@ -106,4 +106,4 @@ def evaluate_dataset(project_id: int) -> None:
 
 if __name__ == "__main__":
     evaluate_dataset(1)  # Run evaluation for project ID 1
-    get_logger().info("Task done, exiting.")
+    get_logger().debug("Task done, exiting.")

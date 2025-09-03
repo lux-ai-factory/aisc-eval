@@ -14,55 +14,60 @@ from a4s_eval.service.api_client import (
     get_onnx_model,
     get_project_datashape,
     post_metrics,
+    mark_failed,
+    mark_completed,
 )
 from a4s_eval.utils.dates import DateIterator
 from a4s_eval.utils.env import API_URL_PREFIX
+from a4s_eval.utils.logging import get_logger
+
+logger = get_logger()
 
 
 @celery_app.task
 def dataset_evaluation_task(evaluation_pid: uuid.UUID) -> None:
-    print(f"Starting evaluation task for {evaluation_pid}")
+    logger.debug(f"Starting evaluation task for {evaluation_pid}")
 
     # Debug: Check registry and API configuration
-    print(f"API_URL_PREFIX: {API_URL_PREFIX}")
+    logger.debug(f"API_URL_PREFIX: {API_URL_PREFIX}")
 
     # Check if any evaluators are registered
     evaluator_list = list(data_evaluator_registry)
-    print(f"Registered evaluators: {len(evaluator_list)}")
+    logger.debug(f"Registered evaluators: {len(evaluator_list)}")
     for name, _ in evaluator_list:
-        print(f"  - {name}")
+        logger.debug(f"  - {name}")
 
     if len(evaluator_list) == 0:
-        print("WARNING: No evaluators registered!")
+        logger.warning("No evaluators registered!")
         return
 
     try:
         evaluation = get_evaluation(evaluation_pid)
-        print(f"Evaluation loaded: {evaluation.pid}")
+        logger.debug(f"Evaluation loaded: {evaluation.pid}")
 
         evaluation.dataset.data = get_dataset_data(evaluation.dataset.pid)
         evaluation.model.dataset.data = get_dataset_data(evaluation.model.dataset.pid)
-        print("Data loaded for both datasets")
+        logger.debug("Data loaded for both datasets")
 
         metrics: list[Metric] = []
 
         x_test = evaluation.dataset.data
-        print("Starting time iteration for evaluation...")
+        logger.debug("Starting time iteration for evaluation...")
+
+        datashape = get_project_datashape(evaluation.project.pid)
 
         # Debug DateIterator parameters
-        print("DateIterator parameters:")
-        print(f"   - window_size: {evaluation.project.window_size}")
-        print(f"   - frequency: {evaluation.project.frequency}")
-        # print(f"   - date_feature: {evaluation.model.dataset.shape.date.name}")
-        print(f"   - data shape: {evaluation.dataset.data.shape}")
-        # print(
-        #     f"   - date column sample: {evaluation.dataset.data[evaluation.model.dataset.shape.date.name].head()}"
-        # )
+        logger.debug("DateIterator parameters:")
+        logger.debug(f"   - window_size: {evaluation.project.window_size}")
+        logger.debug(f"   - frequency: {evaluation.project.frequency}")
+        logger.debug(f"   - date_feature: {datashape.date.name}")
+        logger.debug(f"   - data shape: {evaluation.dataset.data.shape}")
+        logger.debug(
+            f"   - date column sample: {evaluation.dataset.data[datashape.date.name].head()}"
+        )
 
         iteration_count = 0
         evaluator_count = 0  # Initialize here to avoid UnboundLocalError
-
-        datashape = get_project_datashape(evaluation.project.pid)
 
         try:
             date_iterator = DateIterator(
@@ -72,54 +77,65 @@ def dataset_evaluation_task(evaluation_pid: uuid.UUID) -> None:
                 df=evaluation.dataset.data,
                 date_feature=datashape.date.name,
             )
-            print("DateIterator created successfully")
+            logger.debug("DateIterator created successfully")
 
             for i, (date_val, x_curr) in enumerate(date_iterator):
                 iteration_count += 1
-                print(f"Iteration {i}, date: {date_val}, data shape: {x_curr.shape}")
+                logger.debug(
+                    f"Iteration {i}, date: {date_val}, data shape: {x_curr.shape}"
+                )
                 evaluation.dataset.data = x_curr
 
                 evaluator_count = 0
                 for name, evaluator in data_evaluator_registry:
                     evaluator_count += 1
-                    print(f"Running evaluator: {name}")
+                    logger.debug(f"Running evaluator: {name}")
                     new_metrics = evaluator(
                         datashape, evaluation.model.dataset, evaluation.dataset
                     )
-                    print(f"Generated {len(new_metrics)} metrics")
+                    logger.debug(f"Generated {len(new_metrics)} metrics")
                     metrics.extend(new_metrics)
 
         except Exception as e:
-            print(f"Error in DateIterator: {e}")
+            logger.error(f"Error in DateIterator: {e}")
             import traceback
 
-            traceback.print_exc()
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
-        print(f"Total iterations: {iteration_count}")
-        print(f"Total evaluators per iteration: {evaluator_count}")
-        print(f"Total metrics generated: {len(metrics)}")
+        logger.debug(f"Total iterations: {iteration_count}")
+        logger.debug(f"Total evaluators per iteration: {evaluator_count}")
+        logger.debug(f"Total metrics generated: {len(metrics)}")
 
         if len(metrics) > 0:
-            print(f"Sample metric: {metrics[0].model_dump()}")
+            logger.debug(f"Sample metric: {metrics[0].model_dump()}")
         else:
-            print("WARNING: No metrics generated!")
+            logger.warning("No metrics generated!")
 
         evaluation.dataset.data = x_test
 
-        print(f"Posting {len(metrics)} metrics to API...")
+        logger.debug(f"Posting {len(metrics)} metrics to API...")
         try:
             response = post_metrics(evaluation_pid, metrics)
-            print(f"Metrics posted successfully, status: {response.status_code}")
-            print(f"Response content: {response.text}")
+            logger.debug(f"Metrics posted successfully, status: {response.status_code}")
+            logger.debug(f"Response content: {response.text}")
         except Exception as e:
-            print(f"Error posting metrics: {e}")
+            logger.error(f"Error posting metrics: {e}")
             raise
 
-        print("Evaluation task completed successfully")
+        try:
+            mark_completed(evaluation_pid)
+        except Exception as mark_error:
+            logger.error(f"Error marking evaluation as completed: {mark_error}")
+
+        logger.debug("Evaluation task completed successfully")
 
     except Exception as e:
-        print(f"Error in evaluation task: {e}")
-        print("Marking evaluation as failed...")
+        logger.error(f"Error in evaluation task: {e}")
+        logger.debug("Marking evaluation as failed...")
+        try:
+            mark_failed(evaluation_pid)
+        except Exception as mark_error:
+            logger.error(f"Error marking evaluation as failed: {mark_error}")
         raise
 
 
