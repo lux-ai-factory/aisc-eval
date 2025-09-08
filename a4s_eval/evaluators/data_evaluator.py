@@ -1,4 +1,4 @@
-from typing import Callable, Iterator, List, Protocol
+from typing import Callable, Iterator, Protocol
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape
 from a4s_eval.data_model.metric import Metric
@@ -10,7 +10,7 @@ logger = get_logger()
 class DataEvaluator(Protocol):
     def __call__(
         self, datashape: DataShape, reference: Dataset, evaluated: Dataset
-    ) -> List[Metric]:
+    ) -> list[Metric]:
         """Run a specific data evaluation.
 
         Args:
@@ -19,7 +19,7 @@ class DataEvaluator(Protocol):
             evaluated: The evaluated dataset.
 
         """
-        pass
+        raise NotImplementedError
 
 
 class DataEvaluatorRegistry:
@@ -39,19 +39,16 @@ class DataEvaluatorRegistry:
 data_evaluator_registry = DataEvaluatorRegistry()
 
 
-def data_evaluator(name: str) -> Callable[[DataEvaluator], list[Metric]]:
+def data_evaluator(name: str) -> Callable[[DataEvaluator], DataEvaluator]:
     """Decorator to register a function as a data evaluator for A4S.
-
-    Args:
         name: The name to register the evaluator under.
 
     Returns:
-        Callable[[Evaluator], list[Metrics]]: A decorator function that registers the evaluation function as a data evaluator for A4S.
+        Callable[[DataEvaluator], DataEvaluator]: A decorator function that registers the evaluation function as a data evaluator for A4S.
     """
     logger.debug(f"Creating data evaluator decorator for: {name}")
 
-    def func_decorator(func: DataEvaluator) -> None:
-        logger.debug(f"Registering function {func.__name__} as data evaluator '{name}'")
+    def func_decorator(func: DataEvaluator) -> DataEvaluator:
         data_evaluator_registry.register(name, func)
         return func
 

@@ -1,4 +1,4 @@
-from typing import Callable, Iterator, List, Protocol
+from typing import Callable, Iterator, Protocol
 
 import numpy as np
 
@@ -13,7 +13,7 @@ class ModelPredProbaEvaluator(Protocol):
         model: Model,
         dataset: Dataset,
         y_pred_proba: np.ndarray,
-    ) -> List[Metric]:
+    ) -> list[Metric]:
         """Run a specific model evaluation.
 
         Args:
@@ -22,7 +22,7 @@ class ModelPredProbaEvaluator(Protocol):
             y_pred_proba: The predicted probabilities from the model on the dataset.
 
         """
-        pass
+        raise NotImplementedError
 
 
 class ModelPredProbaEvaluatorRegistry:
@@ -41,25 +41,14 @@ model_pred_proba_evaluator_registry = ModelPredProbaEvaluatorRegistry()
 
 def model_pred_proba_evaluator(
     name: str,
-) -> Callable[[ModelPredProbaEvaluator], list[Metric]]:
+) -> Callable[[ModelPredProbaEvaluator], ModelPredProbaEvaluator]:
     """Decorator to register a function as a model evaluator for A4S.
 
-    Args:INSERT INTO model (id, pid, name, data, project_id, dataset_id)
-    VALUES (
-        id:integer,
-        'pid:uuid',
-        'name:character varying',
-        'data:character varying',
-        project_id:integer,
-        dataset_id:integer
-      );
-        name: The name to register the evaluator under.
-
     Returns:
-        Callable[[Evaluator], list[Metrics]]: A decorator function that registers the evaluation function as a data evaluator for A4S.
+        Callable[[Evaluator], ModelPredProbaEvaluator]: A decorator function that registers the evaluation function as a model evaluator for A4S.
     """
 
-    def func_decorator(func: ModelPredProbaEvaluator) -> None:
+    def func_decorator(func: ModelPredProbaEvaluator) -> ModelPredProbaEvaluator:
         model_pred_proba_evaluator_registry.register(name, func)
         return func
 

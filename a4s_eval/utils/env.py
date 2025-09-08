@@ -25,6 +25,7 @@ CACHE_DIR = os.getenv("CACHE_DIR", "/tmp/cache")
 REDIS_SSL_CERT_REQS = handle_bool_var(os.getenv("REDIS_SSL_CERT_REQS", "true"))
 
 BROCKER_SSL_CERT_REQS = handle_bool_var(os.getenv("BROCKER_SSL_CERT_REQS", "true"))
+MQ_USE_SSL = handle_bool_var(os.getenv("MQ_USE_SSL", "false"))
 
 
 def redis_handle_ssl_option(redis_url: str) -> str:
@@ -80,6 +81,7 @@ def get_celery_broker_url():
     # Try to get the direct URL first
     broker_url = os.getenv("CELERY_BROKER_URL")
     if broker_url:
+        get_logger().info("Using url")
         return broker_url
 
     # Construct from separate environment variables
@@ -87,7 +89,7 @@ def get_celery_broker_url():
     mq_username = os.getenv("MQ_USERNAME", "")
     mq_password = os.getenv("MQ_PASSWORD", "")
     mq_use_ssl = handle_bool_var(os.getenv("MQ_USE_SSL", "false"))
-    mq_port = os.getenv("MQ_PORT", "5671")
+    mq_port = os.getenv("MQ_PORT", "5672")
     encoded_password = quote(mq_password)
 
     url_prexix = "amqps://" if mq_use_ssl else "amqp://"
@@ -100,7 +102,6 @@ def get_celery_broker_url():
 
     url_port = f":{mq_port}" if mq_port else ""
     url = f"{url_prexix}{url_login}{mq_host}{url_port}"
-
     return url
 
 

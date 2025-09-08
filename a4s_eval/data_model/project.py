@@ -20,7 +20,4 @@ class Project(BaseModel):
     name: str  # Name of the project
     frequency: str  # Frequency of evaluation (e.g., '1D' for daily)
     window_size: str  # Size of the rolling window for analysis (e.g., '7D' for 7 days)
-    # dataset_id: int  # ID of the associated dataset
-    # model_id: int    # ID of the associated model
-
     dataset: Dataset  # The dataset being analyzed in this project

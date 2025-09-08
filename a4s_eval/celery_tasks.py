@@ -8,8 +8,8 @@ from a4s_eval.service.api_client import (
     mark_completed,
     mark_failed,
 )
-from a4s_eval.tasks.evaluation_tasks import (
-    dataset_evaluation_task,
+from a4s_eval.tasks.dataset_evaluation_task import dataset_evaluation_task
+from a4s_eval.tasks.model_evaluation_tasks import (
     model_evaluation_task,
 )
 from a4s_eval.utils.logging import get_logger
@@ -94,13 +94,3 @@ def handle_error(evaluation_id, request, exc, traceback) -> None:
 
     mark_failed(evaluation_id)
     print(f"Evaluation {evaluation_id} marked as failed due to error.")
-
-
-# @celery_app.task
-# def test_simple_task() -> str:
-#     """Simple test task to debug Celery"""
-#     logger.debug("=== TEST SIMPLE TASK START ===")
-#     logger.debug("This is a simple test task")
-#     logger.debug("=== TEST SIMPLE TASK END ===")
-
-#     return "Test task completed successfully"
