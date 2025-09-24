@@ -12,10 +12,11 @@ from a4s_eval.metric_registries.prediction_metric_registry import (
     prediction_metric_registry,
 )
 
-registries: list[DataMetricRegistry | PredictionMetricRegistry] = [
-    data_metric_registry,
-    prediction_metric_registry,
-]
+# Dirty naming
+registries: dict[str, DataMetricRegistry | PredictionMetricRegistry] = {
+    data_metric_registry.__class__.__name__: data_metric_registry,
+    prediction_metric_registry.__class__.__name__: prediction_metric_registry,
+}
 
 
 def auto_discover(package: ModuleType) -> None:
@@ -35,4 +36,15 @@ auto_discover(a4s_eval.metrics)
 
 
 def get_n_evaluation() -> int:
-    return sum([len(r.get_functions()) for r in registries])
+    return sum([len(r.get_functions()) for r in registries.values()])
+
+
+def get_available_metrics() -> dict[str, list[str]]:
+    return {
+        r.__class__.__name__: {
+            metric[0]: {
+                "source": "a4s"
+            }
+            for metric in r.get_functions().items()
+        } for r in registries
+    }

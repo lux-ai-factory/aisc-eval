@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 from a4s_eval.celery_tasks import poll_and_run_evaluation
 from a4s_eval.utils.logging import get_logger
+from a4s_eval.metric_registries import get_available_metrics
 # from a4s_eval.utils import env
 
 router = APIRouter()
@@ -37,6 +38,14 @@ async def evaluate() -> dict[str, str]:
         return {"message": f"Failed to start evaluation: {str(e)}", "status": "error"}
     finally:
         logger.debug("=== EVALUATE ENDPOINT END ===")
+
+
+@router.get("/available-metrics")
+async def available_metrics() -> dict[str, dict[str, dict[str, str]]]:
+    """Get a list of available metrics."""
+    metrics = get_available_metrics()
+    logger.debug("Available metrics:", metrics)
+    return metrics
 
 
 # @router.get("/evaluate/test-api-connection")
