@@ -30,7 +30,11 @@ def auto_discover_datashape(datashape_pid: uuid.UUID) -> None:
         features = []
         for col in df.columns:
             col_type = str(df[col].dtype)
+            # Hardcode for now
+            if col == "issue_d":
+                print(col, col_type)
             col_type = type_mapping[col_type]
+            col_type = col_type if col != "issue_d" else FeatureType.DATE
 
             _feature = Feature(
                 pid=uuid.uuid4(),
@@ -52,9 +56,9 @@ def auto_discover_datashape(datashape_pid: uuid.UUID) -> None:
 
         get_logger().debug(datashape.model_dump_json())
         patch_datashape(dataset_pid, datashape)
-        patch_datashape_status(datashape_pid, "auto")
+        patch_datashape_status(datashape_pid, "AUTO")
     except Exception as e:
         get_logger().error(
             f"Error during auto-discovery of datashape {datashape_pid}: {e}"
         )
-        patch_datashape_status(datashape_pid, "failed")
+        patch_datashape_status(datashape_pid, "FAILED")

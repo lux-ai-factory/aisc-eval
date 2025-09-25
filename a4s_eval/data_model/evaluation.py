@@ -17,10 +17,10 @@ class FeatureType(str, enum.Enum):
         DATE: For date features
     """
 
-    INTEGER = "integer"
-    FLOAT = "float"
-    CATEGORICAL = "categorical"
-    DATE = "date"
+    INTEGER = "Intenger"
+    FLOAT = "Float"
+    CATEGORICAL = "Categorical"
+    DATE = "Date"
 
 
 class Feature(BaseModel):
