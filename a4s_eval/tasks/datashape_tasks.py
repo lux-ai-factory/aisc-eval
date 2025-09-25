@@ -56,9 +56,9 @@ def auto_discover_datashape(datashape_pid: uuid.UUID) -> None:
 
         get_logger().debug(datashape.model_dump_json())
         patch_datashape(dataset_pid, datashape)
-        patch_datashape_status(datashape_pid, "AUTO")
+        patch_datashape_status(datashape_pid, "Auto")
     except Exception as e:
         get_logger().error(
             f"Error during auto-discovery of datashape {datashape_pid}: {e}"
         )
-        patch_datashape_status(datashape_pid, "FAILED")
+        patch_datashape_status(datashape_pid, "Failed")

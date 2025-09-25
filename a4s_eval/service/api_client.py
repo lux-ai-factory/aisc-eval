@@ -92,7 +92,7 @@ def claim_evaluation(evaluation_pid: uuid.UUID) -> bool:
 
 
 def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
-    return requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=done")
+    return requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done")
 
 
 def mark_failed(evaluation_pid: uuid.UUID) -> None:

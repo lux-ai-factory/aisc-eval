@@ -17,7 +17,7 @@ class FeatureType(str, enum.Enum):
         DATE: For date features
     """
 
-    INTEGER = "Intenger"
+    INTEGER = "Integer"
     FLOAT = "Float"
     CATEGORICAL = "Categorical"
     DATE = "Date"
