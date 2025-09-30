@@ -165,7 +165,7 @@ def post_measures(
     if len(payload) > 0:
         logger.debug(f"Sample payload item: {payload[0]}")
 
-    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/metrics"
+    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/measures"
     logger.debug(f"Posting to URL: {url}")
 
     response = requests.post(url, json=payload)
