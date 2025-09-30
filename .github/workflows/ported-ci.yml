@@ -43,6 +43,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: checks
     steps:
+      - name: Cache Git LFS objects
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          # Key is based on OS + hash of .gitattributes (changes only when LFS files change)
+          key: ${{ runner.os }}-git-lfs-${{ hashFiles('**/.gitattributes') }}
+          restore-keys: |
+            ${{ runner.os }}-git-lfs-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
