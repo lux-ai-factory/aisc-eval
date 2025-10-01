@@ -43,18 +43,30 @@ jobs:
     runs-on: ubuntu-latest
     needs: checks
     steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          fetch-depth: 1
+      - name: Show lfs quota before caching
+        run: git lfs quota
+
+      - name: Generate LFS file list
+        run: git lfs ls-files -n > lfs_files.txt
+
       - name: Cache Git LFS objects
         uses: actions/cache@v4
         with:
           path: .git/lfs
-          # Key is based on OS + hash of .gitattributes (changes only when LFS files change)
-          key: ${{ runner.os }}-git-lfs-${{ hashFiles('**/.gitattributes') }}
+          key: ${{ runner.os }}-git-lfs-${{ hashFiles('lfs_files.txt') }}
           restore-keys: |
             ${{ runner.os }}-git-lfs-
-      - name: Checkout code
+
+      - name: Checkout code with LFS
         uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Show lfs quota after lfs checkout 
+        run: git lfs quota
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
