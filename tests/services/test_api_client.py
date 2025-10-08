@@ -17,7 +17,9 @@ TEST_UUIDS = {
 
 @pytest.fixture
 def mock_evaluation_data() -> dict[str, any]:
-    metadata = pd.read_csv("tests/data/lcld_v2_metadata_api.csv").to_dict(
+    metadata = pd.read_csv("tests/data/lcld_v2_metadata_api.csv")
+    metadata['feature_type'] = metadata['feature_type'].str.capitalize()
+    metadata = metadata.to_dict(
         orient="records"
     )
 
