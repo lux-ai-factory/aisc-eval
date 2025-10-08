@@ -13,10 +13,8 @@ from a4s_eval.metrics.data_metrics.drift_metric import (
 @pytest.fixture
 def data_shape() -> DataShape:
     metadata = pd.read_csv("tests/data/lcld_v2_metadata_api.csv")
-    metadata['feature_type'] = metadata['feature_type'].str.capitalize()
-    metadata = metadata.to_dict(
-        orient="records"
-    )
+    metadata["feature_type"] = metadata["feature_type"].str.capitalize()
+    metadata = metadata.to_dict(orient="records")
 
     for record in metadata:
         record["pid"] = uuid.uuid4()
