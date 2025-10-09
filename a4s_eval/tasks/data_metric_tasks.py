@@ -25,53 +25,15 @@ def dataset_evaluation_task(evaluation_pid: uuid.UUID) -> None:
         get_logger().info(f"  - {name}")
 
     try:
-        evaluation = get_evaluation(evaluation_pid)
-        evaluation.dataset.data = get_dataset_data(evaluation.dataset.pid)
-        evaluation.model.dataset.data = get_dataset_data(evaluation.model.dataset.pid)
-
+        inputs_iterator = data_metric_registry.get_metric_inputs_dateiterator(evaluation_pid)
         metrics: list[Measure] = []
+        for name, evaluator in data_metric_registry:
+            get_logger().info(f"Running evaluator: {name}")
+            for inputs in inputs_iterator:
+                new_metrics = evaluator(*inputs)
+                metrics.extend(new_metrics)
 
-        x_test = evaluation.dataset.data
-
-        iteration_count = 0
-        datashape = get_project_datashape(evaluation.project.pid)
-
-        try:
-            if not datashape.date:
-                raise ValueError(
-                    "Datashape is missing a date feature, which is required for time-based evaluation."
-                )
-            date_iterator = DateIterator(
-                date_round="1 D",
-                window=evaluation.project.window_size,
-                freq=evaluation.project.frequency,
-                df=evaluation.dataset.data,
-                date_feature=datashape.date.name,
-            )
-
-            for i, (date_val, x_curr) in enumerate(date_iterator):
-                iteration_count += 1
-                get_logger().info(
-                    f"Iteration {i}, date: {date_val}, data shape: {x_curr.shape}"
-                )
-                evaluation.dataset.data = x_curr
-
-                for name, evaluator in data_metric_registry:
-                    get_logger().info(f"Running evaluator: {name}")
-                    new_metrics = evaluator(
-                        datashape, evaluation.model.dataset, evaluation.dataset
-                    )
-                    metrics.extend(new_metrics)
-
-        except Exception as e:
-            get_logger().error(f"Error in DateIterator: {e}")
-            traceback.print_exc()
-
-        get_logger().info(f"Total iterations: {iteration_count}")
         get_logger().info(f"Total metrics generated: {len(metrics)}")
-
-        evaluation.dataset.data = x_test
-
         get_logger().debug(f"Posting {len(metrics)} metrics to API...")
         try:
             response = post_measures(evaluation_pid, metrics)
