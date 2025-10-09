@@ -13,7 +13,7 @@ def patch_datashape(datashape_pid: uuid, datashape: DataShape) -> None:
 
 
 def patch_datashape_status(datashape_pid: uuid.UUID, status: str) -> None:
-    assert status == "auto"
+    assert status == "Auto"
 
 
 def test_auto_discover_datashape() -> None:

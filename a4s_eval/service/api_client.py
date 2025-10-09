@@ -28,11 +28,11 @@ def fetch_pending_evaluations() -> list[uuid.UUID]:
     try:
         logger.debug("=== FETCH_PENDING_EVALUATIONS START ===")
         logger.debug(
-            f"1. About to call API: {API_URL_PREFIX}/evaluations?status=pending"
+            f"1. About to call API: {API_URL_PREFIX}/evaluations?status=Pending"
         )
 
         logger.debug("2. Making API request...")
-        resp = requests.get(f"{API_URL_PREFIX}/evaluations?status=pending", timeout=30)
+        resp = requests.get(f"{API_URL_PREFIX}/evaluations?status=Pending", timeout=30)
         logger.debug(f"2. API call completed. Status: {resp.status_code}")
 
         if resp.status_code != 200:
@@ -76,7 +76,7 @@ def claim_evaluation(evaluation_pid: uuid.UUID) -> bool:
     logger.debug(f"Claiming evaluation {evaluation_pid}")
     try:
         resp = requests.put(
-            f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=processing"
+            f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Processing"
         )
         logger.debug(f"Claim response status: {resp.status_code}")
 
@@ -92,7 +92,7 @@ def claim_evaluation(evaluation_pid: uuid.UUID) -> bool:
 
 
 def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
-    return requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=done")
+    return requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done")
 
 
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
@@ -165,7 +165,7 @@ def post_measures(
     if len(payload) > 0:
         logger.debug(f"Sample payload item: {payload[0]}")
 
-    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/metrics"
+    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/measures"
     logger.debug(f"Posting to URL: {url}")
 
     response = requests.post(url, json=payload)
