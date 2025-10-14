@@ -66,7 +66,7 @@ class PredictionMetricRegistry:
         date_iterator = ProjectDataIterator(project_pid)
         datashape, model, dataset, y_pred_proba = cls.get_metric_inputs(eval_pid)
         date_iterator.set_dataset(dataset)
-        return ((datashape, model, dataset, y_pred_proba[list(eval_data.data.index)]) for _, eval_data in date_iterator)
+        return ((datashape, model, eval_data, y_pred_proba[list(eval_data.data.index)]) for _, eval_data in date_iterator)
 
 
 prediction_metric_registry = PredictionMetricRegistry()

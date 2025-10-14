@@ -1,43 +1,28 @@
-import traceback
 import uuid
 from multiprocessing.util import get_logger
 from celery import group
+import yaml
+import pathlib
 
 from a4s_eval.celery_app import celery_app
 from a4s_eval.data_model.measure import Measure
-from a4s_eval.metric_registries.data_metric_registry import data_metric_registry
-from a4s_eval.utils.dates import DateIterator
+from a4s_eval.service.api_client import post_measures
 from a4s_eval.metric_registries import registries_dict
 
 
-def master_metric(evaluation_pid: uuid.UUID) -> None:
-    get_logger().info(f"Starting master task for {evaluation_pid}.")
+@celery_app.task
+def metric_task(
+    evaluation_pid: uuid.UUID, registry_name: str, metric_name_list: list[str]
+) -> None:
+    registry = registries_dict.get(registry_name)
+    inputs_iterator = registry.get_metric_inputs_dateiterator(evaluation_pid)
+    measures: list[Measure] = []
+    
+    for inputs in inputs_iterator:
+        for metric_name in metric_name_list:
+            get_logger().info(f"Running evaluator: {metric_name}")
+            evaluator = registry.get_functions().get(metric_name)
+            new_measures = evaluator(*inputs)
+            measures.extend(new_measures)
 
-
-    groups = []
-    for metric_category, metric_dict in evaluation.target_metrics.items():
-        group(
-            [
-                metric_dict(evaluation)
-            ]
-        )
-        groups.append(group)
-
-    return groups
-
-
-
-
-for registry_name, category_registry in registries_dict.items():
-    print(f"Running category: {registry_name}")
-    # inputs = category_registry.get_inputs(eval_pid)
-    for name, evaluator in category_registry:
-        print(f"Running evaluator: {name}")
-        # inputs = evaluator.get_inputs(eval_pid)
-        # new_metrics = evaluator(
-        #     *inputs
-        # )
-
-
-for name, evaluator in data_metric_registry:
-    print(f"Running evaluator: {name}")
+    response = post_measures(evaluation_pid, measures)

@@ -37,9 +37,10 @@ def model_evaluation_task(evaluation_pid: uuid.UUID) -> None:
     try:
         inputs_iterator = prediction_metric_registry.get_metric_inputs_dateiterator(evaluation_pid)
         metrics: list[Measure] = []
-        for name, evaluator in prediction_metric_registry:
-            get_logger().info(f"Running evaluator: {name}")
-            for inputs in inputs_iterator:
+        
+        for inputs in inputs_iterator:
+            for name, evaluator in prediction_metric_registry:
+                get_logger().info(f"Running evaluator: {name}")
                 new_metrics = evaluator(*inputs)
                 metrics.extend(new_metrics)
 
