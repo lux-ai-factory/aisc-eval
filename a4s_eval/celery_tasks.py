@@ -11,6 +11,7 @@ from a4s_eval.service.api_client import (
     mark_failed,
 )
 from a4s_eval.tasks.metric_tasks import metric_task
+from a4s_eval.metric_registries import registries
 from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
@@ -94,17 +95,26 @@ def generate_evaluation_signature(evaluation_pid: uuid.UUID) -> None:
     config_file = pathlib.Path("config/eval_config.yaml")
     with open(config_file) as f_in:
         eval_config = yaml.safe_load(f_in)
+    
+    eval_config_set = set(eval_config)
 
-    task_signatures = []
-    for registry_name, metric_list in eval_config.items():
-        task_signatures.append(
-            metric_task.s(
-                evaluation_pid, 
-                registry_name, 
-                metric_list
-            ).on_error(
-                handle_error.s(evaluation_pid)
-            ),
+    # --- Build registry metric mapping ---
+    registry_metrics = []
+    for registry in registries:
+        registry_name = type(registry).__name__
+        supported_metrics = eval_config_set.intersection(
+            registry.get_functions()
         )
+        registry_metrics.append((registry_name, list(supported_metrics)))
 
-    return (group(task_signatures) | finalize_evaluation.si(evaluation_pid))
+    # --- Create metric tasks ---
+    task_signatures = [
+        metric_task.s(evaluation_pid, name, metrics).on_error(
+            handle_error.s(evaluation_pid)
+        )
+        for name, metrics in registry_metrics
+    ]
+
+    # --- Combine tasks into a group with finalization ---
+    workflow = group(task_signatures) | finalize_evaluation.si(evaluation_pid)
+    return workflow

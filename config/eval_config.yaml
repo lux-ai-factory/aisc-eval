@@ -1,9 +1,7 @@
-DataMetricRegistry:
-  - Data drift
-PredictionMetricRegistry:
-  - "Accuracy"
-  - "F1 Score"
-  - "Precision"
-  - "Recall"
-  - "Matthews Correlation Coefficient"
-  - "ROCAUC"
+- Data drift
+- "Accuracy"
+- "F1 Score"
+- "Precision"
+- "Recall"
+- "Matthews Correlation Coefficient"
+- "ROCAUC"

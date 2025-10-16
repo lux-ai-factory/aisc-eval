@@ -1,8 +1,5 @@
 import uuid
 from multiprocessing.util import get_logger
-from celery import group
-import yaml
-import pathlib
 
 from a4s_eval.celery_app import celery_app
 from a4s_eval.data_model.measure import Measure

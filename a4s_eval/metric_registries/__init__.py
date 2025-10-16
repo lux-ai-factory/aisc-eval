@@ -44,12 +44,5 @@ def get_n_evaluation() -> int:
     return sum([len(r.get_functions()) for r in registries])
 
 
-def get_available_metrics() -> dict[str, list[str]]:
-    return {
-        r_name: {
-            metric_name: {
-                "source": "a4s",
-            }
-            for metric_name, metric in r.get_functions().items()
-        } for r_name, r in registries_dict.items()
-    }
+def get_available_metrics() -> list[str]:
+    return [metric_name for r in registries for metric_name in r.get_functions()]

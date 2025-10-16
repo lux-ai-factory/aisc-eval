@@ -41,10 +41,10 @@ async def evaluate() -> dict[str, str]:
 
 
 @router.get("/available-metrics")
-async def available_metrics() -> dict[str, dict[str, dict[str, str]]]:
+async def available_metrics() -> list[str]:
     """Get a list of available metrics."""
     metrics = get_available_metrics()
-    logger.debug("Available metrics:", metrics)
+    logger.debug(f"Available metrics: {metrics}")
     return metrics
 
 
