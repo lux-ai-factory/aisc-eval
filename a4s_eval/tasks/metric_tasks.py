@@ -4,14 +4,14 @@ from multiprocessing.util import get_logger
 from a4s_eval.celery_app import celery_app
 from a4s_eval.data_model.measure import Measure
 from a4s_eval.service.api_client import post_measures
-from a4s_eval.metric_registries import registries_dict
+from a4s_eval.metric_registries import registry_mapping
 
 
 @celery_app.task
 def metric_task(
     evaluation_pid: uuid.UUID, registry_name: str, metric_name_list: list[str]
 ) -> None:
-    registry = registries_dict.get(registry_name)
+    registry = registry_mapping.get(registry_name)
     inputs_iterator = registry.get_metric_inputs_dateiterator(evaluation_pid)
     measures: list[Measure] = []
     

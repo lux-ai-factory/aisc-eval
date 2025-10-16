@@ -3,24 +3,23 @@ import pkgutil
 from types import ModuleType
 
 import a4s_eval.metrics
+from a4s_eval.metric_registries.abstract import AbstractMetricRegistry
 from a4s_eval.metric_registries.data_metric_registry import (
-    DataMetricRegistry,
     data_metric_registry,
 )
 from a4s_eval.metric_registries.prediction_metric_registry import (
-    PredictionMetricRegistry,
     prediction_metric_registry,
 )
 
 
-registries: list[DataMetricRegistry | PredictionMetricRegistry] = [
+registries: list[AbstractMetricRegistry] = [
     data_metric_registry,
     prediction_metric_registry,
 ]
 
-registries_dict: dict[str, DataMetricRegistry | PredictionMetricRegistry] = {
-    data_metric_registry.__class__.__name__: data_metric_registry,
-    prediction_metric_registry.__class__.__name__: prediction_metric_registry,
+registry_mapping: dict[str, AbstractMetricRegistry] = {
+    type(r).__name__: r
+    for r in registries
 }
 
 
