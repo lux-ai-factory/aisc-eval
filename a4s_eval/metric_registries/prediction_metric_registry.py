@@ -4,6 +4,7 @@ import numpy as np
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
 from a4s_eval.data_model.measure import Measure
+from a4s_eval.metric_registries.abstract import AbstractMetricRegistry, MetricInputGenerator
 from a4s_eval.service.api_client import get_dataset_data, get_evaluation, get_onnx_model, get_project_datashape
 from a4s_eval.utils.dates import ProjectDataIterator
 from a4s_eval.utils.logging import get_logger
@@ -29,7 +30,30 @@ class ModelPredProbaEvaluator(Protocol):
         raise NotImplementedError
 
 
-class PredictionMetricRegistry:
+class PredictionInputGenerator(MetricInputGenerator):
+    def get_inputs(self) -> tuple[DataShape, Model, Dataset, np.ndarray]:
+        session = self.model_onnx_session
+
+        x_test = self.test_dataset.data
+        x_test_np = x_test[[f.name for f in self.expected_datashape.features]].to_numpy()
+
+        input_name = session.get_inputs()[0].name
+        label_name = session.get_outputs()[1].name
+        pred_onx = session.run([label_name], {input_name: x_test_np})[0]
+        y_pred_proba = np.array([list(d.values()) for d in pred_onx])
+        get_logger().info("Computation finished for Y prediction probability.")
+        return (self.expected_datashape, self.train_dataset, self.test_dataset, y_pred_proba)
+
+    def get_inputs_dateiterator(self) -> Iterator[tuple[DataShape, Model, Dataset, np.ndarray]]:
+        date_iterator = self.project_date_iterator
+        datashape, model, dataset, y_pred_proba = self.get_inputs()
+        date_iterator.set_dataset(dataset)
+        return ((datashape, model, eval_data, y_pred_proba[list(eval_data.data.index)]) for _, eval_data in date_iterator)
+
+
+class PredictionMetricRegistry(AbstractMetricRegistry):
+    InputGenerator = PredictionInputGenerator
+
     def __init__(self) -> None:
         self._functions: dict[str, ModelPredProbaEvaluator] = {}
 
@@ -41,33 +65,7 @@ class PredictionMetricRegistry:
 
     def get_functions(self) -> dict[str, ModelPredProbaEvaluator]:
         return self._functions
-
-    @classmethod
-    def get_metric_inputs(cls, eval_pid: str) -> tuple[DataShape, Model, Dataset, np.ndarray]:
-        evaluation = get_evaluation(eval_pid)
-        evaluation.dataset.data = get_dataset_data(evaluation.dataset.pid)
-        session = get_onnx_model(evaluation.model.pid)
-        datashape = get_project_datashape(evaluation.project.pid)
-
-        x_test = evaluation.dataset.data
-        x_test_np = x_test[[f.name for f in datashape.features]].to_numpy()
-
-        input_name = session.get_inputs()[0].name
-        label_name = session.get_outputs()[1].name
-        pred_onx = session.run([label_name], {input_name: x_test_np})[0]
-        y_pred_proba = np.array([list(d.values()) for d in pred_onx])
-        get_logger().info("Computation finished for Y prediction probability.")
-        return (datashape, evaluation.model.dataset, evaluation.dataset, y_pred_proba)
-
-    @classmethod
-    def get_metric_inputs_dateiterator(cls, eval_pid: str) -> Iterator[tuple[DataShape, Model, Dataset, np.ndarray]]:
-        evaluation = get_evaluation(eval_pid)
-        project_pid = evaluation.project.pid
-        date_iterator = ProjectDataIterator(project_pid)
-        datashape, model, dataset, y_pred_proba = cls.get_metric_inputs(eval_pid)
-        date_iterator.set_dataset(dataset)
-        return ((datashape, model, eval_data, y_pred_proba[list(eval_data.data.index)]) for _, eval_data in date_iterator)
-
+    
 
 prediction_metric_registry = PredictionMetricRegistry()
 

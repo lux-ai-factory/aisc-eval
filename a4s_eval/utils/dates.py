@@ -151,7 +151,7 @@ class ProjectDataIterator:
         self.index = 0
         self.df = df
     
-    def __iter__(self) -> "DateIterator":
+    def __iter__(self) -> "ProjectDataIterator":
         """Return the iterator object."""
         return self
 

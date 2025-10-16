@@ -1,9 +1,9 @@
 DataMetricRegistry:
   - Data drift
 PredictionMetricRegistry:
-  - "Classification Performance metric: Accuracy"
-  - "Classification Performance metric: F1 Score"
-  - "Classification Performance metric: Precision"
-  - "Classification Performance metric: Recall"
-  - "Classification Performance metric: Matthews Correlation Coefficient"
-  - "Classification Performance metric: RROCAUC"
+  - "Accuracy"
+  - "F1 Score"
+  - "Precision"
+  - "Recall"
+  - "Matthews Correlation Coefficient"
+  - "ROCAUC"
