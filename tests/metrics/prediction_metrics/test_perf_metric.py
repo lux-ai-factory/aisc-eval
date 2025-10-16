@@ -1,10 +1,5 @@
 import datetime
-import uuid
-
 import numpy as np
-import onnxruntime as ort
-import pandas as pd
-import pytest
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
 from a4s_eval.metrics.prediction_metrics.perf_metric import (

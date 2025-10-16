@@ -118,7 +118,7 @@ class DateIterator:
         ].copy()
 
 
-class ProjectDataIterator:
+class ProjectDateIterator:
     """
     TODO: update docstring
     Iterator for processing project datasets in temporal batches.
@@ -151,7 +151,7 @@ class ProjectDataIterator:
         self.index = 0
         self.df = df
     
-    def __iter__(self) -> "ProjectDataIterator":
+    def __iter__(self) -> "ProjectDateIterator":
         """Return the iterator object."""
         return self
 

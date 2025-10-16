@@ -1,6 +1,3 @@
-import uuid
-
-import pandas as pd
 import pytest
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape

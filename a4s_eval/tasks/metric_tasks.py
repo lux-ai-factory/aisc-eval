@@ -23,3 +23,6 @@ def metric_task(
             measures.extend(new_measures)
 
     response = post_measures(evaluation_pid, measures)
+    get_logger().info(
+        f"Metrics posted successfully, status: {response.status_code}."
+    )

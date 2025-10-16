@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 from a4s_eval.data_model.evaluation import DataShape, Dataset, Evaluation
 from a4s_eval.service.api_client import get_dataset_data, get_evaluation, get_onnx_model, get_project_datashape
-from a4s_eval.utils.dates import ProjectDataIterator
+from a4s_eval.utils.dates import ProjectDateIterator
 
 
 class MetricInputGenerator(ABC):
@@ -56,7 +56,7 @@ class MetricInputGenerator(ABC):
     @property
     def project_date_iterator(self):
         """Return the date iterator for the project associated with the evaluation."""
-        return ProjectDataIterator(self.evaluation.project.pid)
+        return ProjectDateIterator(self.evaluation.project.pid)
 
     @abstractmethod
     def get_inputs(self):

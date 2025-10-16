@@ -1,8 +1,4 @@
-import uuid
-
 import numpy as np
-import pandas as pd
-import pytest
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape
 from a4s_eval.metrics.data_metrics.drift_metric import (
