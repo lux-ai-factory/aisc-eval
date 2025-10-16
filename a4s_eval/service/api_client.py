@@ -210,6 +210,7 @@ def get_project_datashape(project_pid: uuid.UUID) -> DataShape:
     resp.raise_for_status()
     return DataShape.model_validate(resp.json())
 
+
 def get_project(project_pid: uuid.UUID) -> Project:
     resp = requests.get(f"{API_URL_PREFIX}/projects/{project_pid}")
     resp.raise_for_status()

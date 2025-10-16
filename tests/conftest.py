@@ -12,6 +12,7 @@ import pytest
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
 
+
 @pytest.fixture(scope="module")
 def data_shape() -> DataShape:
     metadata = pd.read_csv("tests/data/lcld_v2_metadata_api.csv")

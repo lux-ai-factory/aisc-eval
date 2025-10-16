@@ -110,9 +110,7 @@ def classification_recall_metric(
     return [metric]
 
 
-@prediction_metric(
-    name="Matthews Correlation Coefficient"
-)
+@prediction_metric(name="Matthews Correlation Coefficient")
 def classification_matthews_corrcoef_metric(
     datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Measure]:

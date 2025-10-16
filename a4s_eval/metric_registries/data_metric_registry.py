@@ -2,7 +2,10 @@ from typing import Callable, Iterator, Protocol
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape
 from a4s_eval.data_model.measure import Measure
-from a4s_eval.metric_registries.abstract import AbstractMetricRegistry, MetricInputGenerator
+from a4s_eval.metric_registries.abstract import (
+    AbstractMetricRegistry,
+    MetricInputGenerator,
+)
 from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
@@ -51,8 +54,8 @@ class DataMetricRegistry(AbstractMetricRegistry):
 
     def get_functions(self) -> dict[str, DataMetric]:
         return self._functions
-    
-   
+
+
 data_metric_registry = DataMetricRegistry()
 
 

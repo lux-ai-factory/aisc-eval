@@ -14,7 +14,7 @@ def metric_task(
     registry = registry_mapping.get(registry_name)
     inputs_iterator = registry.get_metric_inputs_dateiterator(evaluation_pid)
     measures: list[Measure] = []
-    
+
     for inputs in inputs_iterator:
         for metric_name in metric_name_list:
             get_logger().info(f"Running evaluator: {metric_name}")
@@ -23,6 +23,4 @@ def metric_task(
             measures.extend(new_measures)
 
     response = post_measures(evaluation_pid, measures)
-    get_logger().info(
-        f"Metrics posted successfully, status: {response.status_code}."
-    )
+    get_logger().info(f"Metrics posted successfully, status: {response.status_code}.")

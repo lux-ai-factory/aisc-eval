@@ -4,10 +4,14 @@ import numpy as np
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
 from a4s_eval.data_model.measure import Measure
-from a4s_eval.metric_registries.abstract import AbstractMetricRegistry, MetricInputGenerator
+from a4s_eval.metric_registries.abstract import (
+    AbstractMetricRegistry,
+    MetricInputGenerator,
+)
 from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
+
 
 class ModelPredProbaEvaluator(Protocol):
     def __call__(
@@ -33,20 +37,32 @@ class PredictionInputGenerator(MetricInputGenerator):
         session = self.model_onnx_session
 
         x_test = self.test_dataset.data
-        x_test_np = x_test[[f.name for f in self.expected_datashape.features]].to_numpy()
+        x_test_np = x_test[
+            [f.name for f in self.expected_datashape.features]
+        ].to_numpy()
 
         input_name = session.get_inputs()[0].name
         label_name = session.get_outputs()[1].name
         pred_onx = session.run([label_name], {input_name: x_test_np})[0]
         y_pred_proba = np.array([list(d.values()) for d in pred_onx])
         get_logger().info("Computation finished for Y prediction probability.")
-        return (self.expected_datashape, self.train_dataset, self.test_dataset, y_pred_proba)
+        return (
+            self.expected_datashape,
+            self.train_dataset,
+            self.test_dataset,
+            y_pred_proba,
+        )
 
-    def get_inputs_dateiterator(self) -> Iterator[tuple[DataShape, Model, Dataset, np.ndarray]]:
+    def get_inputs_dateiterator(
+        self,
+    ) -> Iterator[tuple[DataShape, Model, Dataset, np.ndarray]]:
         date_iterator = self.project_date_iterator
         datashape, model, dataset, y_pred_proba = self.get_inputs()
         date_iterator.set_dataset(dataset)
-        return ((datashape, model, eval_data, y_pred_proba[list(eval_data.data.index)]) for _, eval_data in date_iterator)
+        return (
+            (datashape, model, eval_data, y_pred_proba[list(eval_data.data.index)])
+            for _, eval_data in date_iterator
+        )
 
 
 class PredictionMetricRegistry(AbstractMetricRegistry):
@@ -63,7 +79,7 @@ class PredictionMetricRegistry(AbstractMetricRegistry):
 
     def get_functions(self) -> dict[str, ModelPredProbaEvaluator]:
         return self._functions
-    
+
 
 prediction_metric_registry = PredictionMetricRegistry()
 

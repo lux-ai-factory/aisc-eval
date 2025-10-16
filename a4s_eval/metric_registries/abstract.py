@@ -1,7 +1,12 @@
 from abc import ABC, abstractmethod
 
 from a4s_eval.data_model.evaluation import DataShape, Dataset, Evaluation
-from a4s_eval.service.api_client import get_dataset_data, get_evaluation, get_onnx_model, get_project_datashape
+from a4s_eval.service.api_client import (
+    get_dataset_data,
+    get_evaluation,
+    get_onnx_model,
+    get_project_datashape,
+)
 from a4s_eval.utils.dates import ProjectDateIterator
 
 
@@ -9,6 +14,7 @@ class MetricInputGenerator(ABC):
     """
     Given an evaluation PID, prepare and yield the inputs required by metrics
     """
+
     def __init__(self, eval_pid: str):
         self.eval_pid = eval_pid
         self.__evaluation: Evaluation | None = None
@@ -27,7 +33,9 @@ class MetricInputGenerator(ABC):
     def expected_datashape(self) -> DataShape:
         """Return the expected data shape for the evaluation."""
         if self.__expected_datashape is None:
-            self.__expected_datashape = get_project_datashape(self.evaluation.project.pid)
+            self.__expected_datashape = get_project_datashape(
+                self.evaluation.project.pid
+            )
         return self.__expected_datashape
 
     @property
@@ -91,7 +99,7 @@ class AbstractMetricRegistry(ABC):
         """Return the inputs required by the metrics for a given evaluation PID."""
         input_generator = self.InputGenerator(eval_pid=eval_pid)
         return input_generator.get_inputs()
-    
+
     def get_metric_inputs_dateiterator(self, eval_pid: str):
         """Return an iterator that yields inputs for each date slice for a given evaluation PID."""
         input_generator = self.InputGenerator(eval_pid=eval_pid)

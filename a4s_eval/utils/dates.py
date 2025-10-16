@@ -123,17 +123,17 @@ class ProjectDateIterator:
     TODO: update docstring
     Iterator for processing project datasets in temporal batches.
     """
+
     def __init__(self, project_pid: str, date_round: str = "1 D"):
         project = get_project(project_pid)
         self.datashape = get_project_datashape(project_pid)
         self.eval_datashape = None
         self.date_round = date_round
-        self.date_feature = self.datashape.date.name 
+        self.date_feature = self.datashape.date.name
         self.window = project.window_size
         self.freq = project.frequency
         self.df = None
         self.index = 0
-
 
     def set_dataset(self, dataset: Dataset):
         """
@@ -150,7 +150,7 @@ class ProjectDateIterator:
         )
         self.index = 0
         self.df = df
-    
+
     def __iter__(self) -> "ProjectDateIterator":
         """Return the iterator object."""
         return self
@@ -174,9 +174,5 @@ class ProjectDateIterator:
             (self.df[self.date_feature] >= start) & (self.df[self.date_feature] < end)
         ].copy()
 
-        dataset = Dataset(
-            pid=uuid.uuid4(),
-            shape=self.eval_datashape,
-            data=temp_df
-        )
+        dataset = Dataset(pid=uuid.uuid4(), shape=self.eval_datashape, data=temp_df)
         return end, dataset

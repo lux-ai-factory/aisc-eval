@@ -34,9 +34,7 @@ def poll_and_run_evaluation() -> None:
             return
 
         logger.debug(f"5. Creating signatures for {len(eval_ids)} evaluations...")
-        signatures = [
-            generate_evaluation_signature(eval_id) for eval_id in eval_ids
-        ]
+        signatures = [generate_evaluation_signature(eval_id) for eval_id in eval_ids]
         logger.debug(f"6. Signatures created: {len(signatures)}")
 
         logger.debug("7. Starting to apply signatures...")
@@ -95,16 +93,14 @@ def generate_evaluation_signature(evaluation_pid: uuid.UUID) -> None:
     config_file = pathlib.Path("config/eval_config.yaml")
     with open(config_file) as f_in:
         eval_config = yaml.safe_load(f_in)
-    
+
     eval_config_set = set(eval_config)
 
     # --- Build registry metric mapping ---
     registry_metrics = []
     for registry in registries:
         registry_name = type(registry).__name__
-        supported_metrics = eval_config_set.intersection(
-            registry.get_functions()
-        )
+        supported_metrics = eval_config_set.intersection(registry.get_functions())
         registry_metrics.append((registry_name, list(supported_metrics)))
 
     # --- Create metric tasks ---

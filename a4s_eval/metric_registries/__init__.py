@@ -18,8 +18,7 @@ registries: list[AbstractMetricRegistry] = [
 ]
 
 registry_mapping: dict[str, AbstractMetricRegistry] = {
-    type(r).__name__: r
-    for r in registries
+    type(r).__name__: r for r in registries
 }
 
 
