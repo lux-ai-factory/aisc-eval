@@ -66,8 +66,6 @@ class PredictionInputGenerator(MetricInputGenerator):
 
 
 class PredictionMetricRegistry(AbstractMetricRegistry):
-    InputGenerator = PredictionInputGenerator
-
     def __init__(self) -> None:
         self._functions: dict[str, ModelPredProbaEvaluator] = {}
 

@@ -78,8 +78,6 @@ class MetricInputGenerator(ABC):
 
 
 class AbstractMetricRegistry(ABC):
-    InputGenerator: MetricInputGenerator
-
     @abstractmethod
     def register(self, name: str, func):
         """Register a metric function with a given name."""
@@ -94,13 +92,3 @@ class AbstractMetricRegistry(ABC):
     def get_functions(self):
         """Return a dictionary of registered metric functions."""
         pass
-
-    def get_metric_inputs(self, eval_pid: str):
-        """Return the inputs required by the metrics for a given evaluation PID."""
-        input_generator = self.InputGenerator(eval_pid=eval_pid)
-        return input_generator.get_inputs()
-
-    def get_metric_inputs_dateiterator(self, eval_pid: str):
-        """Return an iterator that yields inputs for each date slice for a given evaluation PID."""
-        input_generator = self.InputGenerator(eval_pid=eval_pid)
-        return input_generator.get_inputs_dateiterator()

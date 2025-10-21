@@ -38,8 +38,6 @@ class DataMetricInputGenerator(MetricInputGenerator):
 
 
 class DataMetricRegistry(AbstractMetricRegistry):
-    InputGenerator = DataMetricInputGenerator
-
     def __init__(self) -> None:
         self._functions: dict[str, DataMetric] = {}
         logger.debug("DataMetricRegistry initialized")
