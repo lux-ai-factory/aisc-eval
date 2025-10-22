@@ -1,7 +1,7 @@
 import pathlib
 import uuid
 
-from celery import group
+from celery import group, Signature
 import yaml
 
 from a4s_eval.celery_app import celery_app
@@ -89,7 +89,7 @@ def handle_error(
     logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
 
 
-def generate_evaluation_signature(evaluation_pid: uuid.UUID) -> None:
+def generate_evaluation_signature(evaluation_pid: uuid.UUID) -> Signature:
     # --- Load local config file. TODO: using evaluation config in api ---
     config_file = pathlib.Path("config/eval_config.yaml")
     with open(config_file) as f_in:
