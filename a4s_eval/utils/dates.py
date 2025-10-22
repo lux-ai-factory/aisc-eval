@@ -124,7 +124,7 @@ class ProjectDateIterator:
     Iterator for processing project datasets in temporal batches.
     """
 
-    def __init__(self, project_pid: str, date_round: str = "1 D"):
+    def __init__(self, project_pid: uuid.UUID, date_round: str = "1 D"):
         project = get_project(project_pid)
         self.datashape = get_project_datashape(project_pid)
         self.eval_datashape = None
@@ -174,5 +174,6 @@ class ProjectDateIterator:
             (self.df[self.date_feature] >= start) & (self.df[self.date_feature] < end)
         ].copy()
 
+        # Create a dummy Dataset object for the batch
         dataset = Dataset(pid=uuid.uuid4(), shape=self.eval_datashape, data=temp_df)
         return end, dataset
