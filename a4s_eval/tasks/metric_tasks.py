@@ -15,6 +15,8 @@ def metric_task(
     registry = registry_mapping.get(registry_name)
     InputGenerator = input_generator_cls_mapping.get(registry_name)
     # Intantiate input generator with evaluation_pid and getting inputs iterator
+    if registry is None or InputGenerator is None:
+        raise ValueError(f"Unknown registry name: {registry_name}")
     input_generator = InputGenerator(evaluation_pid)
     inputs_iterator = input_generator.get_inputs_dateiterator()
     measures: list[Measure] = []
@@ -23,6 +25,9 @@ def metric_task(
         for metric_name in metric_name_list:
             get_logger().info(f"Running metric function: {metric_name}")
             metric_fn = registry.get_functions().get(metric_name)
+            if metric_fn is None:
+                get_logger().warning(f"Metric function {metric_name} not found in registry {registry_name}.")
+                continue
             new_measures = metric_fn(*inputs)
             measures.extend(new_measures)
 

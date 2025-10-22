@@ -1,6 +1,7 @@
 import importlib
 import pkgutil
 from types import ModuleType
+from typing import Type
 
 import a4s_eval.metrics
 from a4s_eval.metric_registries.abstract import (
@@ -29,7 +30,7 @@ registry_mapping: dict[str, AbstractMetricRegistry] = {
 
 # Mapping of registry class names to related input generator classes
 # Manual listing currently; can be automated if needed
-input_generator_cls_mapping: dict[str, MetricInputGenerator] = {
+input_generator_cls_mapping: dict[str, Type[MetricInputGenerator]] = {
     type(data_metric_registry).__name__: DataMetricInputGenerator,
     type(prediction_metric_registry).__name__: PredictionInputGenerator,
 }

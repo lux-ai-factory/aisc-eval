@@ -37,6 +37,8 @@ class PredictionInputGenerator(MetricInputGenerator):
         session = self.model_onnx_session
 
         x_test = self.test_dataset.data
+        if x_test is None:
+            raise ValueError("Test dataset data is None.")
         x_test_np = x_test[
             [f.name for f in self.expected_datashape.features]
         ].to_numpy()
@@ -48,7 +50,7 @@ class PredictionInputGenerator(MetricInputGenerator):
         get_logger().info("Computation finished for Y prediction probability.")
         return (
             self.expected_datashape,
-            self.train_dataset,
+            self.evaluation.model,
             self.test_dataset,
             y_pred_proba,
         )
@@ -61,7 +63,8 @@ class PredictionInputGenerator(MetricInputGenerator):
         date_iterator.set_dataset(dataset)
         return (
             (datashape, model, eval_data, y_pred_proba[list(eval_data.data.index)])
-            for _, eval_data in date_iterator
+            for _, eval_data in date_iterator 
+            if eval_data.data is not None # Quickfix to satisfy mypy
         )
 
 

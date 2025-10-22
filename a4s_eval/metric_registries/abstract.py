@@ -1,4 +1,8 @@
+import onnxruntime as ort
+import uuid
+
 from abc import ABC, abstractmethod
+from typing import Iterator, Any, Callable
 
 from a4s_eval.data_model.evaluation import DataShape, Dataset, Evaluation
 from a4s_eval.service.api_client import (
@@ -15,7 +19,7 @@ class MetricInputGenerator(ABC):
     Given an evaluation PID, prepare and yield the inputs required by metrics
     """
 
-    def __init__(self, eval_pid: str):
+    def __init__(self, eval_pid: uuid.UUID):
         self.eval_pid = eval_pid
         self.__evaluation: Evaluation | None = None
         self.__train_dataset: Dataset | None = None
@@ -57,38 +61,38 @@ class MetricInputGenerator(ABC):
         return self.__train_dataset
 
     @property
-    def model_onnx_session(self):
+    def model_onnx_session(self) -> ort.capi.onnxruntime_inference_collection.InferenceSession:
         """Return the ONNX session for the model associated with the evaluation."""
         return get_onnx_model(self.evaluation.model.pid)
 
     @property
-    def project_date_iterator(self):
+    def project_date_iterator(self) -> ProjectDateIterator:
         """Return the date iterator for the project associated with the evaluation."""
         return ProjectDateIterator(self.evaluation.project.pid)
 
     @abstractmethod
-    def get_inputs(self):
+    def get_inputs(self)-> tuple[Any, ...]:
         """Return the prepared inputs for metric evaluation."""
         pass
 
     @abstractmethod
-    def get_inputs_dateiterator(self):
+    def get_inputs_dateiterator(self)-> Iterator[tuple[Any, ...]]:
         """Return an iterator that yields inputs for each date slice."""
         pass
 
 
 class AbstractMetricRegistry(ABC):
     @abstractmethod
-    def register(self, name: str, func):
+    def register(self, name: str, func: Callable[..., Any]) -> None:
         """Register a metric function with a given name."""
         pass
 
     @abstractmethod
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[str, Callable[..., Any]]]:
         """Return an iterator over registered metric functions."""
         pass
 
     @abstractmethod
-    def get_functions(self):
+    def get_functions(self) -> dict[str, Callable[..., Any]]:
         """Return a dictionary of registered metric functions."""
         pass
