@@ -3,7 +3,10 @@ import pkgutil
 from types import ModuleType
 
 import a4s_eval.metrics
-from a4s_eval.metric_registries.abstract import AbstractMetricRegistry, MetricInputGenerator
+from a4s_eval.metric_registries.abstract import (
+    AbstractMetricRegistry,
+    MetricInputGenerator,
+)
 from a4s_eval.metric_registries.data_metric_registry import (
     DataMetricInputGenerator,
     data_metric_registry,
@@ -19,7 +22,7 @@ registries: list[AbstractMetricRegistry] = [
     prediction_metric_registry,
 ]
 
-# Mapping of registry class names to registry instances 
+# Mapping of registry class names to registry instances
 registry_mapping: dict[str, AbstractMetricRegistry] = {
     type(r).__name__: r for r in registries
 }
