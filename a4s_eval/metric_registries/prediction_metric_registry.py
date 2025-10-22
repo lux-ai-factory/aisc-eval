@@ -63,8 +63,8 @@ class PredictionInputGenerator(MetricInputGenerator):
         date_iterator.set_dataset(dataset)
         return (
             (datashape, model, eval_data, y_pred_proba[list(eval_data.data.index)])
-            for _, eval_data in date_iterator 
-            if eval_data.data is not None # Quickfix to satisfy mypy
+            for _, eval_data in date_iterator
+            if eval_data.data is not None  # Quickfix to satisfy mypy
         )
 
 

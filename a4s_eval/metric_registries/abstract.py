@@ -61,7 +61,9 @@ class MetricInputGenerator(ABC):
         return self.__train_dataset
 
     @property
-    def model_onnx_session(self) -> ort.capi.onnxruntime_inference_collection.InferenceSession:
+    def model_onnx_session(
+        self,
+    ) -> ort.capi.onnxruntime_inference_collection.InferenceSession:
         """Return the ONNX session for the model associated with the evaluation."""
         return get_onnx_model(self.evaluation.model.pid)
 
@@ -71,12 +73,12 @@ class MetricInputGenerator(ABC):
         return ProjectDateIterator(self.evaluation.project.pid)
 
     @abstractmethod
-    def get_inputs(self)-> tuple[Any, ...]:
+    def get_inputs(self) -> tuple[Any, ...]:
         """Return the prepared inputs for metric evaluation."""
         pass
 
     @abstractmethod
-    def get_inputs_dateiterator(self)-> Iterator[tuple[Any, ...]]:
+    def get_inputs_dateiterator(self) -> Iterator[tuple[Any, ...]]:
         """Return an iterator that yields inputs for each date slice."""
         pass
 

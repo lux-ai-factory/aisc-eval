@@ -26,7 +26,9 @@ def metric_task(
             get_logger().info(f"Running metric function: {metric_name}")
             metric_fn = registry.get_functions().get(metric_name)
             if metric_fn is None:
-                get_logger().warning(f"Metric function {metric_name} not found in registry {registry_name}.")
+                get_logger().warning(
+                    f"Metric function {metric_name} not found in registry {registry_name}."
+                )
                 continue
             new_measures = metric_fn(*inputs)
             measures.extend(new_measures)
