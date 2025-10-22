@@ -13,7 +13,7 @@ from a4s_eval.utils.logging import get_logger
 logger = get_logger()
 
 
-class ModelPredProbaEvaluator(Protocol):
+class ModelPredProbaMetric(Protocol):
     def __call__(
         self,
         datashape: DataShape,
@@ -67,15 +67,15 @@ class PredictionInputGenerator(MetricInputGenerator):
 
 class PredictionMetricRegistry(AbstractMetricRegistry):
     def __init__(self) -> None:
-        self._functions: dict[str, ModelPredProbaEvaluator] = {}
+        self._functions: dict[str, ModelPredProbaMetric] = {}
 
-    def register(self, name: str, func: ModelPredProbaEvaluator) -> None:
+    def register(self, name: str, func: ModelPredProbaMetric) -> None:
         self._functions[name] = func
 
-    def __iter__(self) -> Iterator[tuple[str, ModelPredProbaEvaluator]]:
+    def __iter__(self) -> Iterator[tuple[str, ModelPredProbaMetric]]:
         return iter(self._functions.items())
 
-    def get_functions(self) -> dict[str, ModelPredProbaEvaluator]:
+    def get_functions(self) -> dict[str, ModelPredProbaMetric]:
         return self._functions
 
 
@@ -84,14 +84,14 @@ prediction_metric_registry = PredictionMetricRegistry()
 
 def prediction_metric(
     name: str,
-) -> Callable[[ModelPredProbaEvaluator], ModelPredProbaEvaluator]:
+) -> Callable[[ModelPredProbaMetric], ModelPredProbaMetric]:
     """Decorator to register a function as a model evaluator for A4S.
 
     Returns:
-        Callable[[Evaluator], ModelPredProbaEvaluator]: A decorator function that registers the evaluation function as a model evaluator for A4S.
+        Callable[[Evaluator], ModelPredProbaMetric]: A decorator function that registers the evaluation function as a model evaluator for A4S.
     """
 
-    def func_decorator(func: ModelPredProbaEvaluator) -> ModelPredProbaEvaluator:
+    def func_decorator(func: ModelPredProbaMetric) -> ModelPredProbaMetric:
         prediction_metric_registry.register(name, func)
         return func
 

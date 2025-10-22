@@ -21,9 +21,9 @@ def metric_task(
 
     for inputs in inputs_iterator:
         for metric_name in metric_name_list:
-            get_logger().info(f"Running evaluator: {metric_name}")
-            evaluator = registry.get_functions().get(metric_name)
-            new_measures = evaluator(*inputs)
+            get_logger().info(f"Running metric function: {metric_name}")
+            metric_fn = registry.get_functions().get(metric_name)
+            new_measures = metric_fn(*inputs)
             measures.extend(new_measures)
 
     response = post_measures(evaluation_pid, measures)
