@@ -38,12 +38,11 @@ def empty_model_metric(
     return []
 
 
-@prediction_metric(name="Classification Performance metric: Accuracy")
+@prediction_metric(name="Accuracy")
 def classification_accuracy_metric(
     datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Measure]:
-    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
-    date = date.to_pydatetime()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
@@ -56,12 +55,11 @@ def classification_accuracy_metric(
     return [metric]
 
 
-@prediction_metric(name="Classification Performance metric: F1 Score")
+@prediction_metric(name="F1 Score")
 def classification_f1_score_metric(
     datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Measure]:
-    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
-    date = date.to_pydatetime()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
@@ -74,12 +72,11 @@ def classification_f1_score_metric(
     return [metric]
 
 
-@prediction_metric(name="Classification Performance metric: Precision")
+@prediction_metric(name="Precision")
 def classification_precision_metric(
     datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Measure]:
-    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
-    date = date.to_pydatetime()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
@@ -92,12 +89,11 @@ def classification_precision_metric(
     return [metric]
 
 
-@prediction_metric(name="Classification Performance metric: Recall")
+@prediction_metric(name="Recall")
 def classification_recall_metric(
     datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Measure]:
-    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
-    date = date.to_pydatetime()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
@@ -110,14 +106,11 @@ def classification_recall_metric(
     return [metric]
 
 
-@prediction_metric(
-    name="Classification Performance metric: Matthews Correlation Coefficient"
-)
+@prediction_metric(name="Matthews Correlation Coefficient")
 def classification_matthews_corrcoef_metric(
     datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Measure]:
-    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
-    date = date.to_pydatetime()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
     y_pred = np.argmax(y_pred_proba, axis=1)
 
@@ -130,12 +123,11 @@ def classification_matthews_corrcoef_metric(
     return [metric]
 
 
-@prediction_metric(name="Classification Performance metric: RROCAUC")
+@prediction_metric(name="ROCAUC")
 def classification_roc_auc_metric(
     datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
 ) -> list[Measure]:
-    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
-    date = date.to_pydatetime()
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
     metric = Measure(
