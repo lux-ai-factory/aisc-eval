@@ -35,7 +35,7 @@ celery_config = {
 }
 
 # Only add SSL configuration in production
-if env.MQ_USE_SSL and env.BROCKER_SSL_CERT_REQS:
+if env.MQ_USE_SSL:
     celery_config["broker_transport_options"] = {
         "ssl": {
             "cert_reqs": 0,  # CERT_NONE as integer
