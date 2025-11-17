@@ -16,6 +16,11 @@ from a4s_eval.metric_registries.prediction_metric_registry import (
     PredictionInputGenerator,
     prediction_metric_registry,
 )
+from a4s_eval.metric_registries.regression_metric_registry import (
+    RegressionInputGenerator,
+    regression_metric_registry,
+)
+
 
 
 registries: list[AbstractMetricRegistry] = [
@@ -33,6 +38,7 @@ registry_mapping: dict[str, AbstractMetricRegistry] = {
 input_generator_cls_mapping: dict[str, Type[MetricInputGenerator]] = {
     type(data_metric_registry).__name__: DataMetricInputGenerator,
     type(prediction_metric_registry).__name__: PredictionInputGenerator,
+    type(regression_metric_registry).__name__: RegressionInputGenerator,
 }
 
 
