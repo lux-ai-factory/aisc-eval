@@ -8,6 +8,7 @@ import onnxruntime as ort
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Feature, FeatureType, Model
 from a4s_eval.metrics.regression_metrics.counter_factual_metrics import (
     empty_regression_metric,
+    simple_demo_metric,
 )
 
 
@@ -108,3 +109,14 @@ def test_smoke(
 ) -> None:
     metrics = empty_regression_metric(data_shape, ref_model, test_dataset, y_pred)
     assert len(metrics) == 0
+
+
+def test_simple_demo_metric(
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred: np.ndarray,
+) -> None:
+    metrics = simple_demo_metric(data_shape, ref_model, test_dataset, y_pred)
+    assert len(metrics) == 1
+    assert metrics[0].name == "score_mean_value_metric"
