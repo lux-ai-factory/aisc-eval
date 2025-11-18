@@ -30,7 +30,7 @@ def redis_handle_ssl_option(redis_url: str) -> str:
     if not redis_url.startswith("rediss://"):
         return redis_url
 
-    if ("ssl_cert_reqs" not in redis_url):
+    if "ssl_cert_reqs" not in redis_url:
         separator = "&" if "?" in redis_url else "?"
         return f"{redis_url}{separator}ssl_cert_reqs=none"
 
