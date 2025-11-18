@@ -1,6 +1,8 @@
+import pathlib
 import uuid
 
-from celery import group
+from celery import group, Signature
+import yaml
 
 from a4s_eval.celery_app import celery_app
 from a4s_eval.service.api_client import (
@@ -8,10 +10,8 @@ from a4s_eval.service.api_client import (
     mark_completed,
     mark_failed,
 )
-from a4s_eval.tasks.data_metric_tasks import dataset_evaluation_task
-from a4s_eval.tasks.prediction_metric_tasks import (
-    model_evaluation_task,
-)
+from a4s_eval.tasks.metric_tasks import metric_task
+from a4s_eval.metric_registries import map_registries_to_supported_metrics
 from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
@@ -33,26 +33,16 @@ def poll_and_run_evaluation() -> None:
             logger.debug("4. No pending evaluations found, returning")
             return
 
-        logger.debug(f"5. Creating groups for {len(eval_ids)} evaluations...")
-        groups = [
-            group(
-                [
-                    dataset_evaluation_task.s(eval_id).on_error(
-                        handle_error.s(eval_id)
-                    ),
-                    model_evaluation_task.s(eval_id).on_error(handle_error.s(eval_id)),
-                ]
-            )
-            for eval_id in eval_ids
-        ]
-        logger.debug(f"6. Groups created: {len(groups)} groups")
+        logger.debug(f"5. Creating signatures for {len(eval_ids)} evaluations...")
+        signatures = [generate_evaluation_signature(eval_id) for eval_id in eval_ids]
+        logger.debug(f"6. Signatures created: {len(signatures)}")
 
-        logger.debug("7. Starting to apply groups...")
-        # Apply each group in parallel
-        for i, (eval_id, g) in enumerate(zip(eval_ids, groups)):
+        logger.debug("7. Starting to apply signatures...")
+        # Apply each signature in parallel
+        for i, (eval_id, sig) in enumerate(zip(eval_ids, signatures)):
             logger.debug(f"8.{i + 1} About to launch evaluation task for {eval_id}")
             try:
-                (g | finalize_evaluation.si(eval_id)).apply_async()
+                sig.apply_async()
                 logger.debug(f"9.{i + 1} Task launched successfully for {eval_id}")
             except Exception as e:
                 logger.error(f"ERROR launching task for {eval_id}: {str(e)}")
@@ -97,3 +87,24 @@ def handle_error(
     logger.error(f"--\n\n{request} {exc} {traceback}")
     mark_failed(evaluation_id)
     logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
+
+
+def generate_evaluation_signature(evaluation_pid: uuid.UUID) -> Signature:
+    # --- Load local config file. TODO: using evaluation config in api ---
+    config_file = pathlib.Path("config/eval_config.yaml")
+    with open(config_file) as f_in:
+        eval_config = yaml.safe_load(f_in)
+
+    registry_metric_pairs = map_registries_to_supported_metrics(eval_config)
+
+    # --- Create metric tasks ---
+    task_signatures = [
+        metric_task.s(evaluation_pid, name, metrics).on_error(
+            handle_error.s(evaluation_pid)
+        )
+        for name, metrics in registry_metric_pairs
+    ]
+
+    # --- Combine tasks into a group with finalization ---
+    workflow = group(task_signatures) | finalize_evaluation.si(evaluation_pid)
+    return workflow

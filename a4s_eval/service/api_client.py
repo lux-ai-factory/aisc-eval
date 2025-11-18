@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from a4s_eval.data_model.evaluation import DataShape, Evaluation
 from a4s_eval.data_model.measure import Measure
+from a4s_eval.data_model.project import Project
 from a4s_eval.utils.env import API_URL_PREFIX
 from a4s_eval.utils.logging import get_logger
 
@@ -208,3 +209,9 @@ def get_project_datashape(project_pid: uuid.UUID) -> DataShape:
     resp = requests.get(f"{API_URL_PREFIX}/projects/{project_pid}/datashape")
     resp.raise_for_status()
     return DataShape.model_validate(resp.json())
+
+
+def get_project(project_pid: uuid.UUID) -> Project:
+    resp = requests.get(f"{API_URL_PREFIX}/projects/{project_pid}")
+    resp.raise_for_status()
+    return Project.model_validate(resp.json())

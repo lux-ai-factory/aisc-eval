@@ -2,6 +2,10 @@ from typing import Callable, Iterator, Protocol
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape
 from a4s_eval.data_model.measure import Measure
+from a4s_eval.metric_registries.abstract import (
+    AbstractMetricRegistry,
+    MetricInputGenerator,
+)
 from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
@@ -22,7 +26,18 @@ class DataMetric(Protocol):
         raise NotImplementedError
 
 
-class DataMetricRegistry:
+class DataMetricInputGenerator(MetricInputGenerator):
+    def get_inputs(self) -> tuple[DataShape, Dataset, Dataset]:
+        return (self.expected_datashape, self.train_dataset, self.test_dataset)
+
+    def get_inputs_dateiterator(self) -> Iterator[tuple[DataShape, Dataset, Dataset]]:
+        datashape, ref_dataset, eval_dataset = self.get_inputs()
+        date_iterator = self.project_date_iterator
+        date_iterator.set_dataset(eval_dataset)
+        return ((datashape, ref_dataset, eval_data) for _, eval_data in date_iterator)
+
+
+class DataMetricRegistry(AbstractMetricRegistry):
     def __init__(self) -> None:
         self._functions: dict[str, DataMetric] = {}
         logger.debug("DataMetricRegistry initialized")

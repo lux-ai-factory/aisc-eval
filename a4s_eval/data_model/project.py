@@ -6,7 +6,7 @@ and associations between datasets, models, and their evaluation settings.
 
 from pydantic import BaseModel
 
-from a4s_eval.data_model.evaluation import Dataset
+# from a4s_eval.data_model.evaluation import Dataset
 
 
 class Project(BaseModel):
@@ -20,4 +20,4 @@ class Project(BaseModel):
     name: str  # Name of the project
     frequency: str  # Frequency of evaluation (e.g., '1D' for daily)
     window_size: str  # Size of the rolling window for analysis (e.g., '7D' for 7 days)
-    dataset: Dataset  # The dataset being analyzed in this project
+    # dataset: Dataset  # The dataset being analyzed in this project

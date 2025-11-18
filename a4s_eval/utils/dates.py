@@ -5,6 +5,10 @@ for creating batches of data based on date ranges and iterating over temporal da
 """
 
 import pandas as pd
+import uuid
+
+from a4s_eval.data_model.evaluation import Dataset
+from a4s_eval.service.api_client import get_project, get_project_datashape
 
 
 def get_date_batches(
@@ -112,3 +116,64 @@ class DateIterator:
         return end, self.df[
             (self.df[self.date_feature] >= start) & (self.df[self.date_feature] < end)
         ].copy()
+
+
+class ProjectDateIterator:
+    """
+    TODO: update docstring
+    Iterator for processing project datasets in temporal batches.
+    """
+
+    def __init__(self, project_pid: uuid.UUID, date_round: str = "1 D"):
+        project = get_project(project_pid)
+        self.datashape = get_project_datashape(project_pid)
+        self.eval_datashape = None
+        self.date_round = date_round
+        self.date_feature = self.datashape.date.name
+        self.window = project.window_size
+        self.freq = project.frequency
+        self.df = None
+        self.index = 0
+
+    def set_dataset(self, dataset: Dataset):
+        """
+        Allows setting the DataFrame
+
+        """
+        df = dataset.data.copy()
+        self.eval_datashape = dataset.shape
+        df[self.date_feature] = pd.to_datetime(df[self.date_feature])
+        self.start_date = df[self.date_feature].min()
+        self.end_date = df[self.date_feature].max()
+        self.batches = get_date_batches(
+            self.start_date, self.end_date, self.date_round, self.window, self.freq
+        )
+        self.index = 0
+        self.df = df
+
+    def __iter__(self) -> "ProjectDateIterator":
+        """Return the iterator object."""
+        return self
+
+    def __next__(self) -> tuple[pd.Timestamp, Dataset]:
+        """Get the next batch of data.
+
+        Returns:
+            tuple[pd.Timestamp, Dataset]: A tuple containing the end timestamp
+                and the corresponding dataset slice.
+
+        Raises:
+            StopIteration: When there are no more batches to process.
+        """
+        if self.index >= len(self.batches):
+            raise StopIteration
+        start, end = self.batches[self.index]
+        self.index += 1
+        # Filter DataFrame for current time window
+        temp_df = self.df[
+            (self.df[self.date_feature] >= start) & (self.df[self.date_feature] < end)
+        ].copy()
+
+        # Create a dummy Dataset object for the batch
+        dataset = Dataset(pid=uuid.uuid4(), shape=self.eval_datashape, data=temp_df)
+        return end, dataset
