@@ -16,11 +16,10 @@ wait_for_dependencies() {
     fi
     
     # Wait for RabbitMQ
-    local mq_host=$(echo "${MQ_AMQP_ENDPOINT:-localhost}" | sed -E 's/^[a-z]+:\/\/([^:\/]+).*/\1/')
-    if [ -n "$mq_host" ]; then
-        echo "Waiting for RabbitMQ at $mq_host..."
-        timeout 30 bash -c "until nc -z $mq_host 5671; do sleep 1; done" || {
-            echo "RabbitMQ not reachable at $mq_host:5671"
+    if [ -n "$MQ_HOST" ]; then
+        echo "Waiting for RabbitMQ at $MQ_HOST..."
+        timeout 30 bash -c "until nc -z $MQ_HOST $MQ_PORT; do sleep 1; done" || {
+            echo "RabbitMQ not reachable at $MQ_HOST:$MQ_PORT"
         }
     fi
 }

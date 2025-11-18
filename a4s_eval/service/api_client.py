@@ -183,7 +183,7 @@ def post_measures(
 
 
 def get_datashape_request(datashape_pid: uuid.UUID) -> dict[str, Any]:
-    resp = requests.get(f"{API_URL_PREFIX}/datashape/{datashape_pid}")
+    resp = requests.get(f"{API_URL_PREFIX}/datashapes/{datashape_pid}")
     resp.raise_for_status()
     return resp.json()
 
