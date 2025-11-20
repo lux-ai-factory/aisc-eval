@@ -41,12 +41,12 @@ class RegressionInputGenerator(MetricInputGenerator):
             raise ValueError("Test dataset data is None.")
         x_test_np = x_test[
             [f.name for f in self.expected_datashape.features]
-        ].to_numpy()
+        ].astype(np.float32).to_numpy()
 
         input_name = session.get_inputs()[0].name
         label_name = session.get_outputs()[0].name
         pred_onx = session.run([label_name], {input_name: x_test_np})[0]
-        y_pred = np.array([list(d.values()) for d in pred_onx])
+        y_pred = np.array([d.item() for d in pred_onx])
         get_logger().info("Computation finished for Y prediction probability.")
         return (
             self.expected_datashape,

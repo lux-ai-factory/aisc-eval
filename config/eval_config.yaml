@@ -1,7 +1,9 @@
 - Data drift
-- Accuracy
-- F1 Score
-- Precision
-- Recall
-- Matthews Correlation Coefficient
-- ROCAUC
+# - Accuracy
+# - F1 Score
+# - Precision
+# - Recall
+# - Matthews Correlation Coefficient
+# - ROCAUC
+- Mean Squared Error
+- Mean Absolute Error

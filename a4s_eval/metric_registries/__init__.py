@@ -26,6 +26,7 @@ from a4s_eval.metric_registries.regression_metric_registry import (
 registries: list[AbstractMetricRegistry] = [
     data_metric_registry,
     prediction_metric_registry,
+    regression_metric_registry,
 ]
 
 # Mapping of registry class names to registry instances

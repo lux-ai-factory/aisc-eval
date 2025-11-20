@@ -9,6 +9,7 @@ from a4s_eval.data_model.evaluation import Dataset, DataShape, Feature, FeatureT
 from a4s_eval.metrics.regression_metrics.counter_factual_metrics import (
     empty_regression_metric,
     simple_demo_metric,
+    mean_squared_error_metric
 )
 
 
@@ -47,14 +48,23 @@ def data_shape() -> DataShape:
         features.append(_feature)
 
     date = Feature(
-            pid=uuid.uuid4(),
-            name="col_timestamp",
-            feature_type=FeatureType.DATE,
-            min_value=0,
-            max_value=0,
-        )
+        pid=uuid.uuid4(),
+        name="col_timestamp",
+        feature_type=FeatureType.DATE,
+        min_value=0,
+        max_value=0,
+    )
+    
+    target = Feature(
+        pid=uuid.uuid4(),
+        name="target",
+        feature_type=FeatureType.FLOAT,
+        min_value=df["target"].min(),
+        max_value=df["target"].max(),
+    )
 
-    datashape = DataShape(features=features, date=date, target=None)
+
+    datashape = DataShape(features=features, date=date, target=target)
 
     return datashape
 
@@ -120,3 +130,13 @@ def test_simple_demo_metric(
     metrics = simple_demo_metric(data_shape, ref_model, test_dataset, y_pred)
     assert len(metrics) == 1
     assert metrics[0].name == "score_mean_value_metric"
+
+
+def test_mean_squared_error_metric(
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred: np.ndarray,
+) -> None:
+    metrics = mean_squared_error_metric(data_shape, ref_model, test_dataset, y_pred)
+    assert len(metrics) == 1
