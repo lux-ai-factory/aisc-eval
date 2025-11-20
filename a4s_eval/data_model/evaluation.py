@@ -22,6 +22,17 @@ class FeatureType(str, enum.Enum):
     CATEGORICAL = "Categorical"
     DATE = "Date"
 
+    # Quickfix to allow lowercase deserialization
+    @classmethod
+    def _missing_(cls, value):
+        # Normalize to lowercase for comparison
+        if isinstance(value, str):
+            value_lower = value.lower()
+            for member in cls:
+                if member.value.lower() == value_lower:
+                    return member
+        raise ValueError(f"{value!r} is not a valid {cls.__name__}")
+
 
 class Feature(BaseModel):
     """Represents a single feature (column) in a dataset.
