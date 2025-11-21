@@ -39,9 +39,11 @@ class RegressionInputGenerator(MetricInputGenerator):
         x_test = self.test_dataset.data
         if x_test is None:
             raise ValueError("Test dataset data is None.")
-        x_test_np = x_test[
-            [f.name for f in self.expected_datashape.features]
-        ].astype(np.float32).to_numpy()
+        x_test_np = (
+            x_test[[f.name for f in self.expected_datashape.features]]
+            .astype(np.float32)
+            .to_numpy()
+        )
 
         input_name = session.get_inputs()[0].name
         label_name = session.get_outputs()[0].name
