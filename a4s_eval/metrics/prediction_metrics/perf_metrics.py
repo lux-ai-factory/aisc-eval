@@ -101,7 +101,7 @@ def classification_confusion_matrix_metric(
 
     metrics: list[Measure] = []
 
-    matrix = confusion_matrix(y_true, y_pred), #TODO NOT A FLOAT!!!
+    matrix = (confusion_matrix(y_true, y_pred),)
     matrix = matrix[0]
     max_i, max_j = matrix.shape
 

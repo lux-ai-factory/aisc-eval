@@ -65,7 +65,6 @@ def classification_calibration_score_metric(
 
     ece, mce = 0.0, 0.0
     for index, bin_l, bin_r in zip(range(n_bins), bin_ls, bin_rs):
-
         # Determine if sample is in bin
         in_bin = np.logical_and(confidences > bin_l.item(), confidences <= bin_r.item())
 

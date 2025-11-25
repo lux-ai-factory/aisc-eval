@@ -80,7 +80,7 @@ def test_classification_confusion_matrix_metric(
     metrics = classification_confusion_matrix_metric(
         data_shape, ref_model, test_dataset, y_pred_proba
     )
-    assert len(metrics) >= 4 # minimum 2*2 matrix
+    assert len(metrics) >= 4  # minimum 2*2 matrix
 
     for metric in metrics:
         print(metric)
