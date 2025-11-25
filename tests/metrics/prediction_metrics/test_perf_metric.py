@@ -2,7 +2,7 @@ import datetime
 import numpy as np
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
-from a4s_eval.metrics.prediction_metrics.perf_metric import (
+from a4s_eval.metrics.prediction_metrics.perf_metrics import (
     classification_accuracy_metric,
     classification_f1_score_metric,
     classification_matthews_corrcoef_metric,
