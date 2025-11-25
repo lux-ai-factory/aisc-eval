@@ -215,3 +215,31 @@ def get_project(project_pid: uuid.UUID) -> Project:
     resp = requests.get(f"{API_URL_PREFIX}/projects/{project_pid}")
     resp.raise_for_status()
     return Project.model_validate(resp.json())
+
+
+def post_artifact_dataset(
+    project_pid: uuid.UUID,
+    evaluation_pid: uuid.UUID,
+    artifact_name: str,
+    df: pd.DataFrame,
+) -> requests.Response:
+    resp = requests.post(
+        f"{API_URL_PREFIX}/projects/{project_pid}/datasets", 
+        json={"name": f"artifact-{evaluation_pid}-dataset-{artifact_name}"}
+    )
+    resp.raise_for_status()
+    # Write Parquet to an in-memory buffer
+    buffer = BytesIO()
+    df.to_parquet(buffer, index=False)
+    buffer.seek(0)
+    files = {
+        "file": ("data.parquet", buffer, "application/octet-stream")
+    }
+    resp_df = requests.put(
+        f"{API_URL_PREFIX}/datasets/{resp.json()['pid']}/data",
+        files=files,
+        headers={"accept": "application/json"},
+    )
+
+    resp_df.raise_for_status()
+    return resp
