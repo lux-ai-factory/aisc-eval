@@ -1,3 +1,4 @@
+import datetime
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import euclidean, jensenshannon
@@ -10,13 +11,13 @@ from a4s_eval.utils.logging import get_logger
 logger = get_logger()
 
 @counterfactual_metric(name="Empty counterfactual metric")
-def empty_regression_metric(
-    datashape: DataShape, model: Model, reference: Dataset, evaluated: Dataset
+def empty_counterfactual_metric(
+    expected_datashape: DataShape, factual_scaled: pd.DataFrame, counterfactuals: pd.DataFrame
 ) -> list[Measure]:
     return []
 
 
-def numerical_distance(factuals: Dataset, counterfactuals: Dataset) -> float:
+def numerical_distance(factuals: pd.Series, counterfactuals: pd.Series) -> float:
     """Calculate Euclidean distance between two numerical data points.
 
     Args:
@@ -30,15 +31,16 @@ def numerical_distance(factuals: Dataset, counterfactuals: Dataset) -> float:
         f"Computing numerical distance test - factuals shape: {factuals.shape}, New shape: {counterfactuals.shape}"
     )
     distance = euclidean(factuals, counterfactuals)
+    print(type(factuals))
     logger.debug(f"Euclidean distance computed: {distance}")
     return distance
 
 
 
 def feature_distance_test(
-    factuals: Dataset,
-    counterfctuals: Dataset,
-    date: pd.Timestamp,
+    factuals: pd.Series,
+    counterfactuals: pd.Series,
+    date: datetime.datetime,
 ) -> Measure:
     """Calculate distances between factual and counterfactuals.
 
@@ -55,11 +57,11 @@ def feature_distance_test(
         ValueError: If feature type is not supported
     """
 
-    score = numerical_distance(factuals, counterfctuals)
+    score = numerical_distance(factuals, counterfactuals)
     metric = Measure(
         name="euclidean",
         score=score,
-        time=date.to_pydatetime(),
+        time=date,
     )
     logger.debug(f"Created numerical drift metric: {metric.name} = {metric.score}")
     return metric
@@ -69,7 +71,7 @@ def feature_distance_test(
 
 @counterfactual_metric(name="Counterfactuals distance")
 def counterfactual_distance_metric(
-    datashape: DataShape, model: Model, reference: Dataset, evaluated: Dataset
+    expected_datashape: DataShape, factual_scaled: pd.DataFrame, counterfactuals: pd.DataFrame
 ) -> list[Measure]:
     """Calculate drift for all features between reference and evaluated datasets.
 
@@ -84,32 +86,27 @@ def counterfactual_distance_metric(
     Returns:
         list[Measure]: List of drift metrics for each feature
     """
-    logger.debug(
-        f"Starting data drift evaluation - Reference shape: {reference.data.shape}, Evaluated shape: {evaluated.data.shape}"
-    )
+
 
     # Get the current date from the evaluated dataset
-    date_feature = datashape.date.name
-    date = pd.to_datetime(evaluated.data[date_feature]).max()
+    date = datetime.datetime.now()
     logger.debug(f"Evaluation date: {date}")
 
     metrics = []
-    logger.debug(f"Processing {len(reference.shape.features)} features")
-
-    # Get feature name / feature pid mapping from test dataset
-    test_feature_name_pid_mapping = {
-        _feature.name: _feature.pid for _feature in evaluated.shape.features
-    }
+    logger.debug(f"Processing {len(expected_datashape.features)} features")
 
     # Identify feature types
-    numeric_feats = [f.name for f in datashape.features if f.feature_type == FeatureType.INTEGER or feature_type == FeatureType.FLOAT]
+    numeric_feats = [
+        f.name for f in expected_datashape.features 
+        if f.feature_type == FeatureType.INTEGER or f.feature_type == FeatureType.FLOAT
+    ]
     # TODO: Add categorical distance computation
     
     if numeric_feats:
         # Loop through all features in the project expected datashape
-        for idx in reference.index:
-            factual_row = reference.loc[idx]
-            counterfactual_row = evaluated.loc[idx]
+        for idx in factual_scaled.index:
+            factual_row = factual_scaled.loc[idx]
+            counterfactual_row = counterfactuals.loc[idx]
 
             metric = feature_distance_test(factual_row, counterfactual_row, date)
 

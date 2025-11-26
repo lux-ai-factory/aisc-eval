@@ -21,7 +21,7 @@ class CounterfactualMetric(Protocol):
     def __call__(
         self,
         expected_datashape: DataShape,
-        factual: pd.DataFrame,
+        factual_scaled: pd.DataFrame,
         counterfactuals: pd.DataFrame,
     ) -> list[Measure]:
         """Run a specific model evaluation.
