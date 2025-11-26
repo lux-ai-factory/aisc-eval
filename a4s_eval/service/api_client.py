@@ -225,7 +225,8 @@ def post_artifact_dataset(
 ) -> requests.Response:
     resp = requests.post(
         f"{API_URL_PREFIX}/projects/{project_pid}/datasets", 
-        json={"name": f"artifact-{evaluation_pid}-dataset-{artifact_name}"}
+        # Naming convention for artifact datasets, it should be aligned with front end 
+        json={"name": f"artifact/{evaluation_pid}/{artifact_name}"}
     )
     resp.raise_for_status()
     # Write Parquet to an in-memory buffer
