@@ -31,7 +31,6 @@ def numerical_distance(factuals: pd.Series, counterfactuals: pd.Series) -> float
         f"Computing numerical distance test - factuals shape: {factuals.shape}, New shape: {counterfactuals.shape}"
     )
     distance = euclidean(factuals, counterfactuals)
-    print(type(factuals))
     logger.debug(f"Euclidean distance computed: {distance}")
     return distance
 
