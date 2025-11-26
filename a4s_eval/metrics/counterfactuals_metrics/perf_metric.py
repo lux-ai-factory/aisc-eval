@@ -96,11 +96,6 @@ def counterfactual_distance_metric(
     metrics = []
     logger.debug(f"Processing {len(reference.shape.features)} features")
 
-    # Get feature name / feature pid mapping from test dataset
-    test_feature_name_pid_mapping = {
-        _feature.name: _feature.pid for _feature in evaluated.shape.features
-    }
-
     # Identify feature types
     numeric_feats = [f.name for f in datashape.features if f.feature_type == FeatureType.INTEGER or feature_type == FeatureType.FLOAT]
     # TODO: Add categorical distance computation
