@@ -20,24 +20,23 @@ logger = get_logger()
 class CounterfactualMetric(Protocol):
     def __call__(
         self,
-        datashape: DataShape,
-        model: Model,
-        reference: Dataset,
-        evaluated: Dataset,
+        expected_datashape: DataShape,
+        factual: pd.DataFrame,
+        counterfactuals: pd.DataFrame,
     ) -> list[Measure]:
         """Run a specific model evaluation.
 
         Args:
-            model: The model to run the evaluation.
-            reference: The reference dataset to run the evaluation.
-            evaluated: The evaluated dataset.
+            expected_datashape: The expected datashape for the project
+            test_dataset: The test dataset to run the evaluation.
+            counterfactuals: The counterfactuals that is generated.
 
         """
         raise NotImplementedError
 
 
 class CounterfactualsInputGenerator(MetricInputGenerator):
-    def get_inputs(self) -> tuple[DataShape, Dataset, Dataset]:
+    def get_inputs(self) -> tuple[DataShape, pd.DataFrame, pd.DataFrame]:
         session = self.model_onnx_session
 
         x_test = self.test_dataset.data
@@ -50,13 +49,17 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
 
         numeric_columns = x_train.select_dtypes(include=["number"]).columns
 
+        # remove target column
+        numeric_columns = [col_name for col_name in numeric_columns.to_list() if col_name!= self.expected_datashape.target.name]
+
         dice_data = dice_ml.Data(
             dataframe=x_train,
             continuous_features=list(numeric_columns),
             outcome_name=self.expected_datashape.target.name
         )
         # Sklearn wrapping
-        dice_model = dice_ml.Model(model=session, backend="sklearn", model_type="regressor")
+        # Comment: It seems that onnx is not supported
+        dice_model = dice_ml.Model(model=model_wrapper, backend="sklearn", model_type="regressor")
 
         # Initiate DiCE
         exp = Dice(dice_data, dice_model, method="genetic")  # "random" ou "genetic" ou "kd"
@@ -65,13 +68,14 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
         n_samples = len(x_test.iloc[:10,:]) # Limit to first 10 samples for efficiency
         
         target_col = self.expected_datashape.target.name
-
+        date_col = self.expected_datashape.date.name
         # Min/max of target for desired_range
-        target_min = x_train[target_col].min()
-        target_max = x_train[target_col].max()
+        target_min = self.expected_datashape.target.min_value
+        target_max = self.expected_datashape.target.max_value
+
 
         for i in range(min(n_samples, len(x_test))):
-            query_instance = x_test.drop(columns=target_col).iloc[i:i+1].astype(np.float32)
+            query_instance = x_test.drop(columns=[target_col, date_col]).iloc[i:i+1].astype(np.float32)
 
             # Standardize factual
             factual_scaled = pd.DataFrame(
@@ -80,6 +84,7 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
                 index=query_instance.index
             )
 
+            # Comment: It failed as model is onnx format
             dice_exp = exp.generate_counterfactuals(
                 query_instance,
                 total_CFs=1,
