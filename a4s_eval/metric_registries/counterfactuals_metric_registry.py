@@ -103,7 +103,7 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
         get_logger().info("Computation finished for counterfactuals.")
         return (
             self.expected_datashape,
-            x_test,
+            factual_scaled,
             counterfactuals
         )
 
