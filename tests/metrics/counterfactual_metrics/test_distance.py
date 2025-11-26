@@ -13,6 +13,7 @@ from a4s_eval.data_model.evaluation import (
     Feature,
     FeatureType,
 )
+from a4s_eval.metric_registries.counterfactuals_metric_registry import ONNXWrapper
 from a4s_eval.metrics.counterfactuals_metrics.perf_metric import (
     empty_counterfactual_metric,
     counterfactual_distance_metric,
@@ -135,22 +136,7 @@ def dice_data(X_train: pd.DataFrame, data_shape: DataShape) -> dice_ml.Data:
 
 @pytest.fixture(scope="module")
 def dice_model(session: ort.InferenceSession) -> dice_ml.Model:
-    class ONNXRegressorWrapper:
-        def __init__(self, session, input_name=None, output_name=None):
-            # Load ONNX model
-            self.session = session
-            # Resolve input/output names automatically if not provided
-            self.input_name = input_name or self.session.get_inputs()[0].name
-            self.output_name = output_name or self.session.get_outputs()[0].name
-        def predict(self, X):
-            # Ensure numpy float32 input
-            X = np.array(X).astype(np.float32)
-            inputs = {self.input_name: X}
-            output = self.session.run([self.output_name], inputs)[0]
-            # Flatten if necessary (e.g., output shape (N,1))
-            return output.reshape(len(output))
-        
-    model_wrapper = ONNXRegressorWrapper(session)
+    model_wrapper = ONNXWrapper(session)
     dice_model = dice_ml.Model(model=model_wrapper, backend="sklearn", model_type="regressor")
     return dice_model
 
