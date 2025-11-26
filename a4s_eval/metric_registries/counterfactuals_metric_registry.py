@@ -1,4 +1,5 @@
 from typing import Callable, Iterator, Protocol
+from typing import List
 
 import pandas as pd
 import numpy as np
@@ -16,6 +17,27 @@ from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
 
+
+class ONNXWrapper:
+    def __init__(self, session: Model) -> None:
+        self.session = session
+        self.input_name = session.get_inputs()[0].name
+        self.label_name = session.get_outputs()[0].name
+
+    def predict(self, X: Dataset) -> np.ndarray:
+        if isinstance(X, pd.DataFrame):
+            X = X.astype(np.float32).values
+        else: 
+            raise TypeError(f"Expected X to be a pandas DataFrame, but got {type(X).__name__}")
+
+        # Run ONNX inference
+        pred = self.session.run([self.label_name], {self.input_name: X})[0]
+
+        # flatten ONNX output so DiCE returns scalars, not lists
+        pred = pred.reshape(-1)  
+
+        return pred
+    
 
 class CounterfactualMetric(Protocol):
     def __call__(
@@ -58,6 +80,7 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
             outcome_name=self.expected_datashape.target.name
         )
         # Sklearn wrapping
+        model_wrapper = ONNXWrapper(session)
         # Comment: It seems that onnx is not supported
         dice_model = dice_ml.Model(model=model_wrapper, backend="sklearn", model_type="regressor")
 
