@@ -5,7 +5,7 @@ import pytest
 import uuid
 import onnxruntime as ort
 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 
 from a4s_eval.data_model.evaluation import (
     Dataset,
@@ -35,7 +35,7 @@ def X_test() -> pd.DataFrame:
         "tests/data/counterfactual/testing_data_2021-11-23 00:00:00.csv"
     )
 
-    return df.iloc[[2,3,5,7,11,13,17,19,23,29]]  # select a few samples for faster testing
+    return df.iloc[:10]  # select a few samples for faster testing [2,3,5,7,11,13,17,19,23,29]
 
 
 @pytest.fixture(scope="module")
@@ -116,8 +116,8 @@ def y_pred(X_test: Dataset, data_shape: DataShape, session: ort.InferenceSession
 
 
 @pytest.fixture(scope="module")
-def scaler(X_test: pd.DataFrame, data_shape: DataShape) -> StandardScaler:
-    ss = StandardScaler()
+def scaler(X_test: pd.DataFrame, data_shape: DataShape) -> MinMaxScaler:
+    ss = MinMaxScaler()
     ss.fit(X_test[[f.name for f in data_shape.features]])
     return ss
 
@@ -125,6 +125,7 @@ def scaler(X_test: pd.DataFrame, data_shape: DataShape) -> StandardScaler:
 @pytest.fixture(scope="module")
 def dice_data(X_train: pd.DataFrame, data_shape: DataShape) -> dice_ml.Data:
     numeric_columns = [feature.name for feature in data_shape.features if feature.feature_type == FeatureType.FLOAT]
+    X_train = X_train.drop("col_timestamp", axis=1)
 
     dice_data = dice_ml.Data(
         dataframe=X_train,
@@ -151,37 +152,51 @@ def exp(
 
 
 @pytest.fixture(scope="module")
-def factual_scaled(X_test, scaler: StandardScaler, data_shape: DataShape) -> pd.DataFrame:
-    df = pd.DataFrame(
-        scaler.transform(X_test[[f.name for f in data_shape.features]]),
-        columns=[f.name for f in data_shape.features],
-        index=X_test.index
-    )
-    return df
+def factual_scaled(X_test, scaler: MinMaxScaler, data_shape: DataShape) -> pd.DataFrame:
+    feature_cols = [f.name for f in data_shape.features]
+    scaled_list = []
+
+    for i in range(len(X_test)):
+        query_instance = X_test.loc[X_test.index[i:i+1], feature_cols]
+
+        scaled_instance = pd.DataFrame(
+            scaler.transform(query_instance),
+            columns=feature_cols,
+            index=query_instance.index
+        )
+
+        scaled_list.append(scaled_instance)
+    print(X_test.head(1))
+    print(scaled_list[0])
+    return pd.concat(scaled_list)
 
 
 @pytest.fixture(scope="module")
 def counter_factual(
-    factual_scaled: pd.DataFrame,
-    scaler: StandardScaler,
+    X_test: pd.DataFrame,
+    scaler: MinMaxScaler,
     data_shape: DataShape,
     exp: dice_ml.Dice,
 ) -> pd.DataFrame:
     counterfactual_scaled = []
-    for i in range(len(factual_scaled)):
-        query_instance = factual_scaled.iloc[i:i+1]
+    feature_cols = [f.name for f in data_shape.features]
+    for i in range(len(X_test)):
+        query_instance = X_test.loc[X_test.index[i:i+1], feature_cols]
         dice_exp = exp.generate_counterfactuals(
             query_instance,
             total_CFs=1,
             desired_range=[data_shape.target.min_value, data_shape.target.max_value]
         )
         cf_df = dice_exp.cf_examples_list[0].final_cfs_df.copy()
+
         scaled_cf_df = pd.DataFrame( 
-            scaler.transform(cf_df[[f.name for f in data_shape.features]]),
-            columns=[f.name for f in data_shape.features],
+            scaler.transform(cf_df[feature_cols]),
+            columns=feature_cols,
             index=query_instance.index
         )
         counterfactual_scaled.append(scaled_cf_df)
+    
+    print(counterfactual_scaled[0])
     return pd.concat(counterfactual_scaled)
 
 
