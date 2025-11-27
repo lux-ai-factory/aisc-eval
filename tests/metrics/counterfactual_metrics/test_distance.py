@@ -5,8 +5,6 @@ import pytest
 import uuid
 import onnxruntime as ort
 
-from sklearn.preprocessing import MinMaxScaler
-
 from a4s_eval.data_model.evaluation import (
     Dataset,
     DataShape,
@@ -116,13 +114,6 @@ def y_pred(X_test: Dataset, data_shape: DataShape, session: ort.InferenceSession
 
 
 @pytest.fixture(scope="module")
-def scaler(X_test: pd.DataFrame, data_shape: DataShape) -> MinMaxScaler:
-    ss = MinMaxScaler()
-    ss.fit(X_test[[f.name for f in data_shape.features]])
-    return ss
-
-
-@pytest.fixture(scope="module")
 def dice_data(X_train: pd.DataFrame, data_shape: DataShape) -> dice_ml.Data:
     numeric_columns = [feature.name for feature in data_shape.features if feature.feature_type == FeatureType.FLOAT]
     X_train = X_train.drop("col_timestamp", axis=1)
@@ -152,33 +143,16 @@ def exp(
 
 
 @pytest.fixture(scope="module")
-def factual_scaled(X_test, scaler: MinMaxScaler, data_shape: DataShape) -> pd.DataFrame:
-    feature_cols = [f.name for f in data_shape.features]
-    scaled_list = []
-
-    for i in range(len(X_test)):
-        query_instance = X_test.loc[X_test.index[i:i+1], feature_cols]
-
-        scaled_instance = pd.DataFrame(
-            scaler.transform(query_instance),
-            columns=feature_cols,
-            index=query_instance.index
-        )
-
-        scaled_list.append(scaled_instance)
-    print(X_test.head(1))
-    print(scaled_list[0])
-    return pd.concat(scaled_list)
-
+def factuals(data_shape:DataShape, X_test: pd.DataFrame) -> pd.DataFrame:
+    return X_test[[f.name for f in data_shape.features]]
 
 @pytest.fixture(scope="module")
-def counter_factual(
+def counter_factuals(
     X_test: pd.DataFrame,
-    scaler: MinMaxScaler,
     data_shape: DataShape,
     exp: dice_ml.Dice,
 ) -> pd.DataFrame:
-    counterfactual_scaled = []
+    counterfactuals = []
     feature_cols = [f.name for f in data_shape.features]
     for i in range(len(X_test)):
         query_instance = X_test.loc[X_test.index[i:i+1], feature_cols]
@@ -188,40 +162,51 @@ def counter_factual(
             desired_range=[data_shape.target.min_value, data_shape.target.max_value]
         )
         cf_df = dice_exp.cf_examples_list[0].final_cfs_df.copy()
-
-        scaled_cf_df = pd.DataFrame( 
-            scaler.transform(cf_df[feature_cols]),
-            columns=feature_cols,
-            index=query_instance.index
-        )
-        counterfactual_scaled.append(scaled_cf_df)
+        counterfactuals.append(cf_df)
     
-    print(counterfactual_scaled[0])
-    return pd.concat(counterfactual_scaled)
+    # print(counterfactuals)
+    return pd.concat(counterfactuals)
+
+
+@pytest.fixture(scope="module")
+def mad_values(exp: dice_ml.Dice) -> dict:
+    """
+    Get valid MADs from the DiCE data interface.
+    Returns a dict: {feature_name: MAD_j}
+    """
+    mad = exp.data_interface.get_valid_mads()
+    # Convert to Python dict (DiCE sometimes returns numpy arrays)
+    # mad_dict = {k: float(v) for k, v in mad.items()}
+
+    return mad
+
 
 
 def test_smoke(
-    factual_scaled: pd.DataFrame,
+    factuals: pd.DataFrame,
     data_shape: DataShape,
-    counter_factual: pd.DataFrame,
+    counter_factuals: pd.DataFrame,
+    mad_values: dict,
 ) -> None:
-    metrics = empty_counterfactual_metric(data_shape, factual_scaled, counter_factual)
+    metrics = empty_counterfactual_metric(data_shape, factuals, counter_factuals, mad_values)
     assert len(metrics) == 0
 
 
 
 def test_counterfactual_distance_metric(
     data_shape: DataShape,
-    factual_scaled: pd.DataFrame,
-    counter_factual: pd.DataFrame,
+    factuals: pd.DataFrame,
+    counter_factuals: pd.DataFrame,
+    mad_values: dict,
 ) -> None:
     metrics = counterfactual_distance_metric(
         data_shape,
-        factual_scaled,
-        counter_factual
+        factuals,
+        counter_factuals,
+        mad_values
     )
 
     for metric in metrics:
-        assert metric.name == "euclidean"
+        assert metric.name == "euclidean" # TODO: change to Manhattan
         assert metric.score >= 0
         print(f"Counterfactual distance metric score: {metric.score}")
