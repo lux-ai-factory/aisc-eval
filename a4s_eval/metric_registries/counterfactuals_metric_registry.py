@@ -95,7 +95,7 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
         # Min/max of target for desired_range
         target_min = self.expected_datashape.target.min_value
         target_max = self.expected_datashape.target.max_value
-
+        query_instances_scaled = []
 
         for i in range(min(n_samples, len(x_test))):
             query_instance = x_test.drop(columns=[target_col, date_col]).iloc[i:i+1].astype(np.float32)
@@ -106,6 +106,7 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
                 columns=query_instance.columns,
                 index=query_instance.index
             )
+            query_instances_scaled.append(factual_scaled)
 
             # Comment: It failed as model is onnx format
             dice_exp = exp.generate_counterfactuals(
@@ -126,13 +127,14 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
 
             counterfactual.append(counterfactual_scaled)
 
-        counterfactuals = pd.concat(counterfactual_scaled)
+        query_instances_scaled = pd.concat(query_instances_scaled)
+        counterfactuals_scaled = pd.concat(counterfactual)
 
         get_logger().info("Computation finished for counterfactuals.")
         return (
             self.expected_datashape,
-            factual_scaled,
-            counterfactuals
+            query_instances_scaled,
+            counterfactuals_scaled
         )
 
     def get_inputs_dateiterator(
