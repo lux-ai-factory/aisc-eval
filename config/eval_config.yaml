@@ -1,9 +1,13 @@
-- Data drift
-- Accuracy
-- F1 Score
-- Precision
-- Recall
-- Matthews Correlation Coefficient
-- ROCAUC
+Sliding Window:
+  - Data drift
+  - Accuracy
+  - F1 Score
+  - Precision
+  - Recall
+  - Matthews Correlation Coefficient
+  - ROCAUC
+  - Balanced Accuracy
+One Shot:
+  - Confusion Matrix
 # - Mean Squared Error
 # - Mean Absolute Error

@@ -10,7 +10,7 @@ from a4s_eval.service.api_client import (
     mark_completed,
     mark_failed,
 )
-from a4s_eval.tasks.metric_tasks import metric_task
+from a4s_eval.tasks.metric_tasks import metric_task, metric_one_shot_task
 from a4s_eval.metric_registries import map_registries_to_supported_metrics
 from a4s_eval.utils.logging import get_logger
 
@@ -95,16 +95,27 @@ def generate_evaluation_signature(evaluation_pid: uuid.UUID) -> Signature:
     with open(config_file) as f_in:
         eval_config = yaml.safe_load(f_in)
 
-    registry_metric_pairs = map_registries_to_supported_metrics(eval_config)
+    metric_list_SW = eval_config.get("Sliding Window", [])
+    registry_metric_pairs_SW = map_registries_to_supported_metrics(metric_list_SW)
 
-    # --- Create metric tasks ---
-    task_signatures = [
+    # --- Create metric tasks for sliding window ---
+    task_signatures_SW = [
         metric_task.s(evaluation_pid, name, metrics).on_error(
             handle_error.s(evaluation_pid)
         )
-        for name, metrics in registry_metric_pairs
+        for name, metrics in registry_metric_pairs_SW
+    ]
+
+    metric_list_OS = eval_config.get("One Shot", [])
+    registry_metric_pairs_OS = map_registries_to_supported_metrics(metric_list_OS)
+    # --- Create metric tasks for one shot ---
+    task_signatures_OS = [
+        metric_one_shot_task.s(evaluation_pid, name, metrics).on_error(
+            handle_error.s(evaluation_pid)
+        )
+        for name, metrics in registry_metric_pairs_OS
     ]
 
     # --- Combine tasks into a group with finalization ---
-    workflow = group(task_signatures) | finalize_evaluation.si(evaluation_pid)
+    workflow = group(task_signatures_SW + task_signatures_OS) | finalize_evaluation.si(evaluation_pid)
     return workflow
