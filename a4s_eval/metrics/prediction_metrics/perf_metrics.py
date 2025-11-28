@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
+    balanced_accuracy_score,
+    confusion_matrix,
     f1_score,
     matthews_corrcoef,
     precision_score,
@@ -53,6 +55,69 @@ def classification_accuracy_metric(
     )
 
     return [metric]
+
+
+@prediction_metric(name="Error Rate")
+def classification_error_rate_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    accuracy_metric: Measure = classification_accuracy_metric(
+        datashape, model, dataset, y_pred_proba
+    )[0]
+
+    metric = Measure(
+        name="Error Rate",
+        score=1 - accuracy_metric.score,
+        time=accuracy_metric.time,
+    )
+
+    return [metric]
+
+
+@prediction_metric(name="Balanced Accuracy")
+def classification_balanced_accuracy_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    metric = Measure(
+        name="Balanced Accuracy",
+        score=balanced_accuracy_score(y_true, y_pred),
+        time=date,
+    )
+
+    return [metric]
+
+
+@prediction_metric(name="Confusion Matrix")
+def classification_confusion_matrix_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    metrics: list[Measure] = []
+
+    matrix = (confusion_matrix(y_true, y_pred),)
+    matrix = matrix[0]
+    max_i, max_j = matrix.shape
+
+    print(matrix)
+
+    for i in range(max_i):
+        for j in range(max_j):
+            metric = Measure(
+                name="Confusion Matrix",
+                description=f"({i},{j})/({max_i},{max_j})",
+                score=matrix[i][j],
+                time=date,
+            )
+            metrics.append(metric)
+
+    return metrics
 
 
 @prediction_metric(name="F1 Score")
