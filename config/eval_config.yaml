@@ -7,7 +7,14 @@ Sliding Window:
   - Matthews Correlation Coefficient
   - ROCAUC
   - Balanced Accuracy
-One Shot:
-  - Confusion Matrix
+  # - Error Rate
 # - Mean Squared Error
 # - Mean Absolute Error
+One Shot:
+  - Confusion Matrix
+  - New Category in Test Data
+  - Missing Category in Test Data
+  - Reference Constraints
+  - Evaluated Constraints
+  - Distribution
+  - "Classification Calibration metrics: ECE, MCE"
