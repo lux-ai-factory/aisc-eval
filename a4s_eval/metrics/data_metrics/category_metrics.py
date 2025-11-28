@@ -30,7 +30,8 @@ def data_new_category_metric(
     total_instances: int = 0
 
     # For each feature in evaluated, check if category not in reference
-    for feature in evaluated.shape.features:
+    # Use expected datashape features to ensure consistent processing
+    for feature in datashape.features:
         # Only process categorical features
         if feature.feature_type != FeatureType.CATEGORICAL:
             continue
@@ -50,7 +51,9 @@ def data_new_category_metric(
             name="Number of New Categories in Test Data Feature",
             score=float(len(new_categories)),
             time=date,
-            description=f"feature:{feat_name}, categories:{list(new_categories)}",
+            # description too long
+            # description=f"feature:{feat_name}, categories:{list(new_categories)}",
+            description=f"feature:{feat_name}",
             feature_pid=feature.pid,
         )
         measures.append(diff_categories)
@@ -90,7 +93,8 @@ def data_missing_category_metric(
     total_instances: int = 0
 
     # For each feature in evaluated, check if category not in test
-    for feature in reference.shape.features:
+    # Use expected datashape features to ensure consistent processing
+    for feature in datashape.features:
         # Only process categorical features
         if feature.feature_type != FeatureType.CATEGORICAL:
             continue
@@ -110,7 +114,9 @@ def data_missing_category_metric(
             name="Number of Missing Categories in Test Data Feature",
             score=float(len(new_categories)),
             time=date,
-            description=(f"feature:{feat_name}, categories:{list(new_categories)}"),
+            # description too long
+            # description=(f"feature:{feat_name}, categories:{list(new_categories)}"),
+            description=(f"feature:{feat_name}"),
             feature_pid=feature.pid,
         )
         measures.append(diff_categories)
