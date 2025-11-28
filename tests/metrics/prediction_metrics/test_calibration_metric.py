@@ -33,48 +33,28 @@ def test_model_calibration_evaluation(
         assert isinstance(metric.time, datetime.datetime)
 
 
-def generate_expected_formats(y_true: np.ndarray) -> (DataShape, Dataset):
-    def dummy_feature(name, ftype):
-        return {
-            "pid": uuid.uuid4(),
-            "name": name,
-            "feature_type": ftype,
-            "min_value": 0.0,
-            "max_value": 1.0,
-        }
-
-    dummy_data_shape = DataShape.model_validate(
-        {
-            "features": [],
-            "target": dummy_feature("target", "float"),
-            "date": dummy_feature("date", "date"),
-        }
-    )
-
+def generate_expected_formats(data_shape: DataShape, y_true: np.ndarray) -> Dataset:
     dates = pd.date_range("2025-01-01", periods=len(y_true), freq="D")
-    df = pd.DataFrame(
+    df: pd.DataFrame = pd.DataFrame(
         {
-            dummy_data_shape.target.name: y_true,
-            dummy_data_shape.date.name: dates,
+            data_shape.target.name: y_true,
+            data_shape.date.name: dates,
         }
     )
 
     dummy_dataset = Dataset(
         pid=uuid.uuid4(),
-        shape=dummy_data_shape,
+        shape=data_shape,
         data=df,
     )
 
-    dummy_model = Model(
-        pid=uuid.uuid4(),
-        model=None,
-        dataset=dummy_dataset,
-    )
-
-    return dummy_data_shape, dummy_dataset, dummy_model
+    return dummy_dataset
 
 
-def test_model_calibration_value_evaluation_1():
+def test_model_calibration_value_evaluation_1(data_shape: DataShape, ref_model: Model):
+    dummy_data_shape = data_shape
+    dummy_model = ref_model
+
     # Hardcoded test data
     # Source from towardsdatascience.com
     y_pred_proba = np.array(
@@ -97,7 +77,7 @@ def test_model_calibration_value_evaluation_1():
     n_bins = 5
 
     # Generate expected formats
-    dummy_data_shape, dummy_dataset, dummy_model = generate_expected_formats(y_true)
+    dummy_dataset = generate_expected_formats(dummy_data_shape, y_true)
 
     # Run metrics
     metrics = classification_calibration_score_metric(
@@ -121,7 +101,10 @@ def test_model_calibration_value_evaluation_1():
     assert abs(MCE_metric.score - expected_mce) < 0.00001
 
 
-def test_model_calibration_value_evaluation_2():
+def test_model_calibration_value_evaluation_2(data_shape: DataShape, ref_model: Model):
+    dummy_data_shape = data_shape
+    dummy_model = ref_model
+
     # Hardcoded test data
     # Source from towardsdatascience.com
     y_pred_proba = np.array(
@@ -146,7 +129,7 @@ def test_model_calibration_value_evaluation_2():
 
     # Generate expected formats
     # Generate expected formats
-    dummy_data_shape, dummy_dataset, dummy_model = generate_expected_formats(y_true)
+    dummy_dataset = generate_expected_formats(dummy_data_shape, y_true)
 
     # Run metrics
     metrics = classification_calibration_score_metric(
