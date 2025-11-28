@@ -16,6 +16,11 @@ def check_numeric_constraints(
     df = dataset.data
     measures: list[Measure] = []
 
+    # Get feature name / feature pid mapping from test dataset
+    feature_name_pid_mapping = {
+        _feature.name: _feature.pid for _feature in dataset.shape.features
+    }
+
     # For each feature in datashape, check if dataset meets constraints
     for feature in datashape.features:
         # Only process numeric features
@@ -36,7 +41,7 @@ def check_numeric_constraints(
                 name=f"Number of {name} Constraint Violations (Lower)",
                 score=float(mask_min.sum()),
                 time=date,
-                feature_pid=feature.pid,
+                feature_pid=feature_name_pid_mapping.get(feature.name),
             )
             measures.append(lower_metric)
 
@@ -47,7 +52,7 @@ def check_numeric_constraints(
                 name=f"Number of {name} Constraint Violations (Upper)",
                 score=float(mask_max.sum()),
                 time=date,
-                feature_pid=feature.pid,
+                feature_pid=feature_name_pid_mapping.get(feature.name),
             )
             measures.append(upper_metric)
 
