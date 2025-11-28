@@ -35,7 +35,7 @@ def numerical_distance(data_shape: DataShape, factual: pd.Series, counterfactual
     distance = 0.0
     for col in feature_cols:
         distance += abs(factual[col] - counterfactual[col]) / mad_values[col]
-    print(distance)
+
     logger.debug(f"Euclidean distance computed: {distance}")
     return distance
 

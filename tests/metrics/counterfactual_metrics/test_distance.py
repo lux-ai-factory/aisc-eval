@@ -155,6 +155,7 @@ def counter_factuals(
     counterfactuals = []
     feature_cols = [f.name for f in data_shape.features]
     for i in range(len(X_test)):
+        instance_id = X_test.index[i]
         query_instance = X_test.loc[X_test.index[i:i+1], feature_cols]
         dice_exp = exp.generate_counterfactuals(
             query_instance,
@@ -162,6 +163,10 @@ def counter_factuals(
             desired_range=[data_shape.target.min_value, data_shape.target.max_value]
         )
         cf_df = dice_exp.cf_examples_list[0].final_cfs_df.copy()
+
+        # set the index of the CF to the original instance ID
+        cf_df.index = pd.Index([instance_id])
+
         counterfactuals.append(cf_df)
     
     # print(counterfactuals)
@@ -210,3 +215,5 @@ def test_counterfactual_distance_metric(
         assert metric.name == "euclidean" # TODO: change to Manhattan
         assert metric.score >= 0
         print(f"Counterfactual distance metric score: {metric.score}")
+
+    print(f"Average distance metric score: {np.average([m.score for m in metrics])}")
