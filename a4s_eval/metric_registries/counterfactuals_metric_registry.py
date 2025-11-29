@@ -3,11 +3,12 @@ from typing import List
 
 import pandas as pd
 import numpy as np
+import onnxruntime as ort
 from sklearn.preprocessing import StandardScaler
 import dice_ml
 from dice_ml import Dice
 
-from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
+from a4s_eval.data_model.evaluation import Dataset, DataShape, FeatureType, Model
 from a4s_eval.data_model.measure import Measure
 from a4s_eval.metric_registries.abstract import (
     AbstractMetricRegistry,
@@ -43,8 +44,9 @@ class CounterfactualMetric(Protocol):
     def __call__(
         self,
         expected_datashape: DataShape,
-        factual_scaled: pd.DataFrame,
-        counterfactuals: pd.DataFrame,
+        factuals: pd.DataFrame,
+        counter_factuals: pd.DataFrame,
+        mad_values: dict,
     ) -> list[Measure]:
         """Run a specific model evaluation.
 
@@ -58,92 +60,82 @@ class CounterfactualMetric(Protocol):
 
 
 class CounterfactualsInputGenerator(MetricInputGenerator):
-    def get_inputs(self) -> tuple[DataShape, pd.DataFrame, pd.DataFrame]:
-        session = self.model_onnx_session
+    # Add cache for counterfactuals
+    def __init__(self, *largs, **kwargs) -> None:
+        super().__init__(*largs, **kwargs)
+        self.__counterfactuals: pd.DataFrame | None = None
 
-        x_test = self.test_dataset.data
-        if x_test is None:
-            raise ValueError("Test dataset data is None.")
+    @property
+    def factuals(self) -> pd.DataFrame:
+        X_test = self.test_dataset.data[[f.name for f in self.expected_datashape.features]]
+        return  X_test.iloc[:2]  # limit to first 10 for faster testing
 
-        x_train = self.train_dataset.data
-        scaler = StandardScaler()
-        scaler.fit(x_train.drop(columns=self.expected_datashape.target.name))
+    @property
+    def dice_model(self) -> ort.capi.onnxruntime_inference_collection.InferenceSession:
+        model_wrapper = ONNXWrapper(self.model_onnx_session)
+        dice_model = dice_ml.Model(model=model_wrapper, backend="sklearn", model_type="regressor")
+        return dice_model
 
-        numeric_columns = x_train.select_dtypes(include=["number"]).columns
-
-        # remove target column
-        numeric_columns = [col_name for col_name in numeric_columns.to_list() if col_name!= self.expected_datashape.target.name]
+    @property
+    def dice_data(self) -> dice_ml.Data:
+        numeric_columns = [feature.name for feature in self.expected_datashape.features if feature.feature_type == FeatureType.FLOAT]
+        X_train = self.train_dataset.data[[feature.name for feature in self.expected_datashape.features] + [self.expected_datashape.target.name]]
 
         dice_data = dice_ml.Data(
-            dataframe=x_train,
+            dataframe=X_train,
             continuous_features=list(numeric_columns),
             outcome_name=self.expected_datashape.target.name
         )
-        # Sklearn wrapping
-        model_wrapper = ONNXWrapper(session)
-        # Comment: It seems that onnx is not supported
-        dice_model = dice_ml.Model(model=model_wrapper, backend="sklearn", model_type="regressor")
+        return dice_data
 
-        # Initiate DiCE
-        exp = Dice(dice_data, dice_model, method="genetic")  # "random" ou "genetic" ou "kd"
 
-        counterfactual = []
-        n_samples = len(x_test.iloc[:10,:]) # Limit to first 10 samples for efficiency
+    @property
+    def counter_factuals(self) -> pd.DataFrame:
+        if self.__counterfactuals is not None:
+            return self.__counterfactuals
         
-        target_col = self.expected_datashape.target.name
-        date_col = self.expected_datashape.date.name
-        # Min/max of target for desired_range
-        target_min = self.expected_datashape.target.min_value
-        target_max = self.expected_datashape.target.max_value
-        query_instances_scaled = []
+        counterfactuals = []
+        feature_cols = [f.name for f in self.expected_datashape.features]
+        X_test = self.factuals
+        exp = dice_ml.Dice(self.dice_data, self.dice_model, method="genetic")
 
-        for i in range(min(n_samples, len(x_test))):
-            query_instance = x_test.drop(columns=[target_col, date_col]).iloc[i:i+1].astype(np.float32)
-
-            # Standardize factual
-            factual_scaled = pd.DataFrame(
-                scaler.transform(query_instance),
-                columns=query_instance.columns,
-                index=query_instance.index
-            )
-            query_instances_scaled.append(factual_scaled)
-
-            # Comment: It failed as model is onnx format
+        for i in range(len(X_test)):
+            print(f"Iteration {i}")
+            instance_id = X_test.index[i]
+            query_instance = X_test.loc[X_test.index[i:i+1], feature_cols]
             dice_exp = exp.generate_counterfactuals(
                 query_instance,
                 total_CFs=1,
-                desired_range=[target_min, target_max]
+                desired_range=[self.expected_datashape.target.min_value, self.expected_datashape.target.max_value]
             )
-            
-            cf = dice_exp.cf_examples_list[0].final_cfs_df.copy()
-            cf = cf[query_instance.index]  # Ensure same feature order
+            cf_df = dice_exp.cf_examples_list[0].final_cfs_df.copy()
 
-            # Standardize counterfactual
-            counterfactual_scaled = pd.DataFrame(
-                scaler.transform(cf),
-                columns=cf.columns[:-1],
-                index=cf.index
-            )
+            # set the index of the CF to the original instance ID
+            cf_df.index = pd.Index([instance_id])
 
-            counterfactual.append(counterfactual_scaled)
+            counterfactuals.append(cf_df)
+        self.__counterfactuals = pd.concat(counterfactuals)
+        return self.__counterfactuals
 
-        query_instances_scaled = pd.concat(query_instances_scaled)
-        counterfactuals_scaled = pd.concat(counterfactual)
 
-        get_logger().info("Computation finished for counterfactuals.")
+    def get_inputs(self) -> tuple[DataShape, pd.DataFrame, pd.DataFrame, dict]:
+        exp = dice_ml.Dice(self.dice_data, self.dice_model, method="genetic")
+        mad_values: dict = exp.data_interface.get_valid_mads()
         return (
             self.expected_datashape,
-            query_instances_scaled,
-            counterfactuals_scaled
+            self.factuals,
+            self.counter_factuals,
+            mad_values,
         )
 
     def get_inputs_dateiterator(
         self,
-    ) -> Iterator[tuple[DataShape, Dataset, Dataset]]:
+    ) -> Iterator[tuple[DataShape, pd.DataFrame, pd.DataFrame, dict]]:
+        # Not sure it will be used in counterfactual metrics
         date_iterator = self.project_date_iterator
-        datashape, factuals, counterfactuals = self.get_inputs()
+        datashape, factuals, counterfactuals, mad_values = self.get_inputs()
         date_iterator.set_dataset(factuals)
-        return ((datashape, factuals, counterfactuals) for _, factuals in date_iterator)
+        return ((datashape, factuals, counterfactuals, mad_values) for _, factuals in date_iterator)
 
 
 class CounterfactualRegressionMetricRegistry(AbstractMetricRegistry):
