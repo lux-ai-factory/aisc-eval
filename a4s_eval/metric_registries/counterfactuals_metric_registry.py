@@ -14,6 +14,7 @@ from a4s_eval.metric_registries.abstract import (
     AbstractMetricRegistry,
     MetricInputGenerator,
 )
+from a4s_eval.service.api_client import post_artifact_dataset
 from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
@@ -93,28 +94,34 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
     def counter_factuals(self) -> pd.DataFrame:
         if self.__counterfactuals is not None:
             return self.__counterfactuals
-        
-        counterfactuals = []
+
         feature_cols = [f.name for f in self.expected_datashape.features]
         X_test = self.factuals
         exp = dice_ml.Dice(self.dice_data, self.dice_model, method="genetic")
-
-        for i in range(len(X_test)):
-            print(f"Iteration {i}")
-            instance_id = X_test.index[i]
-            query_instance = X_test.loc[X_test.index[i:i+1], feature_cols]
-            dice_exp = exp.generate_counterfactuals(
-                query_instance,
-                total_CFs=1,
-                desired_range=[self.expected_datashape.target.min_value, self.expected_datashape.target.max_value]
-            )
-            cf_df = dice_exp.cf_examples_list[0].final_cfs_df.copy()
-
-            # set the index of the CF to the original instance ID
-            cf_df.index = pd.Index([instance_id])
-
+        
+        # Generate all counterfactuals at once
+        dice_exp = exp.generate_counterfactuals(
+            X_test[feature_cols],
+            total_CFs=1,
+            desired_range=[self.expected_datashape.target.min_value, 
+                        self.expected_datashape.target.max_value]
+        )
+        
+        # Process results
+        counterfactuals = []
+        for i, cf_example in enumerate(dice_exp.cf_examples_list):
+            cf_df = cf_example.final_cfs_df.copy()
+            cf_df.index = pd.Index([X_test.index[i]])
             counterfactuals.append(cf_df)
+        
         self.__counterfactuals = pd.concat(counterfactuals)
+        
+        post_artifact_dataset(
+            project_pid=self.evaluation.project.pid,
+            evaluation_pid=self.eval_pid,
+            artifact_name="counter_factual",
+            df=self.__counterfactuals
+        )
         return self.__counterfactuals
 
 
