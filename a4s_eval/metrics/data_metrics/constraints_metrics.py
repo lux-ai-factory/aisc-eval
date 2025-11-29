@@ -41,7 +41,8 @@ def check_numeric_constraints(
                 name=f"Number of {name} Constraint Violations (Lower)",
                 score=float(mask_min.sum()),
                 time=date,
-                feature_pid=feature_name_pid_mapping.get(feature.name),
+                feature_pid=None,
+                description=f"{feature.name}",
             )
             measures.append(lower_metric)
 
@@ -52,7 +53,8 @@ def check_numeric_constraints(
                 name=f"Number of {name} Constraint Violations (Upper)",
                 score=float(mask_max.sum()),
                 time=date,
-                feature_pid=feature_name_pid_mapping.get(feature.name),
+                feature_pid=None,
+                description=f"{feature.name}",
             )
             measures.append(upper_metric)
 

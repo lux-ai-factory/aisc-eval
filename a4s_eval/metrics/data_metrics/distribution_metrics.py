@@ -49,7 +49,8 @@ def data_distribution_metric(
             name="Distribution Inside",
             score=float(feat_pass.sum()),
             time=date,
-            feature_pid=feature.pid,
+            feature_pid=None,
+            description=f"{feature.name}",
         )
         measures.append(in_bounds)
 
@@ -57,7 +58,8 @@ def data_distribution_metric(
             name="Distribution Outside",
             score=float((~feat_pass).sum()),
             time=date,
-            feature_pid=feature.pid,
+            feature_pid=None,
+            description=f"{feature.name}",
         )
         measures.append(out_bounds)
 

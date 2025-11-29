@@ -29,6 +29,10 @@ def data_new_category_metric(
     measures: list[Measure] = []
     total_instances: int = 0
 
+    feature_name_pid_mapping = {
+        _feature.name: _feature.pid for _feature in evaluated.shape.features
+    }
+
     # For each feature in evaluated, check if category not in reference
     # Use expected datashape features to ensure consistent processing
     for feature in datashape.features:
@@ -53,8 +57,8 @@ def data_new_category_metric(
             time=date,
             # description too long
             # description=f"feature:{feat_name}, categories:{list(new_categories)}",
-            description=f"feature:{feat_name}",
-            feature_pid=feature.pid,
+            description=f"{[int(c) for c in new_categories]}",
+            feature_pid=feature_name_pid_mapping.get(feat_name),
         )
         measures.append(diff_categories)
 
@@ -92,6 +96,10 @@ def data_missing_category_metric(
     measures: list[Measure] = []
     total_instances: int = 0
 
+    feature_name_pid_mapping = {
+        _feature.name: _feature.pid for _feature in evaluated.shape.features
+    }
+
     # For each feature in evaluated, check if category not in test
     # Use expected datashape features to ensure consistent processing
     for feature in datashape.features:
@@ -116,8 +124,8 @@ def data_missing_category_metric(
             time=date,
             # description too long
             # description=(f"feature:{feat_name}, categories:{list(new_categories)}"),
-            description=(f"feature:{feat_name}"),
-            feature_pid=feature.pid,
+            description=(f"{[int(c) for c in new_categories]}"),
+            feature_pid=feature_name_pid_mapping.get(feat_name),
         )
         measures.append(diff_categories)
 
