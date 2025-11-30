@@ -69,7 +69,7 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
     @property
     def factuals(self) -> pd.DataFrame:
         X_test = self.test_dataset.data[[f.name for f in self.expected_datashape.features]]
-        return  X_test.iloc[:2]  # limit to first 10 for faster testing
+        return  X_test.iloc[:100]  # limit to first 100 for faster testing (hardcoded)
 
     @property
     def dice_model(self) -> ort.capi.onnxruntime_inference_collection.InferenceSession:

@@ -6,15 +6,17 @@ Sliding Window:
   - Recall
   - Matthews Correlation Coefficient
   - ROCAUC
+  - Fairness
   - Balanced Accuracy
   # - Error Rate
-# - Mean Squared Error
-# - Mean Absolute Error
+  # - Mean Squared Error
+  # - Mean Absolute Error
 One Shot:
   - Confusion Matrix
+  # - "Classification Calibration metrics: ECE, MCE"
   - New Category in Test Data
   - Missing Category in Test Data
   - Reference Constraints
   - Evaluated Constraints
   - Distribution
-  - "Classification Calibration metrics: ECE, MCE"
+  # - Counterfactuals distance
