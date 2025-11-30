@@ -130,7 +130,7 @@ def classification_f1_score_metric(
 
     metric = Measure(
         name="F1",
-        score=f1_score(y_true, y_pred),
+        score=f1_score(y_true, y_pred, zero_division=0.0),
         time=date,
     )
 
@@ -164,7 +164,7 @@ def classification_recall_metric(
 
     metric = Measure(
         name="Recall",
-        score=recall_score(y_true, y_pred),
+        score=recall_score(y_true, y_pred, zero_division=0.0),
         time=date,
     )
 

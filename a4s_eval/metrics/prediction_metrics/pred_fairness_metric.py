@@ -33,6 +33,11 @@ def classification_fairness_metric(
     eval_df = dataset.data
     measures: list[Measure] = []
 
+    # Get feature name / feature pid mapping from test dataset
+    feature_name_pid_mapping = {
+        _feature.name: _feature.pid for _feature in dataset.shape.features
+    }
+
     # For each feature in datashape, check fairness
     for feature in datashape.features:
         # Only process categorical features
@@ -66,7 +71,7 @@ def classification_fairness_metric(
                     score=m.score,
                     time=date,
                     description=f"feature:{feat_name}, category:{category}",
-                    feature_pid=feature.pid,
+                    feature_pid=feature_name_pid_mapping[feat_name],
                 )
                 measures.append(fair_m)
 
