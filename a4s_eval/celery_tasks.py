@@ -14,9 +14,13 @@ from a4s_eval.tasks.metric_tasks import metric_task
 from a4s_eval.metric_registries import map_registries_to_supported_metrics
 from a4s_eval.utils.logging import get_logger
 
+from a4s_plugin_manager import Loader
+from a4s_eval.utils import env
+from a4s_eval.service.api_client import get_project
+
 logger = get_logger()
 
-plugin_loader: Loader = Loader(DEV_PLUGIN_PATH)
+plugin_loader: Loader = Loader(env.DEV_PLUGIN_PATH)
 
 @celery_app.task(bind=True)
 def run_plugins(self, project_pid: uuid.UUID):
@@ -35,6 +39,7 @@ def run_plugins(self, project_pid: uuid.UUID):
 def run_plugin(plugin_name: str, plugin_config: dict):
     plugin = plugin_loader.load(plugin_name)
     result = plugin.evaluate(plugin_config, {})
+    return result
 
 
 @celery_app.task

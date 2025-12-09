@@ -85,12 +85,6 @@ test = [
 name = "a4s-plugin-interface"
 version = "0.1.0"
 source = { editable = "../a4s-plugin-interface" }
-dependencies = [
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.12.4" }]
 
 [[package]]
 name = "a4s-plugin-manager"
