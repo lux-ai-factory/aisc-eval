@@ -16,6 +16,26 @@ from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
 
+plugin_loader: Loader = Loader(DEV_PLUGIN_PATH)
+
+@celery_app.task(bind=True)
+def run_plugins(self, project_pid: uuid.UUID):
+    logger.info(f"Running plugins for project {project_pid}")
+
+    project = get_project(project_pid)
+
+    group_task = group(run_plugin.s(plugin.name, plugin.config) for plugin in project.plugins)
+
+    group_result = group_task.apply_async()
+    group_result.save()
+
+    return {'group_id': group_result.id}
+
+@celery_app.task
+def run_plugin(plugin_name: str, plugin_config: dict):
+    plugin = plugin_loader.load(plugin_name)
+    result = plugin.evaluate(plugin_config, {})
+
 
 @celery_app.task
 def poll_and_run_evaluation() -> None:

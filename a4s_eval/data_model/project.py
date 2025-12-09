@@ -9,6 +9,10 @@ from pydantic import BaseModel
 # from a4s_eval.data_model.evaluation import Dataset
 
 
+class Plugin(BaseModel):
+    name: str
+    config: dict
+
 class Project(BaseModel):
     """Represents a machine learning project with its evaluation configuration.
 
@@ -21,3 +25,4 @@ class Project(BaseModel):
     frequency: str  # Frequency of evaluation (e.g., '1D' for daily)
     window_size: str  # Size of the rolling window for analysis (e.g., '7D' for 7 days)
     # dataset: Dataset  # The dataset being analyzed in this project
+    plugins: list[Plugin]

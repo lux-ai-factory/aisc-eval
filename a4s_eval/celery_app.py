@@ -11,7 +11,7 @@ logger.debug(f"CELERY REDIS BACKEND URL: {env.REDIS_BACKEND_URL}")
 logger.debug("=== CELERY APP INITIALIZATION ===")
 
 celery_app: Celery = Celery(
-    __name__, broker=env.CELERY_BROKER_URL, backend=env.REDIS_BACKEND_URL
+    env.CELERY_APP_NAME, broker=env.CELERY_BROKER_URL, backend=env.REDIS_BACKEND_URL
 )
 
 logger.debug("=== CELERY APP CREATED ===")

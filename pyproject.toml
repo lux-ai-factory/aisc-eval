@@ -19,8 +19,9 @@ dependencies = [
     "onnx>=1.17.0,<2",
     "skl2onnx>=1.18.0,<2",
     "onnxruntime>=1.21.0,<2",
-    "fastapi[standard]>=0.115.12",
     "celery[redis]>=5.5.3",
+    "flower>=2.0.1",
+    "a4s-plugin-manager",
 ]
 
 [dependency-groups]
@@ -47,6 +48,9 @@ test = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+a4s-plugin-manager = { path = "../a4s-plugin-manager", editable = true }
 
 [tool.isort]
 multi_line_output = 3

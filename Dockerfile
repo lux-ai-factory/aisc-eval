@@ -75,12 +75,8 @@ RUN mkdir -p /app/data /app/logs && \
 # Switch to non-root user
 USER appuser
 
-# Make startup scripts executable
-RUN chmod +x /app/tasks/entrypoint.sh
-
-
-CMD ["uvicorn", "a4s_eval.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["celery", "-A", "a4s_eval.celery_worker", "worker", "--loglevel=debug"]
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
+  CMD celery --app a4s_eval.celery_app inspect ping -d "celery@$$HOSTNAME"
