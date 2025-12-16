@@ -13,6 +13,8 @@ from a4s_eval.metrics.prediction_metrics.perf_metrics import (
     classification_recall_metric,
     classification_roc_auc_metric,
     empty_model_metric,
+    classification_log_loss_metric,
+    classification_brier_score_loss_metric,
 )
 
 
@@ -162,4 +164,36 @@ def test_roc_auc_metric(
     assert len(metrics) == 1
     assert metrics[0].name == "ROCAUC"
     assert isinstance(metrics[0].score, float)
+    assert isinstance(metrics[0].time, datetime.datetime)
+
+
+def test_log_loss_metric(
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
+):
+    metrics = classification_log_loss_metric(
+        data_shape, ref_model, test_dataset, y_pred_proba
+    )
+    assert len(metrics) == 1
+    assert metrics[0].name == "log_loss"
+    assert isinstance(metrics[0].score, float)
+    print(metrics[0].score)
+    assert isinstance(metrics[0].time, datetime.datetime)
+
+
+def test_brier_score_loss_metric(
+    data_shape: DataShape,
+    ref_model: Model,
+    test_dataset: Dataset,
+    y_pred_proba: np.ndarray,
+):
+    metrics = classification_brier_score_loss_metric(
+        data_shape, ref_model, test_dataset, y_pred_proba
+    )
+    assert len(metrics) == 1
+    assert metrics[0].name == "brier_score_loss"
+    assert isinstance(metrics[0].score, float)
+    print(metrics[0].score)
     assert isinstance(metrics[0].time, datetime.datetime)
