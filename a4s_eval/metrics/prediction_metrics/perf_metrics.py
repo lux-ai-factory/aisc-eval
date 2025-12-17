@@ -9,6 +9,8 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     roc_auc_score,
+    log_loss,
+    brier_score_loss,
 )
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
@@ -198,6 +200,40 @@ def classification_roc_auc_metric(
     metric = Measure(
         name="ROCAUC",
         score=robust_roc_auc_score(y_true, y_pred_proba),
+        time=date,
+    )
+
+    return [metric]
+
+
+@prediction_metric(name="log_loss")
+def classification_log_loss_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    metric = Measure(
+        name="log_loss",
+        score=log_loss(y_true, y_pred),
+        time=date,
+    )
+
+    return [metric]
+
+
+@prediction_metric(name="brier_score_loss")
+def classification_brier_score_loss_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    metric = Measure(
+        name="brier_score_loss",
+        score=brier_score_loss(y_true, y_pred),
         time=date,
     )
 
