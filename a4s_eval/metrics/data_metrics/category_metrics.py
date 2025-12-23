@@ -57,7 +57,7 @@ def data_new_category_metric(
             time=date,
             # description too long
             # description=f"feature:{feat_name}, categories:{list(new_categories)}",
-            description=f"{[int(c) for c in new_categories]}",
+            description=f"{[c for c in new_categories]}",
             feature_pid=feature_name_pid_mapping.get(feat_name),
         )
         measures.append(diff_categories)
@@ -124,7 +124,7 @@ def data_missing_category_metric(
             time=date,
             # description too long
             # description=(f"feature:{feat_name}, categories:{list(new_categories)}"),
-            description=(f"{[int(c) for c in new_categories]}"),
+            description=(f"{[c for c in new_categories]}"),
             feature_pid=feature_name_pid_mapping.get(feat_name),
         )
         measures.append(diff_categories)
