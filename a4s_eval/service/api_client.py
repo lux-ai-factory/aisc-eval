@@ -224,18 +224,16 @@ def post_artifact_dataset(
     df: pd.DataFrame,
 ) -> requests.Response:
     resp = requests.post(
-        f"{API_URL_PREFIX}/projects/{project_pid}/datasets", 
-        # Naming convention for artifact datasets, it should be aligned with front end 
-        json={"name": f"artifact/{evaluation_pid}/{artifact_name}"}
+        f"{API_URL_PREFIX}/projects/{project_pid}/datasets",
+        # Naming convention for artifact datasets, it should be aligned with front end
+        json={"name": f"artifact/{evaluation_pid}/{artifact_name}"},
     )
     resp.raise_for_status()
     # Write Parquet to an in-memory buffer
     buffer = BytesIO()
     df.to_parquet(buffer, index=False)
     buffer.seek(0)
-    files = {
-        "file": ("data.parquet", buffer, "application/octet-stream")
-    }
+    files = {"file": ("data.parquet", buffer, "application/octet-stream")}
     resp_df = requests.put(
         f"{API_URL_PREFIX}/datasets/{resp.json()['pid']}/data",
         files=files,

@@ -117,5 +117,7 @@ def generate_evaluation_signature(evaluation_pid: uuid.UUID) -> Signature:
     ]
 
     # --- Combine tasks into a group with finalization ---
-    workflow = group(task_signatures_SW + task_signatures_OS) | finalize_evaluation.si(evaluation_pid)
+    workflow = group(task_signatures_SW + task_signatures_OS) | finalize_evaluation.si(
+        evaluation_pid
+    )
     return workflow

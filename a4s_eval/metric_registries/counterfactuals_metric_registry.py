@@ -26,17 +26,19 @@ class ONNXWrapper:
     def predict(self, X: Dataset) -> np.ndarray:
         if isinstance(X, pd.DataFrame):
             X = X.astype(np.float32).values
-        else: 
-            raise TypeError(f"Expected X to be a pandas DataFrame, but got {type(X).__name__}")
+        else:
+            raise TypeError(
+                f"Expected X to be a pandas DataFrame, but got {type(X).__name__}"
+            )
 
         # Run ONNX inference
         pred = self.session.run([self.label_name], {self.input_name: X})[0]
 
         # flatten ONNX output so DiCE returns scalars, not lists
-        pred = pred.reshape(-1)  
+        pred = pred.reshape(-1)
 
         return pred
-    
+
 
 class CounterfactualMetric(Protocol):
     def __call__(
@@ -65,27 +67,37 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
 
     @property
     def factuals(self) -> pd.DataFrame:
-        X_test = self.test_dataset.data[[f.name for f in self.expected_datashape.features]]
-        return  X_test.iloc[:100]  # limit to first 100 for faster testing (hardcoded)
+        X_test = self.test_dataset.data[
+            [f.name for f in self.expected_datashape.features]
+        ]
+        return X_test.iloc[:100]  # limit to first 100 for faster testing (hardcoded)
 
     @property
     def dice_model(self) -> ort.capi.onnxruntime_inference_collection.InferenceSession:
         model_wrapper = ONNXWrapper(self.model_onnx_session)
-        dice_model = dice_ml.Model(model=model_wrapper, backend="sklearn", model_type="regressor")
+        dice_model = dice_ml.Model(
+            model=model_wrapper, backend="sklearn", model_type="regressor"
+        )
         return dice_model
 
     @property
     def dice_data(self) -> dice_ml.Data:
-        numeric_columns = [feature.name for feature in self.expected_datashape.features if feature.feature_type == FeatureType.FLOAT]
-        X_train = self.train_dataset.data[[feature.name for feature in self.expected_datashape.features] + [self.expected_datashape.target.name]]
+        numeric_columns = [
+            feature.name
+            for feature in self.expected_datashape.features
+            if feature.feature_type == FeatureType.FLOAT
+        ]
+        X_train = self.train_dataset.data[
+            [feature.name for feature in self.expected_datashape.features]
+            + [self.expected_datashape.target.name]
+        ]
 
         dice_data = dice_ml.Data(
             dataframe=X_train,
             continuous_features=list(numeric_columns),
-            outcome_name=self.expected_datashape.target.name
+            outcome_name=self.expected_datashape.target.name,
         )
         return dice_data
-
 
     @property
     def counter_factuals(self) -> pd.DataFrame:
@@ -95,32 +107,33 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
         feature_cols = [f.name for f in self.expected_datashape.features]
         X_test = self.factuals
         exp = dice_ml.Dice(self.dice_data, self.dice_model, method="genetic")
-        
+
         # Generate all counterfactuals at once
         dice_exp = exp.generate_counterfactuals(
             X_test[feature_cols],
             total_CFs=1,
-            desired_range=[self.expected_datashape.target.min_value, 
-                        self.expected_datashape.target.max_value]
+            desired_range=[
+                self.expected_datashape.target.min_value,
+                self.expected_datashape.target.max_value,
+            ],
         )
-        
+
         # Process results
         counterfactuals = []
         for i, cf_example in enumerate(dice_exp.cf_examples_list):
             cf_df = cf_example.final_cfs_df.copy()
             cf_df.index = pd.Index([X_test.index[i]])
             counterfactuals.append(cf_df)
-        
+
         self.__counterfactuals = pd.concat(counterfactuals)
-        
+
         post_artifact_dataset(
             project_pid=self.evaluation.project.pid,
             evaluation_pid=self.eval_pid,
             artifact_name="counter_factual",
-            df=self.__counterfactuals
+            df=self.__counterfactuals,
         )
         return self.__counterfactuals
-
 
     def get_inputs(self) -> tuple[DataShape, pd.DataFrame, pd.DataFrame, dict]:
         exp = dice_ml.Dice(self.dice_data, self.dice_model, method="genetic")
@@ -139,7 +152,10 @@ class CounterfactualsInputGenerator(MetricInputGenerator):
         date_iterator = self.project_date_iterator
         datashape, factuals, counterfactuals, mad_values = self.get_inputs()
         date_iterator.set_dataset(factuals)
-        return ((datashape, factuals, counterfactuals, mad_values) for _, factuals in date_iterator)
+        return (
+            (datashape, factuals, counterfactuals, mad_values)
+            for _, factuals in date_iterator
+        )
 
 
 class CounterfactualRegressionMetricRegistry(AbstractMetricRegistry):

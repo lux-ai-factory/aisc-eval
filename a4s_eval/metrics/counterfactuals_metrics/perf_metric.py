@@ -3,19 +3,30 @@ import pandas as pd
 
 from a4s_eval.data_model.evaluation import DataShape, FeatureType
 from a4s_eval.data_model.measure import Measure
-from a4s_eval.metric_registries.counterfactuals_metric_registry import counterfactual_metric
+from a4s_eval.metric_registries.counterfactuals_metric_registry import (
+    counterfactual_metric,
+)
 from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
 
+
 @counterfactual_metric(name="Empty counterfactual metric")
 def empty_counterfactual_metric(
-    expected_datashape: DataShape, factuals: pd.DataFrame, counterfactuals: pd.DataFrame, mad_values: dict
+    expected_datashape: DataShape,
+    factuals: pd.DataFrame,
+    counterfactuals: pd.DataFrame,
+    mad_values: dict,
 ) -> list[Measure]:
     return []
 
 
-def numerical_distance(data_shape: DataShape, factual: pd.Series, counterfactual: pd.Series, mad_values: dict) -> float:
+def numerical_distance(
+    data_shape: DataShape,
+    factual: pd.Series,
+    counterfactual: pd.Series,
+    mad_values: dict,
+) -> float:
     """Calculate Euclidean distance between two numerical data points.
 
     Args:
@@ -36,7 +47,6 @@ def numerical_distance(data_shape: DataShape, factual: pd.Series, counterfactual
 
     logger.debug(f"Euclidean distance computed: {distance}")
     return distance
-
 
 
 def feature_distance_test(
@@ -61,7 +71,9 @@ def feature_distance_test(
         ValueError: If feature type is not supported
     """
 
-    score = numerical_distance(expected_datashape, factuals, counterfactuals, mad_values)
+    score = numerical_distance(
+        expected_datashape, factuals, counterfactuals, mad_values
+    )
     metric = Measure(
         name="euclidean",
         score=score,
@@ -70,12 +82,13 @@ def feature_distance_test(
     logger.debug(f"Created numerical distance metric: {metric.name} = {metric.score}")
     return metric
 
-    
-
 
 @counterfactual_metric(name="Counterfactuals distance")
 def counterfactual_distance_metric(
-    expected_datashape: DataShape, factuals: pd.DataFrame, counterfactuals: pd.DataFrame, mad_values: dict
+    expected_datashape: DataShape,
+    factuals: pd.DataFrame,
+    counterfactuals: pd.DataFrame,
+    mad_values: dict,
 ) -> list[Measure]:
     """Calculate drift for all features between reference and evaluated datasets.
 
@@ -91,7 +104,6 @@ def counterfactual_distance_metric(
         list[Measure]: List of drift metrics for each feature
     """
 
-
     # Get the current date from the evaluated dataset
     date = datetime.datetime.now()
     logger.debug(f"Evaluation date: {date}")
@@ -101,18 +113,21 @@ def counterfactual_distance_metric(
 
     # Identify feature types
     numeric_feats = [
-        f.name for f in expected_datashape.features 
+        f.name
+        for f in expected_datashape.features
         if f.feature_type == FeatureType.INTEGER or f.feature_type == FeatureType.FLOAT
     ]
     # TODO: Add categorical distance computation
-    
+
     if numeric_feats:
         # Loop through all features in the project expected datashape
         for idx in factuals.index:
             factual_row = factuals.loc[idx]
             counterfactual_row = counterfactuals.loc[idx]
 
-            metric = feature_distance_test(expected_datashape, factual_row, counterfactual_row, mad_values, date)
+            metric = feature_distance_test(
+                expected_datashape, factual_row, counterfactual_row, mad_values, date
+            )
 
             # Set correct feature pid (from test dataset)
             metrics.append(metric)
@@ -120,6 +135,6 @@ def counterfactual_distance_metric(
     else:
         logger.error("Unsupported feature types")
         raise ValueError("Non-numerical feature type not supported")
-    
+
     logger.debug(f"Distance evaluation completed - Generated {len(metrics)} metrics")
     return metrics

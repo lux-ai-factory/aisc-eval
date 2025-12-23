@@ -37,7 +37,6 @@ def metric_task(
     get_logger().info(f"Metrics posted successfully, status: {response.status_code}.")
 
 
-
 @celery_app.task
 def metric_one_shot_task(
     evaluation_pid: uuid.UUID, registry_name: str, metric_name_list: list[str]
@@ -51,7 +50,6 @@ def metric_one_shot_task(
     input_generator = InputGenerator(evaluation_pid)
     inputs = input_generator.get_inputs()
     measures: list[Measure] = []
-
 
     for metric_name in metric_name_list:
         get_logger().info(f"Running metric function: {metric_name}")

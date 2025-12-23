@@ -76,7 +76,7 @@ def data_shape(X_train: pd.DataFrame) -> DataShape:
                 max_value=float(X_train[col].max()),
             )
             features.append(feature)
-    
+
     date = Feature(
         pid=uuid.uuid4(),
         name="date",
@@ -115,7 +115,9 @@ def ref_dataset(data_shape: DataShape, X_train: pd.DataFrame) -> Dataset:
 @pytest.fixture(scope="module")
 def session(X_train: pd.DataFrame, data_shape: DataShape) -> ort.InferenceSession:
     clr = RandomForestRegressor()
-    clr.fit(X_train[[f.name for f in data_shape.features]], X_train[data_shape.target.name])
+    clr.fit(
+        X_train[[f.name for f in data_shape.features]], X_train[data_shape.target.name]
+    )
 
     initial_type = [("float_input", FloatTensorType([None, len(data_shape.features)]))]
     onx = convert_sklearn(clr, initial_types=initial_type, target_opset=12)
@@ -125,7 +127,9 @@ def session(X_train: pd.DataFrame, data_shape: DataShape) -> ort.InferenceSessio
 
 
 @pytest.fixture(scope="module")
-def y_pred(X_test: Dataset, data_shape: DataShape, session: ort.InferenceSession) -> np.ndarray:
+def y_pred(
+    X_test: Dataset, data_shape: DataShape, session: ort.InferenceSession
+) -> np.ndarray:
     input_name = session.get_inputs()[0].name
     label_name = session.get_outputs()[0].name
     pred_onx = session.run(
@@ -134,7 +138,7 @@ def y_pred(X_test: Dataset, data_shape: DataShape, session: ort.InferenceSession
             input_name: X_test[[f.name for f in data_shape.features]]
             .astype(np.float32)
             .to_numpy()
-        }
+        },
     )[0]
     y_pred = np.array([d.item() for d in pred_onx])
     return y_pred
@@ -142,13 +146,17 @@ def y_pred(X_test: Dataset, data_shape: DataShape, session: ort.InferenceSession
 
 @pytest.fixture(scope="module")
 def dice_data(X_train: pd.DataFrame, data_shape: DataShape) -> dice_ml.Data:
-    numeric_columns = [feature.name for feature in data_shape.features if feature.feature_type == FeatureType.FLOAT]
+    numeric_columns = [
+        feature.name
+        for feature in data_shape.features
+        if feature.feature_type == FeatureType.FLOAT
+    ]
     X_train = X_train.drop("col_timestamp", axis=1)
 
     dice_data = dice_ml.Data(
         dataframe=X_train,
         continuous_features=list(numeric_columns),
-        outcome_name=data_shape.target.name
+        outcome_name=data_shape.target.name,
     )
     return dice_data
 
@@ -156,22 +164,22 @@ def dice_data(X_train: pd.DataFrame, data_shape: DataShape) -> dice_ml.Data:
 @pytest.fixture(scope="module")
 def dice_model(session: ort.InferenceSession) -> dice_ml.Model:
     model_wrapper = ONNXWrapper(session)
-    dice_model = dice_ml.Model(model=model_wrapper, backend="sklearn", model_type="regressor")
+    dice_model = dice_ml.Model(
+        model=model_wrapper, backend="sklearn", model_type="regressor"
+    )
     return dice_model
 
 
 @pytest.fixture(scope="module")
-def exp(
-    dice_data: dice_ml.Data,
-    dice_model: dice_ml.Model
-) -> dice_ml.Dice:
+def exp(dice_data: dice_ml.Data, dice_model: dice_ml.Model) -> dice_ml.Dice:
     exp = dice_ml.Dice(dice_data, dice_model, method="genetic")
     return exp
 
 
 @pytest.fixture(scope="module")
-def factuals(data_shape:DataShape, X_test: pd.DataFrame) -> pd.DataFrame:
+def factuals(data_shape: DataShape, X_test: pd.DataFrame) -> pd.DataFrame:
     return X_test[[f.name for f in data_shape.features]]
+
 
 @pytest.fixture(scope="module")
 def counter_factuals(
@@ -183,11 +191,11 @@ def counter_factuals(
     feature_cols = [f.name for f in data_shape.features]
     for i in range(len(X_test)):
         instance_id = X_test.index[i]
-        query_instance = X_test.loc[X_test.index[i:i+1], feature_cols]
+        query_instance = X_test.loc[X_test.index[i : i + 1], feature_cols]
         dice_exp = exp.generate_counterfactuals(
             query_instance,
             total_CFs=1,
-            desired_range=[data_shape.target.min_value, data_shape.target.max_value]
+            desired_range=[data_shape.target.min_value, data_shape.target.max_value],
         )
         cf_df = dice_exp.cf_examples_list[0].final_cfs_df.copy()
 
@@ -195,7 +203,7 @@ def counter_factuals(
         cf_df.index = pd.Index([instance_id])
 
         counterfactuals.append(cf_df)
-    
+
     # print(counterfactuals)
     return pd.concat(counterfactuals)
 
@@ -213,16 +221,16 @@ def mad_values(exp: dice_ml.Dice) -> dict:
     return mad
 
 
-
 def test_smoke(
     factuals: pd.DataFrame,
     data_shape: DataShape,
     counter_factuals: pd.DataFrame,
     mad_values: dict,
 ) -> None:
-    metrics = empty_counterfactual_metric(data_shape, factuals, counter_factuals, mad_values)
+    metrics = empty_counterfactual_metric(
+        data_shape, factuals, counter_factuals, mad_values
+    )
     assert len(metrics) == 0
-
 
 
 def test_counterfactual_distance_metric(
@@ -232,14 +240,11 @@ def test_counterfactual_distance_metric(
     mad_values: dict,
 ) -> None:
     metrics = counterfactual_distance_metric(
-        data_shape,
-        factuals,
-        counter_factuals,
-        mad_values
+        data_shape, factuals, counter_factuals, mad_values
     )
 
     for metric in metrics:
-        assert metric.name == "euclidean" # TODO: change to Manhattan
+        assert metric.name == "euclidean"  # TODO: change to Manhattan
         assert metric.score >= 0
         print(f"Counterfactual distance metric score: {metric.score}")
 
