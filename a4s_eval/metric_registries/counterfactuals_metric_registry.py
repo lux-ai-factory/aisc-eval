@@ -1,12 +1,9 @@
 from typing import Callable, Iterator, Protocol
-from typing import List
 
 import pandas as pd
 import numpy as np
 import onnxruntime as ort
-from sklearn.preprocessing import StandardScaler
 import dice_ml
-from dice_ml import Dice
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, FeatureType, Model
 from a4s_eval.data_model.measure import Measure

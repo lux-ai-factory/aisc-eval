@@ -1,9 +1,7 @@
 import datetime
-import numpy as np
 import pandas as pd
-from scipy.spatial.distance import euclidean, jensenshannon
 
-from a4s_eval.data_model.evaluation import Dataset, DataShape, Model, FeatureType
+from a4s_eval.data_model.evaluation import DataShape, FeatureType
 from a4s_eval.data_model.measure import Measure
 from a4s_eval.metric_registries.counterfactuals_metric_registry import counterfactual_metric
 from a4s_eval.utils.logging import get_logger
@@ -120,8 +118,8 @@ def counterfactual_distance_metric(
             metrics.append(metric)
         print(metrics)
     else:
-        logger.error(f"Unsupported feature types")
-        raise ValueError(f"Non-numerical feature type not supported")
+        logger.error("Unsupported feature types")
+        raise ValueError("Non-numerical feature type not supported")
     
     logger.debug(f"Distance evaluation completed - Generated {len(metrics)} metrics")
     return metrics

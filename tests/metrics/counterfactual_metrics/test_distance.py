@@ -220,8 +220,7 @@ def test_smoke(
     counter_factuals: pd.DataFrame,
     mad_values: dict,
 ) -> None:
-    # metrics = empty_counterfactual_metric(data_shape, factuals, counter_factuals, mad_values)
-    metrics = []
+    metrics = empty_counterfactual_metric(data_shape, factuals, counter_factuals, mad_values)
     assert len(metrics) == 0
 
 

@@ -17,9 +17,9 @@ def check_numeric_constraints(
     measures: list[Measure] = []
 
     # Get feature name / feature pid mapping from test dataset
-    feature_name_pid_mapping = {
-        _feature.name: _feature.pid for _feature in dataset.shape.features
-    }
+    # feature_name_pid_mapping = {
+    #     _feature.name: _feature.pid for _feature in dataset.shape.features
+    # }
 
     # For each feature in datashape, check if dataset meets constraints
     for feature in datashape.features:
