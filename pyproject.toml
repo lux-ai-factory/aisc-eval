@@ -22,6 +22,7 @@ dependencies = [
     "fastapi[standard]>=0.115.12",
     "celery[redis]>=5.5.3",
     "dice-ml>=0.12",
+    "flower>=2.0.1",
 ]
 
 [dependency-groups]
