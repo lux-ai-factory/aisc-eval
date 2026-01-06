@@ -2,11 +2,15 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
+    balanced_accuracy_score,
+    confusion_matrix,
     f1_score,
     matthews_corrcoef,
     precision_score,
     recall_score,
     roc_auc_score,
+    log_loss,
+    brier_score_loss,
 )
 
 from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
@@ -55,6 +59,69 @@ def classification_accuracy_metric(
     return [metric]
 
 
+@prediction_metric(name="Error Rate")
+def classification_error_rate_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    accuracy_metric: Measure = classification_accuracy_metric(
+        datashape, model, dataset, y_pred_proba
+    )[0]
+
+    metric = Measure(
+        name="Error Rate",
+        score=1 - accuracy_metric.score,
+        time=accuracy_metric.time,
+    )
+
+    return [metric]
+
+
+@prediction_metric(name="Balanced Accuracy")
+def classification_balanced_accuracy_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    metric = Measure(
+        name="Balanced Accuracy",
+        score=balanced_accuracy_score(y_true, y_pred),
+        time=date,
+    )
+
+    return [metric]
+
+
+@prediction_metric(name="Confusion Matrix")
+def classification_confusion_matrix_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    metrics: list[Measure] = []
+
+    matrix = (confusion_matrix(y_true, y_pred),)
+    matrix = matrix[0]
+    max_i, max_j = matrix.shape
+
+    print(matrix)
+
+    for i in range(max_i):
+        for j in range(max_j):
+            metric = Measure(
+                name="Confusion Matrix",
+                description=f"({i},{j})/({max_i},{max_j})",
+                score=matrix[i][j],
+                time=date,
+            )
+            metrics.append(metric)
+
+    return metrics
+
+
 @prediction_metric(name="F1 Score")
 def classification_f1_score_metric(
     datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
@@ -65,7 +132,7 @@ def classification_f1_score_metric(
 
     metric = Measure(
         name="F1",
-        score=f1_score(y_true, y_pred),
+        score=f1_score(y_true, y_pred, zero_division=0.0),
         time=date,
     )
 
@@ -99,7 +166,7 @@ def classification_recall_metric(
 
     metric = Measure(
         name="Recall",
-        score=recall_score(y_true, y_pred),
+        score=recall_score(y_true, y_pred, zero_division=0.0),
         time=date,
     )
 
@@ -133,6 +200,40 @@ def classification_roc_auc_metric(
     metric = Measure(
         name="ROCAUC",
         score=robust_roc_auc_score(y_true, y_pred_proba),
+        time=date,
+    )
+
+    return [metric]
+
+
+@prediction_metric(name="log_loss")
+def classification_log_loss_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    metric = Measure(
+        name="log_loss",
+        score=log_loss(y_true, y_pred),
+        time=date,
+    )
+
+    return [metric]
+
+
+@prediction_metric(name="brier_score_loss")
+def classification_brier_score_loss_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    metric = Measure(
+        name="brier_score_loss",
+        score=brier_score_loss(y_true, y_pred),
         time=date,
     )
 

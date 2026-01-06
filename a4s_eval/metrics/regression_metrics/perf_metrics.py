@@ -1,0 +1,54 @@
+import numpy as np
+import pandas as pd
+
+from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
+from a4s_eval.data_model.measure import Measure
+from a4s_eval.metric_registries.regression_metric_registry import regression_metric
+
+
+@regression_metric(name="Empty regression metric")
+def empty_regression_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred: np.ndarray
+) -> list[Measure]:
+    return []
+
+
+@regression_metric(name="Simple demo metric")
+def simple_demo_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+
+    # Instantiate Measure object(s) to return
+    measure = Measure(name="score_mean_value_metric", score=y_pred.mean(), time=date)
+    print(measure)
+
+    return [measure]
+
+
+@regression_metric(name="Mean Squared Error")
+def mean_squared_error_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+
+    # Instantiate Measure object(s) to return
+    measure = Measure(name="MSE", score=np.mean((y_true - y_pred) ** 2), time=date)
+    print(measure)
+
+    return [measure]
+
+
+@regression_metric(name="Mean Absolute Error")
+def mean_absolute_error_metric(
+    datashape: DataShape, model: Model, dataset: Dataset, y_pred: np.ndarray
+) -> list[Measure]:
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+    y_true = dataset.data[datashape.target.name].to_numpy()
+
+    # Instantiate Measure object(s) to return
+    measure = Measure(name="MAE", score=np.mean(np.abs(y_true - y_pred)), time=date)
+    print(measure)
+
+    return [measure]

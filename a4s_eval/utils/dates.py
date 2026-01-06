@@ -174,6 +174,10 @@ class ProjectDateIterator:
             (self.df[self.date_feature] >= start) & (self.df[self.date_feature] < end)
         ].copy()
 
+        if temp_df.empty:
+            # If the filtered DataFrame is empty, skip to the next batch
+            return self.__next__()
+
         # Create a dummy Dataset object for the batch
         dataset = Dataset(pid=uuid.uuid4(), shape=self.eval_datashape, data=temp_df)
         return end, dataset
