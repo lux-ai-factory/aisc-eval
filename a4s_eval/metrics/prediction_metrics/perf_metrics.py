@@ -41,7 +41,7 @@ def empty_model_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     return []
 
@@ -52,18 +52,21 @@ def classification_accuracy_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    metric = Measure(
-        name="Accuracy",
-        score=accuracy_score(y_true, y_pred),
-        time=date,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="Accuracy",
+            score=accuracy_score(y_true, y_pred),
+            time=date,
+        )
+    ]
 
 
 @prediction_metric(name="Error Rate")
@@ -72,19 +75,22 @@ def classification_error_rate_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     accuracy_metric: Measure = classification_accuracy_metric(
         datashape, model, dataset, y_pred_proba, y_pred
     )[0]
 
-    metric = Measure(
-        name="Error Rate",
-        score=1 - accuracy_metric.score,
-        time=accuracy_metric.time,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="Error Rate",
+            score=1 - accuracy_metric.score,
+            time=accuracy_metric.time,
+        )
+    ]
 
 
 @prediction_metric(name="Balanced Accuracy")
@@ -93,18 +99,21 @@ def classification_balanced_accuracy_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    metric = Measure(
-        name="Balanced Accuracy",
-        score=balanced_accuracy_score(y_true, y_pred),
-        time=date,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="Balanced Accuracy",
+            score=balanced_accuracy_score(y_true, y_pred),
+            time=date,
+        )
+    ]
 
 
 @prediction_metric(name="Confusion Matrix")
@@ -113,10 +122,13 @@ def classification_confusion_matrix_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
+
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
     matrix = confusion_matrix(y_true, y_pred)
     max_i, max_j = matrix.shape
@@ -139,10 +151,13 @@ def classification_f1_score_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
+
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
     return [
         Measure(
@@ -159,18 +174,21 @@ def classification_precision_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    metric = Measure(
-        name="Precision",
-        score=precision_score(y_true, y_pred, zero_division=0.0),
-        time=date,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="Precision",
+            score=precision_score(y_true, y_pred, zero_division=0.0),
+            time=date,
+        )
+    ]
 
 
 @prediction_metric(name="Recall")
@@ -179,18 +197,21 @@ def classification_recall_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    metric = Measure(
-        name="Recall",
-        score=recall_score(y_true, y_pred, zero_division=0.0),
-        time=date,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="Recall",
+            score=recall_score(y_true, y_pred, zero_division=0.0),
+            time=date,
+        )
+    ]
 
 
 @prediction_metric(name="Matthews Correlation Coefficient")
@@ -199,18 +220,21 @@ def classification_matthews_corrcoef_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    metric = Measure(
-        name="MCC",
-        score=matthews_corrcoef(y_true, y_pred),
-        time=date,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="MCC",
+            score=matthews_corrcoef(y_true, y_pred),
+            time=date,
+        )
+    ]
 
 
 @prediction_metric(name="ROCAUC")
@@ -219,18 +243,21 @@ def classification_roc_auc_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    metric = Measure(
-        name="ROCAUC",
-        score=robust_roc_auc_score(y_true, y_pred_proba),
-        time=date,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="ROCAUC",
+            score=robust_roc_auc_score(y_true, y_pred_proba),
+            time=date,
+        )
+    ]
 
 
 @prediction_metric(name="log_loss")
@@ -239,18 +266,21 @@ def classification_log_loss_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    metric = Measure(
-        name="log_loss",
-        score=log_loss(y_true, y_pred),
-        time=date,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="log_loss",
+            score=log_loss(y_true, y_pred),
+            time=date,
+        )
+    ]
 
 
 @prediction_metric(name="brier_score_loss")
@@ -259,15 +289,18 @@ def classification_brier_score_loss_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred: np.ndarray | None = None,
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    metric = Measure(
-        name="brier_score_loss",
-        score=brier_score_loss(y_true, y_pred),
-        time=date,
-    )
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
 
-    return [metric]
+    return [
+        Measure(
+            name="brier_score_loss",
+            score=brier_score_loss(y_true, y_pred),
+            time=date,
+        )
+    ]
