@@ -37,7 +37,11 @@ def robust_roc_auc_score(y_true: np.ndarray, y_pred_proba: np.ndarray) -> np.nda
 
 @prediction_metric(name="Empty model pred proba metric")
 def empty_model_metric(
-    datashape: DataShape, model: Model, dataset: Dataset, y_pred_proba: np.ndarray
+    datashape: DataShape,
+    model: Model,
+    dataset: Dataset,
+    y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ) -> list[Measure]:
     return []
 
@@ -71,7 +75,7 @@ def classification_error_rate_metric(
     y_pred: np.ndarray,
 ) -> list[Measure]:
     accuracy_metric: Measure = classification_accuracy_metric(
-        datashape, model, dataset, y_pred_proba
+        datashape, model, dataset, y_pred_proba, y_pred
     )[0]
 
     metric = Measure(
