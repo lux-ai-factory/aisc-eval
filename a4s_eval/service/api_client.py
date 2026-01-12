@@ -118,6 +118,19 @@ def get_dataset_data(dataset_pid: uuid.UUID) -> pd.DataFrame:
         raise ValueError("Unsupported dataset format")
 
 
+def get_dataset_file_content(file_name: str) -> bytes:
+    resp = requests.get(f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True)
+    resp.raise_for_status()
+
+    return resp.content
+
+def get_model_file_content(file_name: str) -> bytes:
+    resp = requests.get(f"{API_URL_PREFIX}/files/model/{file_name}", stream=True)
+    resp.raise_for_status()
+
+    return resp.content
+
+
 def get_onnx_model(
     model_pid: uuid.UUID,
 ) -> ort.capi.onnxruntime_inference_collection.InferenceSession:
@@ -133,7 +146,7 @@ def get_onnx_model(
 
 def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
     resp = requests.get(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,dataset,model,datashape"
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,dataset,model,datashape,plugin"
     )
     resp.raise_for_status()
     return resp.json()

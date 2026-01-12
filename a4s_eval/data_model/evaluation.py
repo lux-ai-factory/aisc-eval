@@ -6,6 +6,8 @@ import pandas as pd
 from onnxruntime.capi.onnxruntime_inference_collection import InferenceSession
 from pydantic import BaseModel, ConfigDict, field_serializer
 
+from a4s_eval.data_model.project import Plugin
+
 
 class FeatureType(str, enum.Enum):
     """Enumeration of supported feature data types.
@@ -96,6 +98,7 @@ class Project(BaseModel):
 
 class Evaluation(BaseModel):
     pid: uuid.UUID
-    dataset: Dataset
-    model: Model
+    dataset: Dataset | None
+    model: Model | None
     project: Project
+    evaluation_plugins: list[Plugin]
