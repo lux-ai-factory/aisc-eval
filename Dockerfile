@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     procps \
     netcat-openbsd \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Create application user for security
@@ -40,6 +41,10 @@ FROM base AS builder
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
 WORKDIR /app
+
+RUN --mount=type=secret,id=git_pat \
+    export GITHUB_TOKEN=$(cat /run/secrets/git_pat) && \
+    git config --global url."https://$GITHUB_TOKEN@github.com/".insteadOf https://github.com/
 
 # Install production dependencies with caching
 RUN --mount=type=cache,target=/root/.cache/uv \
