@@ -58,8 +58,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-a4s-plugin-manager = { path = "../a4s-plugin-manager", editable = true }
-a4s-plugin-interface = { path = "../a4s-plugin-interface", editable = true }
+a4s-plugin-manager = { git = "https://github.com/lux-ai-factory/a4s-plugin-manager.git" }
 
 
 [tool.isort]
