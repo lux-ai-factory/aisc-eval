@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from scipy import stats
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
@@ -278,6 +279,28 @@ def classification_log_loss_metric(
         Measure(
             name="log_loss",
             score=log_loss(y_true, y_pred),
+            time=date,
+        )
+    ]
+
+
+@prediction_metric(name="Average Entropy")
+def classification_average_entropy_metric(
+    datashape: DataShape,
+    model: Model,
+    dataset: Dataset,
+    y_pred_proba: np.ndarray,
+    y_pred: np.ndarray | None = None,
+) -> list[Measure]:
+    """
+    The entropy is used as a measure of (total) uncertainty
+    """
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
+
+    return [
+        Measure(
+            name="average_entropy",
+            score=stats.entropy(y_pred_proba, axis=1, base=2).mean(),
             time=date,
         )
     ]
