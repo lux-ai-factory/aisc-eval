@@ -20,6 +20,7 @@ class ModelPredProbaMetric(Protocol):
         model: Model,
         dataset: Dataset,
         y_pred_proba: np.ndarray,
+        y_pred: np.ndarray | None = None,
     ) -> list[Measure]:
         """Run a specific model evaluation.
 
@@ -27,6 +28,7 @@ class ModelPredProbaMetric(Protocol):
             model: The model to run the evaluation.
             dataset: The dataset to evaluate.
             y_pred_proba: The predicted probabilities from the model on the dataset.
+            y_pred: The predicted labels (classes) from the model on the dataset.
 
         """
         raise NotImplementedError
