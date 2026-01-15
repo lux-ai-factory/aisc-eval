@@ -133,6 +133,7 @@ class ProjectDateIterator:
         self.window = project.window_size
         self.freq = project.frequency
         self.df = None
+        self.df_date_series = None
         self.index = 0
 
     def set_dataset(self, dataset: Dataset):
@@ -140,16 +141,19 @@ class ProjectDateIterator:
         Allows setting the DataFrame
 
         """
-        df = dataset.data.copy()
         self.eval_datashape = dataset.shape
-        df[self.date_feature] = pd.to_datetime(df[self.date_feature])
-        self.start_date = df[self.date_feature].min()
-        self.end_date = df[self.date_feature].max()
+
+        # self.df is a reference to dataset.data, and datetime is tracked in the df_date_series
+        self.df = dataset.data
+        self.df_date_series = pd.to_datetime(self.df[self.date_feature])
+
+        self.start_date = self.df_date_series.min()
+        self.end_date = self.df_date_series.max()
+
         self.batches = get_date_batches(
             self.start_date, self.end_date, self.date_round, self.window, self.freq
         )
         self.index = 0
-        self.df = df
 
     def __iter__(self) -> "ProjectDateIterator":
         """Return the iterator object."""
@@ -169,9 +173,10 @@ class ProjectDateIterator:
             raise StopIteration
         start, end = self.batches[self.index]
         self.index += 1
+
         # Filter DataFrame for current time window
         temp_df = self.df[
-            (self.df[self.date_feature] >= start) & (self.df[self.date_feature] < end)
+            (self.df_date_series >= start) & (self.df_date_series < end)
         ].copy()
 
         if temp_df.empty:

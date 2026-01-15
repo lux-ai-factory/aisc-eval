@@ -23,8 +23,11 @@ def test_smoke(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ) -> None:
-    metrics = empty_model_metric(data_shape, ref_model, test_dataset, y_pred_proba)
+    metrics = empty_model_metric(
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
+    )
     assert len(metrics) == 0
 
 
@@ -33,9 +36,10 @@ def test_classification_accuracy_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_accuracy_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "Accuracy"
@@ -48,9 +52,10 @@ def test_classification_error_rate_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_error_rate_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "Error Rate"
@@ -63,9 +68,10 @@ def test_classification_balanced_accuracy_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_balanced_accuracy_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "Balanced Accuracy"
@@ -78,9 +84,10 @@ def test_classification_confusion_matrix_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_confusion_matrix_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) >= 4  # minimum 2*2 matrix
 
@@ -97,9 +104,10 @@ def test_f1_score_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_f1_score_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "F1"
@@ -112,9 +120,10 @@ def test_precision_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_precision_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "Precision"
@@ -127,9 +136,10 @@ def test_recall_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_recall_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "Recall"
@@ -142,9 +152,10 @@ def test_matthews_corrcoef_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_matthews_corrcoef_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "MCC"
@@ -157,9 +168,10 @@ def test_roc_auc_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_roc_auc_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "ROCAUC"
@@ -172,9 +184,10 @@ def test_log_loss_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_log_loss_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "log_loss"
@@ -188,9 +201,10 @@ def test_brier_score_loss_metric(
     ref_model: Model,
     test_dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray,
 ):
     metrics = classification_brier_score_loss_metric(
-        data_shape, ref_model, test_dataset, y_pred_proba
+        data_shape, ref_model, test_dataset, y_pred_proba, y_pred
     )
     assert len(metrics) == 1
     assert metrics[0].name == "brier_score_loss"
