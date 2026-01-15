@@ -19,11 +19,7 @@ def simple_demo_metric(
 ) -> list[Measure]:
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
 
-    # Instantiate Measure object(s) to return
-    measure = Measure(name="score_mean_value_metric", score=y_pred.mean(), time=date)
-    print(measure)
-
-    return [measure]
+    return [Measure(name="score_mean_value_metric", score=y_pred.mean(), time=date)]
 
 
 @regression_metric(name="Mean Squared Error")
@@ -33,11 +29,7 @@ def mean_squared_error_metric(
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    # Instantiate Measure object(s) to return
-    measure = Measure(name="MSE", score=np.mean((y_true - y_pred) ** 2), time=date)
-    print(measure)
-
-    return [measure]
+    return [Measure(name="MSE", score=np.mean((y_true - y_pred) ** 2), time=date)]
 
 
 @regression_metric(name="Mean Absolute Error")
@@ -47,8 +39,4 @@ def mean_absolute_error_metric(
     date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
 
-    # Instantiate Measure object(s) to return
-    measure = Measure(name="MAE", score=np.mean(np.abs(y_true - y_pred)), time=date)
-    print(measure)
-
-    return [measure]
+    return [Measure(name="MAE", score=np.mean(np.abs(y_true - y_pred)), time=date)]
