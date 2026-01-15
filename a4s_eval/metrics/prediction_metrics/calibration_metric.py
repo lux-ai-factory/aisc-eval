@@ -13,6 +13,7 @@ def classification_calibration_score_metric(
     model: Model,
     dataset: Dataset,
     y_pred_proba: np.ndarray,
+    y_pred: np.ndarray | None = None,
     n_bins: int = 10,
 ) -> list[Measure]:
     """
@@ -55,11 +56,12 @@ def classification_calibration_score_metric(
         between predicted confidence and empirical accuracy across probability bins.
     - "MCE": Maximum Calibration Error is the largest absolute difference across bins.
     """
-    date = pd.to_datetime(dataset.data[datashape.date.name]).max()
-    date = date.to_pydatetime()
-
+    date = pd.to_datetime(dataset.data[datashape.date.name]).max().to_pydatetime()
     y_true = dataset.data[datashape.target.name].to_numpy()
-    y_pred = np.argmax(y_pred_proba, axis=1)
+
+    if y_pred is None:
+        y_pred = np.argmax(y_pred_proba, axis=1)
+
     n_samples = y_true.shape[0]
 
     confidences = np.max(y_pred_proba, axis=1)
