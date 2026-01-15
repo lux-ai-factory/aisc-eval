@@ -81,7 +81,7 @@ def test_model_calibration_value_evaluation_1(data_shape: DataShape, ref_model: 
 
     # Run metrics
     metrics = classification_calibration_score_metric(
-        dummy_data_shape, dummy_model, dummy_dataset, y_pred_proba, n_bins
+        dummy_data_shape, dummy_model, dummy_dataset, y_pred_proba, n_bins=n_bins
     )
 
     # Run assertions
@@ -133,7 +133,7 @@ def test_model_calibration_value_evaluation_2(data_shape: DataShape, ref_model: 
 
     # Run metrics
     metrics = classification_calibration_score_metric(
-        dummy_data_shape, dummy_model, dummy_dataset, y_pred_proba, n_bins
+        dummy_data_shape, dummy_model, dummy_dataset, y_pred_proba, n_bins=n_bins
     )
 
     # Run assertions
