@@ -22,7 +22,7 @@ from a4s_eval.utils import env
 
 logger = get_logger()
 
-plugin_loader: Loader = Loader(env.DEV_PLUGIN_PATH)
+plugin_loader: Loader = Loader(env.PLUGIN_PATH)
 
 @celery_app.task(bind=True)
 def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
