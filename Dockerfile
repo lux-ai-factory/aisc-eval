@@ -31,9 +31,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Copy application code
 COPY . .
 
-# Install project in production mode
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --upgrade-package a4s-plugin-manager \
+        --no-dev
 
 # Final stage for runtime
 FROM base AS runtime
