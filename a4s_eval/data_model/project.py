@@ -11,9 +11,9 @@ from pydantic import BaseModel
 
 class Plugin(BaseModel):
     name: str
-    config: dict | None
-    dataset_filename: str | None
-    model_filename: str | None
+    config: dict | None = None
+    dataset_filename: str | None = None
+    model_filename: str | None = None
 
 class Project(BaseModel):
     """Represents a machine learning project with its evaluation configuration.

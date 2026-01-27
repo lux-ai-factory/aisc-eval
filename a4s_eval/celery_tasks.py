@@ -141,7 +141,7 @@ def handle_error(
 
 def generate_evaluation_signature(evaluation_pid: uuid.UUID) -> Signature:
     # --- Load local config file. TODO: using evaluation config in api ---
-    config_file = pathlib.Path("config/eval_config.yaml")
+    config_file = pathlib.Path(__file__).parent.parent / "config" / "eval_config.yaml"
     with open(config_file) as f_in:
         eval_config = yaml.safe_load(f_in)
 
