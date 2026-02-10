@@ -1,6 +1,5 @@
 from celery import Celery
 
-from a4s_eval.metric_registries import get_n_evaluation
 from a4s_eval.utils import env
 from a4s_eval.utils.logging import get_logger
 
@@ -48,5 +47,3 @@ if env.MQ_USE_SSL:
 celery_app.conf.update(celery_config)
 
 logger.debug("=== CELERY CONFIGURATION COMPLETED ===")
-
-logger.info(f"{get_n_evaluation()} evaluation(s) registered.")
