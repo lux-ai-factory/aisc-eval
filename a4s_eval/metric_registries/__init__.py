@@ -16,11 +16,21 @@ from a4s_eval.metric_registries.prediction_metric_registry import (
     PredictionInputGenerator,
     prediction_metric_registry,
 )
+from a4s_eval.metric_registries.regression_metric_registry import (
+    RegressionInputGenerator,
+    regression_metric_registry,
+)
+from a4s_eval.metric_registries.counterfactuals_metric_registry import (
+    CounterfactualsInputGenerator,
+    counterfactual_metric_registry,
+)
 
 
 registries: list[AbstractMetricRegistry] = [
     data_metric_registry,
     prediction_metric_registry,
+    regression_metric_registry,
+    counterfactual_metric_registry,
 ]
 
 # Mapping of registry class names to registry instances
@@ -33,6 +43,8 @@ registry_mapping: dict[str, AbstractMetricRegistry] = {
 input_generator_cls_mapping: dict[str, Type[MetricInputGenerator]] = {
     type(data_metric_registry).__name__: DataMetricInputGenerator,
     type(prediction_metric_registry).__name__: PredictionInputGenerator,
+    type(regression_metric_registry).__name__: RegressionInputGenerator,
+    type(counterfactual_metric_registry).__name__: CounterfactualsInputGenerator,
 }
 
 

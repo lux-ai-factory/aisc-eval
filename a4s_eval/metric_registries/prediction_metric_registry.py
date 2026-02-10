@@ -20,6 +20,7 @@ class ModelPredProbaMetric(Protocol):
         model: Model,
         dataset: Dataset,
         y_pred_proba: np.ndarray,
+        y_pred: np.ndarray | None = None,
     ) -> list[Measure]:
         """Run a specific model evaluation.
 
@@ -27,13 +28,14 @@ class ModelPredProbaMetric(Protocol):
             model: The model to run the evaluation.
             dataset: The dataset to evaluate.
             y_pred_proba: The predicted probabilities from the model on the dataset.
+            y_pred: The predicted labels (classes) from the model on the dataset.
 
         """
         raise NotImplementedError
 
 
 class PredictionInputGenerator(MetricInputGenerator):
-    def get_inputs(self) -> tuple[DataShape, Model, Dataset, np.ndarray]:
+    def get_inputs(self) -> tuple[DataShape, Model, Dataset, np.ndarray, np.ndarray]:
         session = self.model_onnx_session
 
         x_test = self.test_dataset.data
@@ -47,25 +49,30 @@ class PredictionInputGenerator(MetricInputGenerator):
         label_name = session.get_outputs()[1].name
         pred_onx = session.run([label_name], {input_name: x_test_np})[0]
         y_pred_proba = np.array([list(d.values()) for d in pred_onx])
+        y_pred = np.argmax(y_pred_proba, axis=1)
+
         get_logger().info("Computation finished for Y prediction probability.")
         return (
             self.expected_datashape,
             self.evaluation.model,
             self.test_dataset,
             y_pred_proba,
+            y_pred,
         )
 
     def get_inputs_dateiterator(
         self,
-    ) -> Iterator[tuple[DataShape, Model, Dataset, np.ndarray]]:
+    ) -> Iterator[tuple[DataShape, Model, Dataset, np.ndarray, np.ndarray]]:
+        datashape, model, dataset, y_pred_proba, y_pred = self.get_inputs()
+
         date_iterator = self.project_date_iterator
-        datashape, model, dataset, y_pred_proba = self.get_inputs()
         date_iterator.set_dataset(dataset)
-        return (
-            (datashape, model, eval_data, y_pred_proba[list(eval_data.data.index)])
-            for _, eval_data in date_iterator
-            if eval_data.data is not None  # Quickfix to satisfy mypy
-        )
+
+        for _, eval_data in date_iterator:
+            if eval_data is None:
+                continue
+            indices = list(eval_data.data.index)
+            yield (datashape, model, eval_data, y_pred_proba[indices], y_pred[indices])
 
 
 class PredictionMetricRegistry(AbstractMetricRegistry):

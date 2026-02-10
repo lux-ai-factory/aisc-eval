@@ -1,8 +1,11 @@
+import uuid
 import pandas as pd
 from scipy.spatial.distance import jensenshannon
 from scipy.stats import wasserstein_distance
+from functools import partial
+from concurrent.futures import ThreadPoolExecutor
 
-from a4s_eval.data_model.evaluation import Dataset, DataShape, FeatureType
+from a4s_eval.data_model.evaluation import Dataset, DataShape, Feature, FeatureType
 from a4s_eval.data_model.measure import Measure
 from a4s_eval.metric_registries.data_metric_registry import data_metric
 from a4s_eval.utils.logging import get_logger
@@ -21,9 +24,10 @@ def numerical_drift_test(x_ref: "pd.Series[float]", x_new: "pd.Series[float]") -
         float: Wasserstein distance between the distributions
     """
     logger.debug(
-        f"Computing numerical drift test - Reference shape: {x_ref.shape}, New shape: {x_new.shape}"
+        f"Computing numerical drift test - Reference shape: {x_ref.shape}, "
+        f"New shape: {x_new.shape}"
     )
-    distance = wasserstein_distance(x_ref, x_new)
+    distance = wasserstein_distance(x_ref.to_numpy(), x_new.to_numpy())
     logger.debug(f"Wasserstein distance computed: {distance}")
     return distance
 
@@ -39,7 +43,8 @@ def categorical_drift_test(x_ref: "pd.Series[int]", x_new: "pd.Series[int]") -> 
         float: Jensen-Shannon distance between the distributions
     """
     logger.debug(
-        f"Computing categorical drift test - Reference shape: {x_ref.shape}, New shape: {x_new.shape}"
+        f"Computing categorical drift test - Reference shape: {x_ref.shape}, "
+        f"New shape: {x_new.shape}"
     )
 
     # Get all unique values from both series
@@ -60,18 +65,20 @@ def categorical_drift_test(x_ref: "pd.Series[int]", x_new: "pd.Series[int]") -> 
 
 
 def feature_drift_test(
-    x_ref: "pd.Series[float]",
-    x_new: "pd.Series[float]",
-    feature_type: FeatureType,
+    feature: Feature,
+    feature_pid: uuid.UUID,
     date: pd.Timestamp,
+    reference: pd.DataFrame,
+    evaluated: pd.DataFrame,
 ) -> Measure:
     """Calculate drift for a specific feature based on its type.
 
     Args:
-        x_ref: Reference distribution for the feature
-        x_new: New distribution to compare
-        feature_type: Type of the feature (numerical or categorical)
+        feature: Feature
+        feature_pid: uuid.UUID
         date: Timestamp for the metric
+        reference: Reference dataframe
+        evaluated: Evaluated dataframe
 
     Returns:
         Measure: Drift metric object with computed score
@@ -79,32 +86,34 @@ def feature_drift_test(
     Raises:
         ValueError: If feature type is not supported
     """
+    feature_type = feature.feature_type
+    logger.debug(f"Processing feature: {feature.name} (type: {feature_type})")
     logger.debug(f"Computing feature drift test for feature type: {feature_type}")
 
+    score = None
+    metric_name = None
+
     if feature_type == FeatureType.INTEGER or feature_type == FeatureType.FLOAT:
-        score = numerical_drift_test(x_ref, x_new)
-        metric = Measure(
-            name="wasserstein_distance",
-            score=score,
-            time=date.to_pydatetime(),
-        )
-        logger.debug(f"Created numerical drift metric: {metric.name} = {metric.score}")
-        return metric
+        score = numerical_drift_test(reference[feature.name], evaluated[feature.name])
+        metric_name = "wasserstein_distance"
+        logger.debug(f"Created numerical drift metric: {metric_name} = {score}")
 
     elif feature_type == FeatureType.CATEGORICAL:
-        score = categorical_drift_test(x_ref, x_new)
-        metric = Measure(
-            name="jensenshannon",
-            score=score,
-            time=date.to_pydatetime(),
-        )
-        logger.debug(
-            f"Created categorical drift metric: {metric.name} = {metric.score}"
-        )
-        return metric
+        score = categorical_drift_test(reference[feature.name], evaluated[feature.name])
+        metric_name = "jensenshannon"
+        logger.debug(f"Created categorical drift metric: {metric_name} = {score}")
+
     else:
         logger.error(f"Unsupported feature type: {feature_type}")
         raise ValueError(f"Feature type {feature_type} not supported")
+
+    if score is not None:
+        logger.debug(
+            f"Added metric for feature {feature.name}: {metric_name} = {score}"
+        )
+        return Measure(
+            name=metric_name, score=score, time=date, feature_pid=feature_pid
+        )
 
 
 @data_metric(name="Data drift")
@@ -125,7 +134,8 @@ def data_drift_metric(
         list[Measure]: List of drift metrics for each feature
     """
     logger.debug(
-        f"Starting data drift evaluation - Reference shape: {reference.data.shape}, Evaluated shape: {evaluated.data.shape}"
+        "Starting data drift evaluation - "
+        f"Reference shape: {reference.data.shape}, Evaluated shape: {evaluated.data.shape}"
     )
 
     # Get the current date from the evaluated dataset
@@ -133,7 +143,9 @@ def data_drift_metric(
     date = pd.to_datetime(evaluated.data[date_feature]).max()
     logger.debug(f"Evaluation date: {date}")
 
-    metrics = []
+    # Get the current date from the evaluated dataset
+    logger.debug(f"Evaluation date: {date}")
+
     logger.debug(f"Processing {len(reference.shape.features)} features")
 
     # Get feature name / feature pid mapping from test dataset
@@ -141,23 +153,20 @@ def data_drift_metric(
         _feature.name: _feature.pid for _feature in evaluated.shape.features
     }
 
-    # Loop through all features in the project expected datashape
-    for feature in datashape.features:
-        logger.debug(
-            f"Processing feature: {feature.name} (type: {feature.feature_type})"
-        )
-        feature_type = feature.feature_type
-        x_ref_feature = reference.data[feature.name]
-        x_new_feature = evaluated.data[feature.name]
+    compute_metric = partial(
+        feature_drift_test,
+        date=date,
+        reference=reference.data,
+        evaluated=evaluated.data,
+    )
+    it = (
+        (feature, test_feature_name_pid_mapping.get(feature.name, None))
+        for feature in datashape.features
+    )
 
-        metric = feature_drift_test(x_ref_feature, x_new_feature, feature_type, date)
-
-        # Set correct feature pid (from test dataset)
-        metric.feature_pid = test_feature_name_pid_mapping.get(feature.name, None)
-        metrics.append(metric)
-        logger.debug(
-            f"Added metric for feature {feature.name}: {metric.name} = {metric.score}"
-        )
+    # FIXME: perhaps set max_workers
+    with ThreadPoolExecutor() as pool:
+        metrics = list(pool.map(compute_metric, *(zip(*it))))
 
     logger.debug(f"Data drift evaluation completed - Generated {len(metrics)} metrics")
     return metrics

@@ -74,3 +74,8 @@ def y_pred_proba(ref_model: Model, test_dataset: Dataset) -> np.ndarray:
     y_pred_proba = np.array([list(d.values()) for d in pred_onx])
 
     return y_pred_proba
+
+
+@pytest.fixture(scope="module")
+def y_pred(y_pred_proba: np.ndarray) -> np.ndarray:
+    return np.argmax(y_pred_proba, axis=1)

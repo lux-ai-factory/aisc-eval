@@ -1,7 +1,22 @@
-- Data drift
-- Accuracy
-- F1 Score
-- Precision
-- Recall
-- Matthews Correlation Coefficient
-- ROCAUC
+Sliding Window:
+  - Data drift
+  - Accuracy
+  - F1 Score
+  - Precision
+  - Recall
+  - Matthews Correlation Coefficient
+  - ROCAUC
+  # - Fairness
+  # - Balanced Accuracy
+  # - Error Rate
+  # - Mean Squared Error
+  # - Mean Absolute Error
+# One Shot:
+#   - Confusion Matrix
+#   - "Classification Calibration metrics: ECE, MCE"
+#   - New Category in Test Data
+#   - Missing Category in Test Data
+#   - Reference Constraints
+#   - Evaluated Constraints
+#   - Distribution
+#   - Counterfactuals distance
