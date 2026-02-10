@@ -167,5 +167,4 @@ website/_site
 website/.jekyll-cache
 .env.dev-local
 
-tests/data
-plugins/
+/.run

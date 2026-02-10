@@ -1,10 +1,10 @@
 import uuid
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
 
-from a4s_eval.service.api_client import get_dataset_data, get_evaluation
+from a4s_eval.service.api_client import get_evaluation
 
 TEST_UUIDS = {
     "project": uuid.UUID("afb49e3f-813d-8888-9919-ee179d1090e6"),
@@ -62,22 +62,3 @@ def test_get_evaluation(mock_evaluation_data: dict[str, any]) -> None:
 
         # Now evaluation should be an EvaluationDto object built from mock_response
         assert evaluation.pid == TEST_UUIDS["evaluation"]
-
-
-def test_get_dataset() -> None:
-    with open("./tests/data/lcld_v2_train_800.csv", "r") as f:
-        csv_data = f.read()
-
-    # Prepare mock response
-    mock_resp = MagicMock()
-    mock_resp.headers = {"Content-Type": "text/csv"}
-    mock_resp.status_code = 200
-    mock_resp.content = csv_data.encode("utf-8")
-    # mock_resp.raise_for_status = MagicMock()
-
-    # Set the mock return value
-    # mock_get.return_value = mock_resp
-    with patch("requests.get", return_value=mock_resp):
-        df = get_dataset_data(TEST_UUIDS["train_dataset"])
-
-        assert len(df) == 800

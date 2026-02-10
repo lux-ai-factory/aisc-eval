@@ -1,6 +1,5 @@
 from celery import Celery
 
-from a4s_eval.metric_registries import get_n_evaluation
 from a4s_eval.utils import env
 from a4s_eval.utils.logging import get_logger
 
@@ -11,7 +10,7 @@ logger.debug(f"CELERY REDIS BACKEND URL: {env.REDIS_BACKEND_URL}")
 logger.debug("=== CELERY APP INITIALIZATION ===")
 
 celery_app: Celery = Celery(
-    __name__, broker=env.CELERY_BROKER_URL, backend=env.REDIS_BACKEND_URL
+    env.CELERY_APP_NAME, broker=env.CELERY_BROKER_URL, backend=env.REDIS_BACKEND_URL
 )
 
 logger.debug("=== CELERY APP CREATED ===")
@@ -48,5 +47,3 @@ if env.MQ_USE_SSL:
 celery_app.conf.update(celery_config)
 
 logger.debug("=== CELERY CONFIGURATION COMPLETED ===")
-
-logger.info(f"{get_n_evaluation()} evaluation(s) registered.")

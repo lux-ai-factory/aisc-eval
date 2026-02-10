@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # Entrypoint script for A4S Evaluation Service
-# Supports multiple modes: server, worker, or combined
 
 set -e
 
@@ -24,51 +23,18 @@ wait_for_dependencies() {
     fi
 }
 
-# Function to start FastAPI server
-start_server() {
-    echo "Starting FastAPI evaluation server..."
-    exec uvicorn a4s_eval.main:app --host 0.0.0.0 --port 8001
-}
-
 # Function to start Celery worker
 start_worker() {
     echo "Starting Celery worker..."
     exec celery -A a4s_eval.celery_worker worker --loglevel=info --concurrency=1 --hostname=worker@%h
 }
 
-# Function to start both server and worker
-start_combined() {
-    echo "Starting combined server and worker..."
-    
-    # Start Celery worker in background
-    echo "Starting Celery worker in background..."
-    celery -A a4s_eval.celery_worker worker --loglevel=info --concurrency=1 --hostname=worker@%h &
-    
-    # Wait a moment for worker to start
-    sleep 5
-    
-    # Start FastAPI server in foreground
-    echo "Starting FastAPI server..."
-    exec uvicorn a4s_eval.main:app --host 0.0.0.0 --port 8001
-}
-
 # Main function
 main() {
     # Wait for dependencies
     wait_for_dependencies
-    
-    # Start based on mode
-    case "${1:-server}" in
-        "server")
-            start_server
-            ;;
-        "worker")
-            start_worker
-            ;;
-        "combined")
-            start_combined
-            ;;
-    esac
+
+    start_worker
 }
 
 # Execute main function with all arguments
