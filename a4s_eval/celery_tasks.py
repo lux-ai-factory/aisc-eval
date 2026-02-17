@@ -14,6 +14,7 @@ from a4s_eval.service.api_client import (
     get_model_file_content,
 )
 from a4s_eval.utils.logging import get_logger
+from a4s_plugin_interface import TaskProgress
 
 from a4s_plugin_manager.loader import Loader
 from a4s_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
@@ -40,11 +41,16 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
     group_result = group_task.apply_async()
 
-    return {'group_id': group_result.id}
+    return {'evaluation_pid': evaluation_pid}
 
-@celery_app.task
-def run_plugin(plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
+@celery_app.task(bind=True)
+def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
     plugin: BaseEvaluationPlugin = plugin_loader.load(plugin_name)
+
+    def progress_callback(task_progress: TaskProgress):
+        self.update_state(state='RUNNING', meta=task_progress.model_dump())
+
+    plugin._set_progress_callback(progress_callback)
 
     if dataset_file:
         dataset_file_contents = get_dataset_file_content(dataset_file)
