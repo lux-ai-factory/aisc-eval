@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from celery import group, chain
 
@@ -40,14 +41,14 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
     group_result = group_task.apply_async()
 
-    return {'group_id': group_result.id}
+    return {'evaluation_pid': evaluation_pid}
 
 @celery_app.task(bind=True)
 def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
     plugin: BaseEvaluationPlugin = plugin_loader.load(plugin_name)
 
     def progress_callback(task_progress: TaskProgress):
-        self.update_state(state='PROGRESS', meta=task_progress.model_dump())
+        self.update_state(state='RUNNING', meta=task_progress.model_dump())
 
     plugin._set_progress_callback(progress_callback)
 
