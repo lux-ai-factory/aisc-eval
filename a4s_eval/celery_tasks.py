@@ -14,10 +14,9 @@ from a4s_eval.service.api_client import (
     get_model_file_content,
 )
 from a4s_eval.utils.logging import get_logger
-from a4s_plugin_interface import TaskProgress
 
 from a4s_plugin_manager.loader import Loader
-from a4s_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
+from a4s_plugin_interface import BaseEvaluationPlugin, TaskProgress
 from a4s_eval.utils import env
 
 logger = get_logger()
@@ -48,7 +47,9 @@ def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | 
     plugin: BaseEvaluationPlugin = plugin_loader.load(plugin_name)
 
     def progress_callback(task_progress: TaskProgress):
-        self.update_state(state='RUNNING', meta=task_progress.model_dump())
+        meta = task_progress.model_dump()
+        meta["plugin_name"] = plugin_name
+        self.update_state(state='RUNNING', meta=meta)
 
     plugin._set_progress_callback(progress_callback)
 
