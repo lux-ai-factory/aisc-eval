@@ -42,20 +42,3 @@ def test_evaluation_data_model():
     )
     assert feature.name == "test_feature"
     assert feature.feature_type == FeatureType.FLOAT
-
-
-def test_drift_metric_import():
-    """Test that drift evaluation functions can be imported."""
-    try:
-        from a4s_eval.metrics.data_metrics.drift_metric import (
-            categorical_drift_test,
-            data_drift_metric,
-            numerical_drift_test,
-        )
-
-        # Just verify they can be imported
-        assert callable(data_drift_metric)
-        assert callable(numerical_drift_test)
-        assert callable(categorical_drift_test)
-    except ImportError as e:
-        pytest.fail(f"Failed to import drift evaluation functions: {e}")

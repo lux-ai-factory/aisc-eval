@@ -24,6 +24,10 @@ CACHE_DIR = os.getenv("CACHE_DIR", "/tmp/cache")
 
 MQ_USE_SSL = handle_bool_var(os.getenv("MQ_USE_SSL", "false"))
 
+CELERY_APP_NAME = os.getenv("CELERY_APP_NAME", "celery_app")
+
+PLUGIN_PATH = os.getenv('PLUGIN_PATH', '')
+
 
 def redis_handle_ssl_option(redis_url: str) -> str:
     # Only apply to ssl redis
