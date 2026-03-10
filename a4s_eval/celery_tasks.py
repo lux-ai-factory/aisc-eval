@@ -3,6 +3,17 @@ from typing import Any
 
 from celery import group, chain
 
+from a4s_eval.audit.events import (
+    EVALUATION_COMPLETED,
+    EVALUATION_FAILED,
+    EVALUATION_STARTED,
+    MEASUREMENTS_POSTED,
+    PLUGIN_COMPLETED,
+    PLUGIN_FAILED,
+    PLUGIN_STARTED,
+    AuditTimer,
+    log_audit_event,
+)
 from a4s_eval.celery_app import celery_app
 from a4s_eval.data_model.measure import Measure
 from a4s_eval.service.api_client import (
@@ -27,6 +38,12 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH)
 def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
 
+    log_audit_event(
+        EVALUATION_STARTED,
+        evaluation_id=str(evaluation_pid),
+        task_id=self.request.id,
+    )
+
     evaluation = get_evaluation(evaluation_pid)
 
     plugin_chains = []
@@ -44,50 +61,90 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
-    plugin: BaseEvaluationPlugin = plugin_loader.load(plugin_name)
+    log_audit_event(
+        PLUGIN_STARTED,
+        plugin_name=plugin_name,
+        task_id=self.request.id,
+    )
 
-    def progress_callback(task_progress: TaskProgress):
-        meta = task_progress.model_dump()
-        meta["plugin_name"] = plugin_name
-        self.update_state(state='RUNNING', meta=meta)
+    try:
+        with AuditTimer() as timer:
+            plugin: BaseEvaluationPlugin = plugin_loader.load(plugin_name)
 
-    plugin._set_progress_callback(progress_callback)
+            def progress_callback(task_progress: TaskProgress):
+                meta = task_progress.model_dump()
+                meta["plugin_name"] = plugin_name
+                self.update_state(state='RUNNING', meta=meta)
 
-    if dataset_file:
-        dataset_file_contents = get_dataset_file_content(dataset_file)
-        plugin.set_dataset_input_provider(dataset_file_contents)
+            plugin._set_progress_callback(progress_callback)
 
-    if model_filename:
-        model_file_contents = get_model_file_content(model_filename)
-        plugin.set_model_input_provider(model_file_contents)
+            if dataset_file:
+                dataset_file_contents = get_dataset_file_content(dataset_file)
+                plugin.set_dataset_input_provider(dataset_file_contents)
 
-    evaluation_output: Any = plugin.evaluate(plugin_config)
+            if model_filename:
+                model_file_contents = get_model_file_content(model_filename)
+                plugin.set_model_input_provider(model_file_contents)
 
-    measurements: list[Measure] = plugin.export_metrics(evaluation_output)
-    measurements_dict = [m.model_dump() for m in measurements]
-    return measurements_dict
+            evaluation_output: Any = plugin.evaluate(plugin_config)
 
-@celery_app.task
-def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID):
+            measurements: list[Measure] = plugin.export_metrics(evaluation_output)
+            measurements_dict = [m.model_dump() for m in measurements]
+
+        log_audit_event(
+            PLUGIN_COMPLETED,
+            plugin_name=plugin_name,
+            task_id=self.request.id,
+            duration_ms=timer.duration_ms,
+            details={"measurement_count": len(measurements_dict)},
+        )
+
+        return measurements_dict
+
+    except Exception as e:
+        log_audit_event(
+            PLUGIN_FAILED,
+            plugin_name=plugin_name,
+            task_id=self.request.id,
+            status="failure",
+            error_message=str(e),
+        )
+        raise
+
+@celery_app.task(bind=True)
+def post_measurements(self, measurements_dict: list[dict], evaluation_pid: uuid.UUID):
     measurements = [Measure(**m) for m in measurements_dict]
-    response = post_measures(evaluation_pid, measurements)
+    post_measures(evaluation_pid, measurements)
+
+    log_audit_event(
+        MEASUREMENTS_POSTED,
+        evaluation_id=str(evaluation_pid),
+        task_id=self.request.id,
+        details={"measurement_count": len(measurements)},
+    )
 
 
-@celery_app.task
-def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
+@celery_app.task(bind=True)
+def finalize_evaluation(self, evaluation_id: uuid.UUID) -> None:
     logger.debug(f"Finalizing evaluation {evaluation_id}")
     try:
         response = mark_completed(evaluation_id)
         logger.debug(
             f"Evaluation {evaluation_id} marked as completed, status: {response.status_code}"
         )
+        log_audit_event(
+            EVALUATION_COMPLETED,
+            evaluation_id=str(evaluation_id),
+            task_id=self.request.id,
+        )
     except Exception as e:
         logger.error(f"Failed to mark evaluation {evaluation_id} as completed: {e}")
         mark_failed(evaluation_id)
 
 
-@celery_app.task
+@celery_app.task(bind=True)
 def handle_error(
+    self,
     evaluation_id: uuid.UUID,
     request: object,
     exc: BaseException,
@@ -95,5 +152,15 @@ def handle_error(
 ) -> None:
     logger.error(f"Error in evaluation {evaluation_id}:")
     logger.error(f"--\n\n{request} {exc} {traceback}")
+
+    log_audit_event(
+        EVALUATION_FAILED,
+        evaluation_id=str(evaluation_id),
+        task_id=self.request.id,
+        status="failure",
+        error_message=str(exc),
+        details={"traceback": str(traceback)},
+    )
+
     mark_failed(evaluation_id)
     logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")

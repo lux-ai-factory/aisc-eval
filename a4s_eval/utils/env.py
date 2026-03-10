@@ -97,3 +97,10 @@ def get_celery_broker_url() -> str:
 
 
 CELERY_BROKER_URL = get_celery_broker_url()
+
+# immudb audit configuration
+IMMUDB_HOST = os.getenv("IMMUDB_HOST", "immudb")
+IMMUDB_PORT = int(os.getenv("IMMUDB_PORT", "3322"))
+IMMUDB_USER = os.getenv("IMMUDB_USER", "immudb")
+IMMUDB_PASSWORD = os.getenv("IMMUDB_PASSWORD", "immudb")
+IMMUDB_DATABASE = os.getenv("IMMUDB_DATABASE", "defaultdb")

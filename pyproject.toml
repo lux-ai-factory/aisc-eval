@@ -31,6 +31,7 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "gpt4all>=2.8.2",
     "pyyaml>=6.0.2",
+    "immudb-py>=1.4.0",
 ]
 
 [dependency-groups]
