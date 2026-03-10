@@ -48,7 +48,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
     plugin_chains = []
     for plugin in evaluation.evaluation_plugins:
-        run_plugin_sig = run_plugin.s(plugin.name, plugin.config, plugin.dataset_filename, plugin.model_filename)
+        run_plugin_sig = run_plugin.s(str(evaluation_pid), plugin.name, plugin.config, plugin.dataset_filename, plugin.model_filename)
         post_measurements_sig = post_measurements.s(evaluation_pid)
         plugin_chain = chain(run_plugin_sig, post_measurements_sig)
         plugin_chains.append(plugin_chain)
@@ -60,9 +60,10 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     return {'evaluation_pid': evaluation_pid}
 
 @celery_app.task(bind=True)
-def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
+def run_plugin(self, evaluation_id: str, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
     log_audit_event(
         PLUGIN_STARTED,
+        evaluation_id=evaluation_id,
         plugin_name=plugin_name,
         task_id=self.request.id,
     )
@@ -79,11 +80,11 @@ def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | 
             plugin._set_progress_callback(progress_callback)
 
             if dataset_file:
-                dataset_file_contents = get_dataset_file_content(dataset_file)
+                dataset_file_contents = get_dataset_file_content(dataset_file, evaluation_id=evaluation_id)
                 plugin.set_dataset_input_provider(dataset_file_contents)
 
             if model_filename:
-                model_file_contents = get_model_file_content(model_filename)
+                model_file_contents = get_model_file_content(model_filename, evaluation_id=evaluation_id)
                 plugin.set_model_input_provider(model_file_contents)
 
             evaluation_output: Any = plugin.evaluate(plugin_config)
@@ -93,6 +94,7 @@ def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | 
 
         log_audit_event(
             PLUGIN_COMPLETED,
+            evaluation_id=evaluation_id,
             plugin_name=plugin_name,
             task_id=self.request.id,
             duration_ms=timer.duration_ms,
@@ -104,6 +106,7 @@ def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | 
     except Exception as e:
         log_audit_event(
             PLUGIN_FAILED,
+            evaluation_id=evaluation_id,
             plugin_name=plugin_name,
             task_id=self.request.id,
             status="failure",

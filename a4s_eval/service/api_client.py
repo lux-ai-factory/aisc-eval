@@ -53,7 +53,7 @@ def mark_failed(evaluation_pid: uuid.UUID) -> None:
     )
 
 
-def get_dataset_file_content(file_name: str) -> bytes:
+def get_dataset_file_content(file_name: str, evaluation_id: str = "") -> bytes:
     with AuditTimer() as timer:
         resp = requests.get(
             f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True
@@ -62,13 +62,14 @@ def get_dataset_file_content(file_name: str) -> bytes:
         content = resp.content
     log_audit_event(
         API_CALL_GET_DATASET,
+        evaluation_id=evaluation_id,
         duration_ms=timer.duration_ms,
         details={"file_name": file_name, "content_length": len(content)},
     )
     return content
 
 
-def get_model_file_content(file_name: str) -> bytes:
+def get_model_file_content(file_name: str, evaluation_id: str = "") -> bytes:
     with AuditTimer() as timer:
         resp = requests.get(
             f"{API_URL_PREFIX}/files/model/{file_name}", stream=True
@@ -77,6 +78,7 @@ def get_model_file_content(file_name: str) -> bytes:
         content = resp.content
     log_audit_event(
         API_CALL_GET_MODEL,
+        evaluation_id=evaluation_id,
         duration_ms=timer.duration_ms,
         details={"file_name": file_name, "content_length": len(content)},
     )
