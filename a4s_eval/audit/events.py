@@ -41,11 +41,13 @@ API_CALL_MARK_FAILED = "API_CALL_MARK_FAILED"
 
 _INSERT_SQL = """
     INSERT INTO audit_events (
-        timestamp, event_type, evaluation_id, task_id,
-        plugin_name, status, duration_ms, details, error_message
+        timestamp, event_type, user_id, evaluation_id, task_id,
+        plugin_name, status, duration_ms, details, error_message,
+        test_set, configuration, target_system, execution_start, execution_end
     ) VALUES (
-        @timestamp, @event_type, @evaluation_id, @task_id,
-        @plugin_name, @status, @duration_ms, @details, @error_message
+        @timestamp, @event_type, @user_id, @evaluation_id, @task_id,
+        @plugin_name, @status, @duration_ms, @details, @error_message,
+        @test_set, @configuration, @target_system, @execution_start, @execution_end
     );
 """
 
@@ -69,6 +71,12 @@ def log_audit_event(
     duration_ms: int | None = None,
     details: dict[str, Any] | None = None,
     error_message: str | None = None,
+    user_id: int | None = None,
+    test_set: str | None = None,
+    configuration: str | None = None,
+    target_system: str | None = None,
+    execution_start: datetime | None = None,
+    execution_end: datetime | None = None,
 ) -> None:
     """Write a single audit event to immudb.
 
@@ -83,9 +91,15 @@ def log_audit_event(
         if len(details_str) > 4000:
             details_str = details_str[:3997] + "..."
 
+        now = datetime.now(timezone.utc)
+        config_str = json.dumps(configuration, default=str) if isinstance(configuration, dict) else (configuration or "")
+        if len(config_str) > 4000:
+            config_str = config_str[:3997] + "..."
+
         params = {
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": now,
             "event_type": event_type,
+            "user_id": user_id if user_id is not None else 0,
             "evaluation_id": str(evaluation_id) if evaluation_id else "",
             "task_id": str(task_id) if task_id else "",
             "plugin_name": plugin_name or "",
@@ -93,6 +107,11 @@ def log_audit_event(
             "duration_ms": duration_ms if duration_ms is not None else 0,
             "details": details_str,
             "error_message": _truncate(error_message, 2000),
+            "test_set": _truncate(test_set, 500),
+            "configuration": config_str,
+            "target_system": _truncate(target_system, 250),
+            "execution_start": execution_start or now,
+            "execution_end": execution_end or now,
         }
 
         result = client.sqlExec(_INSERT_SQL, params)

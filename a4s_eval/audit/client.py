@@ -15,16 +15,22 @@ logger = get_logger()
 
 _CREATE_TABLE_SQL = """
     CREATE TABLE IF NOT EXISTS audit_events (
-        id              INTEGER AUTO_INCREMENT,
-        timestamp       TIMESTAMP,
-        event_type      VARCHAR[64],
-        evaluation_id   VARCHAR[64],
-        task_id         VARCHAR[255],
-        plugin_name     VARCHAR[255],
-        status          VARCHAR[32],
-        duration_ms     INTEGER,
-        details         VARCHAR[4096],
-        error_message   VARCHAR[2048],
+        id                      INTEGER AUTO_INCREMENT,
+        timestamp               TIMESTAMP,
+        event_type              VARCHAR[64],
+        user_id                 INTEGER,
+        evaluation_id           VARCHAR[64],
+        task_id                 VARCHAR[255],
+        plugin_name             VARCHAR[255],
+        status                  VARCHAR[32],
+        duration_ms             INTEGER,
+        details                 VARCHAR[4096],
+        error_message           VARCHAR[2048],
+        test_set                VARCHAR[512],
+        configuration           VARCHAR[4096],
+        target_system           VARCHAR[255],
+        execution_start         TIMESTAMP,
+        execution_end           TIMESTAMP,
         PRIMARY KEY id
     );
 """
@@ -70,6 +76,25 @@ def get_audit_client() -> ImmudbClient:
             client.useDatabase(env.IMMUDB_DATABASE.encode())
 
             client.sqlExec(_CREATE_TABLE_SQL)
+
+            # Add new columns to existing tables (idempotent)
+            _new_columns = [
+                ("user_id", "INTEGER"),
+                ("test_set", "VARCHAR[512]"),
+                ("configuration", "VARCHAR[4096]"),
+                ("target_system", "VARCHAR[255]"),
+                ("execution_start", "TIMESTAMP"),
+                ("execution_end", "TIMESTAMP"),
+            ]
+            for col_name, col_type in _new_columns:
+                try:
+                    client.sqlExec(
+                        f"ALTER TABLE audit_events ADD COLUMN {col_name} {col_type};"
+                    )
+                    logger.info(f"Added column {col_name} to audit_events")
+                except Exception:
+                    pass  # Column already exists
+
             logger.info("Audit table verified/created successfully")
 
             _client = client

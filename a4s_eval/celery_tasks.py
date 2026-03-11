@@ -3,6 +3,8 @@ from typing import Any
 
 from celery import group, chain
 
+from datetime import datetime, timezone
+
 from a4s_eval.audit.events import (
     EVALUATION_COMPLETED,
     EVALUATION_FAILED,
@@ -35,13 +37,14 @@ logger = get_logger()
 plugin_loader: Loader = Loader(env.PLUGIN_PATH)
 
 @celery_app.task(bind=True)
-def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
+def run_evaluation(self, evaluation_pid: uuid.UUID, user_id: int | None = None) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
 
     log_audit_event(
         EVALUATION_STARTED,
         evaluation_id=str(evaluation_pid),
         task_id=self.request.id,
+        user_id=user_id,
     )
 
     evaluation = get_evaluation(evaluation_pid)
@@ -61,11 +64,19 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, evaluation_id: str, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
+    import json as _json
+    config_str = _json.dumps(plugin_config, default=str) if plugin_config else ""
+    execution_start = datetime.now(timezone.utc)
+
     log_audit_event(
         PLUGIN_STARTED,
         evaluation_id=evaluation_id,
         plugin_name=plugin_name,
         task_id=self.request.id,
+        test_set=dataset_file or "",
+        configuration=config_str,
+        target_system=plugin_name,
+        execution_start=execution_start,
     )
 
     try:
@@ -92,6 +103,7 @@ def run_plugin(self, evaluation_id: str, plugin_name: str, plugin_config: dict, 
             measurements: list[Measure] = plugin.export_metrics(evaluation_output)
             measurements_dict = [m.model_dump() for m in measurements]
 
+        execution_end = datetime.now(timezone.utc)
         log_audit_event(
             PLUGIN_COMPLETED,
             evaluation_id=evaluation_id,
@@ -99,11 +111,17 @@ def run_plugin(self, evaluation_id: str, plugin_name: str, plugin_config: dict, 
             task_id=self.request.id,
             duration_ms=timer.duration_ms,
             details={"measurement_count": len(measurements_dict)},
+            test_set=dataset_file or "",
+            configuration=config_str,
+            target_system=plugin_name,
+            execution_start=execution_start,
+            execution_end=execution_end,
         )
 
         return measurements_dict
 
     except Exception as e:
+        execution_end = datetime.now(timezone.utc)
         log_audit_event(
             PLUGIN_FAILED,
             evaluation_id=evaluation_id,
@@ -111,6 +129,11 @@ def run_plugin(self, evaluation_id: str, plugin_name: str, plugin_config: dict, 
             task_id=self.request.id,
             status="failure",
             error_message=str(e),
+            test_set=dataset_file or "",
+            configuration=config_str,
+            target_system=plugin_name,
+            execution_start=execution_start,
+            execution_end=execution_end,
         )
         raise
 
