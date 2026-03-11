@@ -86,9 +86,9 @@ class TestAuditClient:
         mock_client = MagicMock()
         mock_immudb_cls.return_value = mock_client
 
-        client1 = get_audit_client()
+        get_audit_client()
         reset_client()
-        client2 = get_audit_client()
+        get_audit_client()
 
         assert mock_immudb_cls.call_count == 2
 

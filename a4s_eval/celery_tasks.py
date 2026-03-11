@@ -58,7 +58,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID, user_id: int | None = None) 
 
     group_task = group(plugin_chains) | finalize_evaluation.si(evaluation_pid)
 
-    group_result = group_task.apply_async()
+    group_task.apply_async()
 
     return {'evaluation_pid': evaluation_pid}
 
