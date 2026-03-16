@@ -61,7 +61,9 @@ class TestAuditClient:
         assert client is mock_client
         mock_client.login.assert_called_once()
         mock_client.useDatabase.assert_called_once()
-        mock_client.sqlExec.assert_called_once_with(_CREATE_TABLE_SQL)
+        # CREATE TABLE + 6 ALTER TABLE for new columns = 7 calls
+        assert mock_client.sqlExec.call_count == 7
+        mock_client.sqlExec.assert_any_call(_CREATE_TABLE_SQL)
 
     @patch("a4s_eval.audit.client.ImmudbClient")
     def test_get_audit_client_returns_singleton(self, mock_immudb_cls):
