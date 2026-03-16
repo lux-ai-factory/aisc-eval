@@ -21,9 +21,9 @@ from a4s_eval.utils.logging import get_logger
 
 logger = get_logger()
 
+
 class EvaluationStatusUpdateDTO(BaseModel):
     status: str
-
 
 
 def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
@@ -43,9 +43,7 @@ def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
     payload = EvaluationStatusUpdateDTO(status="failed").model_dump()
     with AuditTimer() as timer:
-        requests.put(
-            f"{API_URL_PREFIX}/evaluations/{evaluation_pid}", json=payload
-        )
+        requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}", json=payload)
     log_audit_event(
         API_CALL_MARK_FAILED,
         evaluation_id=str(evaluation_pid),
@@ -55,9 +53,7 @@ def mark_failed(evaluation_pid: uuid.UUID) -> None:
 
 def get_dataset_file_content(file_name: str, evaluation_id: str = "") -> bytes:
     with AuditTimer() as timer:
-        resp = requests.get(
-            f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True
-        )
+        resp = requests.get(f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True)
         resp.raise_for_status()
         content = resp.content
     log_audit_event(
@@ -71,9 +67,7 @@ def get_dataset_file_content(file_name: str, evaluation_id: str = "") -> bytes:
 
 def get_model_file_content(file_name: str, evaluation_id: str = "") -> bytes:
     with AuditTimer() as timer:
-        resp = requests.get(
-            f"{API_URL_PREFIX}/files/model/{file_name}", stream=True
-        )
+        resp = requests.get(f"{API_URL_PREFIX}/files/model/{file_name}", stream=True)
         resp.raise_for_status()
         content = resp.content
     log_audit_event(

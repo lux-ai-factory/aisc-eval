@@ -32,7 +32,7 @@ celery_config = {
     "worker_hijack_root_logger": False,
     "broker_use_ssl": env.MQ_USE_SSL,
     "results_extended": True,
-    "task_track_started": True
+    "task_track_started": True,
 }
 
 # Only add SSL configuration in production

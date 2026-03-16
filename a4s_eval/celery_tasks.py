@@ -36,6 +36,7 @@ logger = get_logger()
 
 plugin_loader: Loader = Loader(env.PLUGIN_PATH)
 
+
 @celery_app.task(bind=True)
 def run_evaluation(self, evaluation_pid: uuid.UUID, user_id: int | None = None) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
@@ -51,7 +52,13 @@ def run_evaluation(self, evaluation_pid: uuid.UUID, user_id: int | None = None) 
 
     plugin_chains = []
     for plugin in evaluation.evaluation_plugins:
-        run_plugin_sig = run_plugin.s(str(evaluation_pid), plugin.name, plugin.config, plugin.dataset_filename, plugin.model_filename)
+        run_plugin_sig = run_plugin.s(
+            str(evaluation_pid),
+            plugin.name,
+            plugin.config,
+            plugin.dataset_filename,
+            plugin.model_filename,
+        )
         post_measurements_sig = post_measurements.s(evaluation_pid)
         plugin_chain = chain(run_plugin_sig, post_measurements_sig)
         plugin_chains.append(plugin_chain)
@@ -60,11 +67,20 @@ def run_evaluation(self, evaluation_pid: uuid.UUID, user_id: int | None = None) 
 
     group_task.apply_async()
 
-    return {'evaluation_pid': evaluation_pid}
+    return {"evaluation_pid": evaluation_pid}
+
 
 @celery_app.task(bind=True)
-def run_plugin(self, evaluation_id: str, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
+def run_plugin(
+    self,
+    evaluation_id: str,
+    plugin_name: str,
+    plugin_config: dict,
+    dataset_file: str | None,
+    model_filename: str | None,
+) -> list[dict]:
     import json as _json
+
     config_str = _json.dumps(plugin_config, default=str) if plugin_config else ""
     execution_start = datetime.now(timezone.utc)
 
@@ -86,16 +102,20 @@ def run_plugin(self, evaluation_id: str, plugin_name: str, plugin_config: dict, 
             def progress_callback(task_progress: TaskProgress):
                 meta = task_progress.model_dump()
                 meta["plugin_name"] = plugin_name
-                self.update_state(state='RUNNING', meta=meta)
+                self.update_state(state="RUNNING", meta=meta)
 
             plugin._set_progress_callback(progress_callback)
 
             if dataset_file:
-                dataset_file_contents = get_dataset_file_content(dataset_file, evaluation_id=evaluation_id)
+                dataset_file_contents = get_dataset_file_content(
+                    dataset_file, evaluation_id=evaluation_id
+                )
                 plugin.set_dataset_input_provider(dataset_file_contents)
 
             if model_filename:
-                model_file_contents = get_model_file_content(model_filename, evaluation_id=evaluation_id)
+                model_file_contents = get_model_file_content(
+                    model_filename, evaluation_id=evaluation_id
+                )
                 plugin.set_model_input_provider(model_file_contents)
 
             evaluation_output: Any = plugin.evaluate(plugin_config)
@@ -136,6 +156,7 @@ def run_plugin(self, evaluation_id: str, plugin_name: str, plugin_config: dict, 
             execution_end=execution_end,
         )
         raise
+
 
 @celery_app.task(bind=True)
 def post_measurements(self, measurements_dict: list[dict], evaluation_pid: uuid.UUID):

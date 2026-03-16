@@ -92,7 +92,11 @@ def log_audit_event(
             details_str = details_str[:3997] + "..."
 
         now = datetime.now(timezone.utc)
-        config_str = json.dumps(configuration, default=str) if isinstance(configuration, dict) else (configuration or "")
+        config_str = (
+            json.dumps(configuration, default=str)
+            if isinstance(configuration, dict)
+            else (configuration or "")
+        )
         if len(config_str) > 4000:
             config_str = config_str[:3997] + "..."
 
@@ -131,9 +135,7 @@ def log_audit_event(
                         f"Verification failed for audit event {event_type} "
                         f"(id={inserted_id})"
                     )
-                logger.debug(
-                    f"Audit event verified: {event_type} (id={inserted_id})"
-                )
+                logger.debug(f"Audit event verified: {event_type} (id={inserted_id})")
             else:
                 logger.debug(f"Audit event logged: {event_type} (no PK returned)")
         else:
