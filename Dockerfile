@@ -18,11 +18,6 @@ FROM base AS builder
 
 ENV UV_HTTP_TIMEOUT=300
 
-RUN --mount=type=secret,id=git_pat \
-    if [ ! -s /run/secrets/git_pat ]; then echo "Error: Secret 'git_pat' is empty"; exit 1; fi && \
-    cat /run/secrets/git_pat | tr -d '\n\r' | gh auth login --with-token && \
-    gh auth setup-git
-
 # Install production dependencies with caching
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
