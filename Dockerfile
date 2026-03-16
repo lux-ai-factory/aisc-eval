@@ -48,7 +48,7 @@ RUN mkdir -p /app/data /app/logs && \
     chmod 755 /app/data /app/logs
 
 
-CMD ["uv", "run", "celery", "-A", "a4s_eval.celery_worker", "worker", "--loglevel=debug"]
+CMD ["uv", "run", "celery", "-A", "a4s_eval.celery_worker:celery_app", "worker", "--loglevel=debug"]
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
