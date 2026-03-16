@@ -49,7 +49,16 @@ def mock_evaluation_data() -> dict[str, any]:
             "name": "LCLD",
             "frequency": "1 day",
             "window_size": "1 month",
+            "plugins": [{"name": "ClassificationPerformancePlugin"}],
         },
+        "evaluation_plugins": [
+            {
+                "name": "ClassificationPerformancePlugin",
+                "config": {},
+                "dataset_filename": None,
+                "model_filename": None,
+            },
+        ],
     }
 
 
