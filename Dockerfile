@@ -16,8 +16,6 @@ WORKDIR /app
 # Builder stage for dependencies and compilation
 FROM base AS builder
 
-ENV UV_HTTP_TIMEOUT=300
-
 # Install production dependencies with caching
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -30,6 +28,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --upgrade-package a4s-plugin-manager \
         --no-dev
 
+# Create necessary directories
+RUN mkdir -p /app/data /app/logs && \
+    chmod 755 /app/data /app/logs
+
 # Final stage for runtime
 FROM base AS runtime
 
@@ -37,16 +39,10 @@ ENV UV_NO_SYNC=1
 
 # Copy built application from builder
 COPY --from=builder /app /app
-WORKDIR /app
 
 # Add virtual environment to PATH and set Python environment variables
 ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
-
-# Create necessary directories
-RUN mkdir -p /app/data /app/logs && \
-    chmod 755 /app/data /app/logs
-
 
 CMD ["uv", "run", "celery", "-A", "a4s_eval.celery_worker:celery_app", "worker", "--loglevel=debug"]
 
