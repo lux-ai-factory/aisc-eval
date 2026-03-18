@@ -49,7 +49,16 @@ def mock_evaluation_data() -> dict[str, any]:
             "name": "LCLD",
             "frequency": "1 day",
             "window_size": "1 month",
+            "plugins": [{"name": "ClassificationPerformancePlugin"}],
         },
+        "evaluation_plugins": [
+            {
+                "name": "ClassificationPerformancePlugin",
+                "config": {},
+                "dataset_filename": None,
+                "model_filename": None,
+            },
+        ],
     }
 
 
@@ -57,7 +66,10 @@ def test_get_evaluation(mock_evaluation_data: dict[str, any]) -> None:
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = mock_evaluation_data
-    with patch("requests.get", return_value=mock_response):
+    with (
+        patch("requests.get", return_value=mock_response),
+        patch("a4s_eval.service.api_client.log_audit_event"),
+    ):
         evaluation = get_evaluation(TEST_UUIDS["evaluation"])
 
         # Now evaluation should be an EvaluationDto object built from mock_response

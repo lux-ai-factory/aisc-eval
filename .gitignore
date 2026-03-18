@@ -168,3 +168,6 @@ website/.jekyll-cache
 .env.dev-local
 
 /.run
+
+# Claude Code
+.claude/
