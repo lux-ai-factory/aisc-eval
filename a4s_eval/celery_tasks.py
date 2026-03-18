@@ -4,6 +4,7 @@ from typing import Any
 from celery import group, chain
 
 from a4s_eval.celery_app import celery_app
+from a4s_eval.data_model.evaluation import Evaluation
 from a4s_eval.data_model.measure import Measure
 from a4s_eval.service.api_client import (
     mark_completed,
@@ -27,11 +28,15 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH)
 def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
 
-    evaluation = get_evaluation(evaluation_pid)
+    evaluation: Evaluation = get_evaluation(evaluation_pid)
 
     plugin_chains = []
-    for plugin in evaluation.evaluation_plugins:
-        run_plugin_sig = run_plugin.s(plugin.name, plugin.config, plugin.dataset_filename, plugin.model_filename)
+    for evaluation_plugin in evaluation.evaluation_plugins:
+        config = None
+        if evaluation_plugin.plugin_config:
+            config = evaluation_plugin.plugin_config.config
+
+        run_plugin_sig = run_plugin.s(evaluation_plugin.name, config, evaluation_plugin.dataset_filename, evaluation_plugin.model_filename)
         post_measurements_sig = post_measurements.s(evaluation_pid)
         plugin_chain = chain(run_plugin_sig, post_measurements_sig)
         plugin_chains.append(plugin_chain)

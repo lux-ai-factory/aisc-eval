@@ -8,10 +8,14 @@ from pydantic import BaseModel
 
 # from a4s_eval.data_model.evaluation import Dataset
 
+class PluginConfig(BaseModel):
+    id: int
+    config : dict
+    created_at: str
 
 class Plugin(BaseModel):
     name: str
-    config: dict | None = None
+    plugin_config: PluginConfig | None = None
     dataset_filename: str | None = None
     model_filename: str | None = None
 
