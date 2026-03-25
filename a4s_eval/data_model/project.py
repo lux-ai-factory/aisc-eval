@@ -3,10 +3,15 @@
 This module defines the Project class which serves as a container for configurations
 and associations between datasets, models, and their evaluation settings.
 """
+import enum
 
 from pydantic import BaseModel
 
 # from a4s_eval.data_model.evaluation import Dataset
+
+class InputFile(BaseModel):
+    filename: str
+    type: InputFileType
 
 class PluginConfig(BaseModel):
     id: int

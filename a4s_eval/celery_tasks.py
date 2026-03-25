@@ -6,6 +6,7 @@ from celery import group, chain
 from a4s_eval.celery_app import celery_app
 from a4s_eval.data_model.evaluation import Evaluation
 from a4s_eval.data_model.measure import Measure
+from a4s_eval.data_model.project import InputFile
 from a4s_eval.service.api_client import (
     mark_completed,
     mark_failed,
@@ -48,7 +49,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     return {'evaluation_pid': evaluation_pid}
 
 @celery_app.task(bind=True)
-def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
+def run_plugin(self, plugin_name: str, plugin_config: dict, input_files: list[InputFile]) -> list[dict]:
     plugin: BaseEvaluationPlugin = plugin_loader.load(plugin_name)
 
     def progress_callback(task_progress: TaskProgress):
