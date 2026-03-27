@@ -41,7 +41,7 @@ def get_model_file_content(file_name: str) -> bytes:
 
 def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
     resp = requests.get(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,dataset,model,datashape,plugin"
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,plugin"
     )
     resp.raise_for_status()
     return resp.json()
@@ -54,25 +54,17 @@ def get_evaluation(
 
 
 def post_measures(
-    evaluation_pid: uuid.UUID, metrics: list[Measure]
+    evaluation_pid: uuid.UUID, plugin_name: str, metrics: list[Measure]
 ) -> requests.Response:
-    """Post metrics to the API for a specific evaluation.
 
-    Args:
-        evaluation_pid: UUID of the evaluation to post metrics for
-        metrics: List of metrics to post
-
-    Returns:
-        requests.Response: The API response
-    """
     logger.debug(
         f"post_metrics called with {len(metrics)} metrics for evaluation {evaluation_pid}"
     )
 
-    payload = [m.model_dump() for m in metrics]
+    payload = {
+        plugin_name: [m.model_dump() for m in metrics]
+    }
     logger.debug(f"Payload prepared, size: {len(payload)}")
-    if len(payload) > 0:
-        logger.debug(f"Sample payload item: {payload[0]}")
 
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/measures"
     logger.debug(f"Posting to URL: {url}")

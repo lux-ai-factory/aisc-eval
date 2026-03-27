@@ -36,8 +36,18 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         if evaluation_plugin.plugin_config:
             config = evaluation_plugin.plugin_config.config
 
-        run_plugin_sig = run_plugin.s(evaluation_plugin.name, config, evaluation_plugin.dataset_filename, evaluation_plugin.model_filename)
-        post_measurements_sig = post_measurements.s(evaluation_pid)
+        input_file_definitions = []
+        for input_file in evaluation_plugin.input_files:
+            input_file_definitions.append(
+                {
+                    'name': input_file.name,
+                    'input_type': input_file.input_type,
+                    'data': input_file.input_file.data,
+                }
+            )
+
+        run_plugin_sig = run_plugin.s(evaluation_plugin.name, config, input_file_definitions)
+        post_measurements_sig = post_measurements.s(evaluation_plugin.name, evaluation_pid)
         plugin_chain = chain(run_plugin_sig, post_measurements_sig)
         plugin_chains.append(plugin_chain)
 
@@ -48,7 +58,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     return {'evaluation_pid': evaluation_pid}
 
 @celery_app.task(bind=True)
-def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | None, model_filename: str | None) -> list[dict]:
+def run_plugin(self, plugin_name: str, plugin_config: dict, input_file_definitions: list[dict]) -> list[dict]:
     plugin: BaseEvaluationPlugin = plugin_loader.load(plugin_name)
 
     def progress_callback(task_progress: TaskProgress):
@@ -58,13 +68,15 @@ def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | 
 
     plugin._set_progress_callback(progress_callback)
 
-    if dataset_file:
-        dataset_file_contents = get_dataset_file_content(dataset_file)
-        plugin.set_dataset_input_provider(dataset_file_contents)
+    for input_file_definition in input_file_definitions:
+        if input_file_definition['input_type'] == "dataset":
+            file_content = get_dataset_file_content(input_file_definition['data'])
+        elif input_file_definition['input_type'] == "model":
+            file_content = get_model_file_content(input_file_definition['data'])
+        else:
+            raise ValueError(f"Unsupported file type: {input_file_definition['input_type']}")
 
-    if model_filename:
-        model_file_contents = get_model_file_content(model_filename)
-        plugin.set_model_input_provider(model_file_contents)
+        plugin.set_input_content(input_file_definition['name'], file_content)
 
     evaluation_output: Any = plugin.evaluate(plugin_config)
 
@@ -73,9 +85,9 @@ def run_plugin(self, plugin_name: str, plugin_config: dict, dataset_file: str | 
     return measurements_dict
 
 @celery_app.task
-def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID):
+def post_measurements(measurements_dict: list[dict], plugin_name: str, evaluation_pid: uuid.UUID):
     measurements = [Measure(**m) for m in measurements_dict]
-    response = post_measures(evaluation_pid, measurements)
+    response = post_measures(evaluation_pid, plugin_name, measurements)
 
 
 @celery_app.task

@@ -92,13 +92,9 @@ class Model(BaseModel):
 class Project(BaseModel):
     pid: uuid.UUID
     name: str
-    frequency: str
-    window_size: str
 
 
 class Evaluation(BaseModel):
     pid: uuid.UUID
-    dataset: Dataset | None
-    model: Model | None
     project: Project
     evaluation_plugins: list[Plugin]
