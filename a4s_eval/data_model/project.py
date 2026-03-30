@@ -15,7 +15,6 @@ class Plugin(BaseModel):
     dataset_filename: str | None = None
     model_filename: str | None = None
 
-
 class Project(BaseModel):
     """Represents a machine learning project with its evaluation configuration.
 

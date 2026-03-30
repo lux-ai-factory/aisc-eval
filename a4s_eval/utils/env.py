@@ -26,7 +26,7 @@ MQ_USE_SSL = handle_bool_var(os.getenv("MQ_USE_SSL", "false"))
 
 CELERY_APP_NAME = os.getenv("CELERY_APP_NAME", "celery_app")
 
-PLUGIN_PATH = os.getenv("PLUGIN_PATH", "")
+PLUGIN_PATH = os.getenv('PLUGIN_PATH', '')
 
 
 def redis_handle_ssl_option(redis_url: str) -> str:
@@ -97,10 +97,3 @@ def get_celery_broker_url() -> str:
 
 
 CELERY_BROKER_URL = get_celery_broker_url()
-
-# immudb audit configuration
-IMMUDB_HOST = os.getenv("IMMUDB_HOST", "immudb")
-IMMUDB_PORT = int(os.getenv("IMMUDB_PORT", "3322"))
-IMMUDB_USER = os.getenv("IMMUDB_USER", "immudb")
-IMMUDB_PASSWORD = os.getenv("IMMUDB_PASSWORD", "immudb")
-IMMUDB_DATABASE = os.getenv("IMMUDB_DATABASE", "defaultdb")
