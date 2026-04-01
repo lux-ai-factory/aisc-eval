@@ -80,3 +80,12 @@ def post_measures(
         raise ValueError(response.text)
 
     return response
+
+def upload_artifact(evaluation_pid: uuid.UUID, plugin_name: str, name: str, content: bytes) -> requests.Response:
+    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/artifacts"
+
+    files = {'file': (name, content)}
+    data = {'plugin_name': plugin_name}
+    response = requests.post(url, files=files, data=data)
+
+    return response
