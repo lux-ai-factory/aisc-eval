@@ -20,7 +20,7 @@ celery_config = {
     "task_acks_late": True,  # Acknowledge task only after completion
     "worker_prefetch_multiplier": 1,  # Process one task at a time
     "task_soft_time_limit": 1800,  # 30 minutes soft limit
-    "task_time_limit": 2100,  # 35 minutes hard limit (buffer for cleanup)
+    "task_time_limit": env.EVAL_TASK_TIME_LIMIT,
     "broker_connection_max_retries": 10,
     "redis_retry_on_timeout": True,
     "redis_socket_keepalive": True,
@@ -32,7 +32,8 @@ celery_config = {
     "worker_hijack_root_logger": False,
     "broker_use_ssl": env.MQ_USE_SSL,
     "results_extended": True,
-    "task_track_started": True
+    "task_track_started": True,
+    "task_default_queue": env.EVAL_DEFAULT_QUEUE_NAME
 }
 
 # Only add SSL configuration in production

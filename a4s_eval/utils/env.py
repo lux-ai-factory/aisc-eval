@@ -27,7 +27,8 @@ MQ_USE_SSL = handle_bool_var(os.getenv("MQ_USE_SSL", "false"))
 CELERY_APP_NAME = os.getenv("CELERY_APP_NAME", "celery_app")
 
 PLUGIN_PATH = os.getenv('PLUGIN_PATH', '')
-
+EVAL_DEFAULT_QUEUE_NAME = os.getenv('EVAL_DEFAULT_QUEUE_NAME','default')
+EVAL_TASK_TIME_LIMIT= os.getenv('EVAL_TASK_TIME_LIMIT','2100')
 
 def redis_handle_ssl_option(redis_url: str) -> str:
     # Only apply to ssl redis
