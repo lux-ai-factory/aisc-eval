@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Entrypoint script for A4S Evaluation Service
+# Entrypoint script for VERA Evaluation Service
 
 set -e
 
@@ -26,7 +26,7 @@ wait_for_dependencies() {
 # Function to start Celery worker
 start_worker() {
     echo "Starting Celery worker..."
-    exec celery -A a4s_eval.celery_worker worker --loglevel=info --concurrency=1 --hostname=worker@%h
+    exec celery -A vera_eval.celery_worker worker --loglevel=info --concurrency=1 --hostname=worker@%h
 }
 
 # Main function

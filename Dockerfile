@@ -44,8 +44,8 @@ COPY --from=builder /app /app
 ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
 
-CMD ["uv", "run", "celery", "-A", "a4s_eval.celery_worker:celery_app", "worker", "--loglevel=debug"]
+CMD ["uv", "run", "celery", "-A", "vera_eval.celery_worker:celery_app", "worker", "--loglevel=debug"]
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD uv run celery --app a4s_eval.celery_app inspect ping -d "celery@$$HOSTNAME"
+  CMD uv run celery --app vera_eval.celery_app inspect ping -d "celery@$$HOSTNAME"

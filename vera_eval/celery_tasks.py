@@ -4,10 +4,10 @@ from functools import partial
 
 from celery import group, chain, Task
 
-from a4s_eval.celery_app import celery_app
-from a4s_eval.data_model.evaluation import Evaluation
-from a4s_eval.data_model.measure import Measure
-from a4s_eval.service.api_client import (
+from vera_eval.celery_app import celery_app
+from vera_eval.data_model.evaluation import Evaluation
+from vera_eval.data_model.measure import Measure
+from vera_eval.service.api_client import (
     mark_completed,
     mark_failed,
     post_measures,
@@ -15,11 +15,11 @@ from a4s_eval.service.api_client import (
     get_dataset_file_content,
     get_model_file_content, upload_artifact,
 )
-from a4s_eval.utils.logging import get_logger
+from vera_eval.utils.logging import get_logger
 
 from a4s_plugin_manager.loader import Loader
 from a4s_plugin_interface import BaseEvaluationPlugin, TaskProgress
-from a4s_eval.utils import env
+from vera_eval.utils import env
 
 logger = get_logger()
 

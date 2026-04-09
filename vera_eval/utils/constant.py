@@ -1,4 +1,4 @@
-"""Constants used throughout the A4S Evaluation system.
+"""Constants used throughout the VERA Evaluation system.
 
 This module defines constant values that are used across different parts of the
 evaluation system to maintain consistency and avoid magic strings.

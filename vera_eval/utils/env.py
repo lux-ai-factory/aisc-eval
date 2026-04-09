@@ -1,14 +1,14 @@
-"""Environment configuration module for A4S Evaluation.
+"""Environment configuration module for VERA Evaluation.
 
 This module defines environment variables and their default values used throughout
-the A4S evaluation system. These can be overridden by setting actual environment
+the VERA evaluation system. These can be overridden by setting actual environment
 variables.
 """
 
 import os
 from urllib.parse import quote
 
-from a4s_eval.utils.logging import get_logger
+from vera_eval.utils.logging import get_logger
 
 logger = get_logger()
 

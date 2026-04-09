@@ -1,4 +1,4 @@
-"""File handling utilities for A4S evaluation.
+"""File handling utilities for VERA evaluation.
 
 This module provides utilities for downloading, caching, and reading dataset and model
 files. It handles file downloads from the API server and manages a local cache to
@@ -7,7 +7,7 @@ avoid redundant downloads.
 
 import os
 import pandas as pd
-from a4s_eval.utils import env
+from vera_eval.utils import env
 import requests
 
 # Directory names for caching different types of files
