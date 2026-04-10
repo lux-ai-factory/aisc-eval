@@ -1,4 +1,4 @@
-# A4S Evaluation module
+# VERA Evaluation module
 
 # Quickstart for Evaluation module
 
@@ -20,16 +20,16 @@ uv sync --frozen --group dev
 uv run pre-commit install
 ``` -->
 
-### Launching locally the A4S Evaluation API
-With the services running, you can now launch the A4S Evaluation API locally.
+### Launching locally the VERA Evaluation API
+With the services running, you can now launch the VERA Evaluation API locally.
 
 ```bash
 uv sync --frozen --group dev
 bash tasks/start_api.sh
 ```
 
-### Launching locally the A4S Evaluation Worker
-With the services running, you can now launch the A4S Evaluation Worker locally.
+### Launching locally the VERA Evaluation Worker
+With the services running, you can now launch the VERA Evaluation Worker locally.
 
 ```bash
 uv sync --frozen --group dev
@@ -57,7 +57,7 @@ uv run pytest tests/
 
 ### How to log and customise logs
 
-We use a single package-wide logger named as the main package: `a4s_api`.
+We use a single package-wide logger named as the main package: `vera_api`.
 
 To log, simply import the logger and use it:
 

@@ -4,10 +4,10 @@ from typing import Any
 import requests
 from pydantic import BaseModel
 
-from a4s_eval.data_model.evaluation import Evaluation
-from a4s_eval.data_model.measure import Measure
-from a4s_eval.utils.env import API_URL_PREFIX
-from a4s_eval.utils.logging import get_logger
+from vera_eval.data_model.evaluation import Evaluation
+from vera_eval.data_model.measure import Measure
+from vera_eval.utils.env import API_URL_PREFIX
+from vera_eval.utils.logging import get_logger
 
 logger = get_logger()
 

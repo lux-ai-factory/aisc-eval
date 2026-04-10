@@ -1,4 +1,4 @@
-# Development Dockerfile for A4S Evaluation Service
+# Development Dockerfile for VERA Evaluation Service
 # This Dockerfile sets up a development environment with hot-reloading capabilities
 
 # Use Python slim image as base

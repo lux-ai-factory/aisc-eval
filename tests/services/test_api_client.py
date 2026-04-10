@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 import pandas as pd
 import pytest
 
-from a4s_eval.service.api_client import get_evaluation
+from vera_eval.service.api_client import get_evaluation
 
 TEST_UUIDS = {
     "project": uuid.UUID("afb49e3f-813d-8888-9919-ee179d1090e6"),

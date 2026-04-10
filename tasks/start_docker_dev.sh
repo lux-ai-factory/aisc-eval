@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script to build and run the development Docker container for A4S Evaluation Service
+# Script to build and run the development Docker container for VERA Evaluation Service
 # This script:
 # 1. Builds the development Docker image using Dockerfile.dev
 # 2. Runs the container with appropriate volume mounting and port forwarding
