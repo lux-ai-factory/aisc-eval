@@ -1,4 +1,4 @@
-"""PyTest configuration and fixtures for A4S EVAL tests.
+"""PyTest configuration and fixtures for VERA EVAL tests.
 
 This module configures the test environment and provides shared fixtures
 for all test modules. It ensures a clean database state before each test session.
@@ -10,7 +10,7 @@ import onnxruntime as ort
 import pandas as pd
 import pytest
 
-from a4s_eval.data_model.evaluation import Dataset, DataShape, Model
+from vera_eval.data_model.evaluation import Dataset, DataShape, Model
 
 
 @pytest.fixture(scope="module")

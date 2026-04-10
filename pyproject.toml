@@ -1,7 +1,7 @@
 [project]
-name = "a4s_eval"
-version = "0.1.0"
-description = "Evaluation service for A4S"
+name = "vera-eval"
+version = "0.2.1"
+description = "Evaluation service for VERA"
 authors = [
     { name = "Thibault Simonetto", email = "thibault.simonetto@uni.lu" },
     { name = "Maxime Cordy", email = "maxime.cordy@uni.lu" },
@@ -59,7 +59,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-a4s-plugin-manager = { git = "https://github.com/lux-ai-factory/a4s-plugin-manager.git" }
+a4s-plugin-manager = { git = "https://github.com/lux-ai-factory/a4s-plugin-manager.git" , tag = "v0.2.1" }
 
 
 [tool.isort]

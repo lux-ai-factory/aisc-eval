@@ -6,7 +6,7 @@ import pandas as pd
 from onnxruntime.capi.onnxruntime_inference_collection import InferenceSession
 from pydantic import BaseModel, ConfigDict, field_serializer
 
-from a4s_eval.data_model.project import Plugin
+from vera_eval.data_model.project import Plugin
 
 
 class FeatureType(str, enum.Enum):

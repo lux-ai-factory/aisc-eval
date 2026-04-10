@@ -1,4 +1,4 @@
-"""Basic integration tests for A4S Evaluation service.
+"""Basic integration tests for VERA Evaluation service.
 
 These tests verify core functionality without requiring external services.
 They are designed to run in CI environments reliably.
@@ -9,14 +9,14 @@ from datetime import datetime
 
 import pytest
 
-from a4s_eval.data_model.evaluation import Feature, FeatureType
-from a4s_eval.data_model.measure import Measure
+from vera_eval.data_model.evaluation import Feature, FeatureType
+from vera_eval.data_model.measure import Measure
 
 
 def test_celery_tasks_import():
     """Test that Celery tasks can be imported without errors."""
     try:
-        from a4s_eval import celery_tasks
+        from vera_eval import celery_tasks
 
         # Just verify the module loads, don't try to connect to Redis
         assert hasattr(celery_tasks, "celery_app")

@@ -1,4 +1,4 @@
-"""Data model for representing projects in the A4S evaluation framework.
+"""Data model for representing projects in the VERA evaluation framework.
 
 This module defines the Project class which serves as a container for configurations
 and associations between datasets, models, and their evaluation settings.

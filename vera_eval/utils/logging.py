@@ -1,6 +1,6 @@
-"""Logging configuration and utilities for A4S evaluation.
+"""Logging configuration and utilities for VERA evaluation.
 
-This module provides custom logging configuration for the A4S evaluation system,
+This module provides custom logging configuration for the VERA evaluation system,
 including JSON formatting, filtering capabilities, and queue-based logging setup.
 It supports structured logging with custom attributes and asynchronous logging
 through a queue handler.
@@ -19,7 +19,7 @@ from typing import override
 import yaml
 
 # Main application logger instances
-app_logger = logging.getLogger("a4s_eval")
+app_logger = logging.getLogger("vera_eval")
 root_logger = logging.getLogger()
 
 
