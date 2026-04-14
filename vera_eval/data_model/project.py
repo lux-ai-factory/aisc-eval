@@ -7,7 +7,7 @@ import enum
 
 from pydantic import BaseModel
 
-from a4s_plugin_interface import InputType
+from vera_plugin_interface import InputType
 
 class InputFile(BaseModel):
     pid: str

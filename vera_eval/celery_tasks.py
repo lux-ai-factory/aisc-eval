@@ -17,8 +17,8 @@ from vera_eval.service.api_client import (
 )
 from vera_eval.utils.logging import get_logger
 
-from a4s_plugin_manager.loader import Loader
-from a4s_plugin_interface import BaseEvaluationPlugin, TaskProgress
+from vera_plugin_manager.loader import Loader
+from vera_plugin_interface import BaseEvaluationPlugin, TaskProgress
 from vera_eval.utils import env
 
 logger = get_logger()
