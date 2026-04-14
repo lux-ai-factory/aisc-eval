@@ -1333,7 +1333,7 @@ wheels = [
 
 [[package]]
 name = "vera-eval"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "." }
 dependencies = [
     { name = "celery", extra = ["redis"] },
@@ -1402,8 +1402,8 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.6.1,<2" },
     { name = "scipy", specifier = ">=1.15.1,<2" },
     { name = "skl2onnx", specifier = ">=1.18.0,<2" },
-    { name = "vera-plugin-interface" },
-    { name = "vera-plugin-manager", git = "https://github.com/lux-ai-factory/vera-plugin-manager.git" },
+    { name = "vera-plugin-interface", specifier = ">=0.2.2" },
+    { name = "vera-plugin-manager", git = "https://github.com/lux-ai-factory/vera-plugin-manager?tag=v0.2.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -1429,8 +1429,8 @@ test = [
 
 [[package]]
 name = "vera-plugin-interface"
-version = "0.2.1"
-source = { git = "https://github.com/lux-ai-factory/vera-plugin-interface.git#55d192ea6a23aedc172940c9bb57067f29a5c94c" }
+version = "0.2.2"
+source = { git = "https://github.com/lux-ai-factory/vera-plugin-interface.git?tag=v0.2.2#d0b5df08aed9bbf2e1f2bd3066cf03c5c106bb8c" }
 dependencies = [
     { name = "pydantic" },
     { name = "rich" },
@@ -1438,8 +1438,8 @@ dependencies = [
 
 [[package]]
 name = "vera-plugin-manager"
-version = "0.2.1"
-source = { git = "https://github.com/lux-ai-factory/vera-plugin-manager.git#be2e91f4cfe9138cef7cf5e8845bbbf4d4626dd7" }
+version = "0.2.2"
+source = { git = "https://github.com/lux-ai-factory/vera-plugin-manager?tag=v0.2.2#9f692d03825855ffac224c537f79c0d40d89231d" }
 dependencies = [
     { name = "vera-plugin-interface" },
 ]
