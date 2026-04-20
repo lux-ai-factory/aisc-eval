@@ -54,7 +54,7 @@ def get_evaluation(
 
 
 def post_measures(
-    evaluation_pid: uuid.UUID, plugin_name: str, metrics: list[Measure]
+    evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID, metrics: list[Measure]
 ) -> requests.Response:
 
     logger.debug(
@@ -62,11 +62,11 @@ def post_measures(
     )
 
     payload = {
-        plugin_name: [m.model_dump() for m in metrics]
+        str(evaluation_plugin_uuid): [m.model_dump() for m in metrics]
     }
     logger.debug(f"Payload prepared, size: {len(payload)}")
 
-    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/measures"
+    url = f"{API_URL_PREFIX}/evaluations/{str(evaluation_pid)}/measures"
     logger.debug(f"Posting to URL: {url}")
 
     response = requests.post(url, json=payload)
@@ -81,11 +81,11 @@ def post_measures(
 
     return response
 
-def upload_artifact(evaluation_pid: uuid.UUID, plugin_name: str, name: str, content: bytes) -> requests.Response:
+def upload_artifact(evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID, name: str, content: bytes) -> requests.Response:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/artifacts"
 
     files = {'file': (name, content)}
-    data = {'plugin_name': plugin_name}
+    data = {'evaluation_plugin_uuid': str(evaluation_plugin_uuid)}
     response = requests.post(url, files=files, data=data)
 
     return response

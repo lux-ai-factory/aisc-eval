@@ -1,98 +1,12 @@
-import enum
 import uuid
-from typing import Any
 
-import pandas as pd
-from onnxruntime.capi.onnxruntime_inference_collection import InferenceSession
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel
 
 from vera_eval.data_model.project import Plugin
-
-
-class FeatureType(str, enum.Enum):
-    """Enumeration of supported feature data types.
-
-    Attributes:
-        INTEGER: For integer numerical features
-        FLOAT: For floating-point numerical features
-        CATEGORICAL: For categorical/nominal features
-        DATE: For date features
-    """
-
-    INTEGER = "Integer"
-    FLOAT = "Float"
-    CATEGORICAL = "Categorical"
-    DATE = "Date"
-
-    # Quickfix to allow lowercase deserialization
-    @classmethod
-    def _missing_(cls, value):
-        # Normalize to lowercase for comparison
-        if isinstance(value, str):
-            value_lower = value.lower()
-            for member in cls:
-                if member.value.lower() == value_lower:
-                    return member
-        raise ValueError(f"{value!r} is not a valid {cls.__name__}")
-
-
-class Feature(BaseModel):
-    """Represents a single feature (column) in a dataset.
-
-    This class defines the properties of individual features,
-    including their data type and valid value ranges.
-
-    Attributes:
-        id (int): Primary key for the feature.
-        name (str): Name of the feature.
-        feature_type (FeatureType): Data type of the feature.
-        min_value (Optional[float]): Minimum allowed value.
-        max_value (Optional[float]): Maximum allowed value.
-    """
-
-    # Feature attributes
-    pid: uuid.UUID
-    name: str
-    feature_type: FeatureType
-    min_value: float | Any
-    max_value: float | Any
-
-    @field_serializer("feature_type")
-    def serialize_feature_type(self, feature_type: FeatureType) -> str:
-        return feature_type.value
-
-    @field_serializer("pid")
-    def serialize_pid(self, pid: uuid.UUID | None) -> str | None:
-        return str(pid) if pid is not None else None
-
-
-class DataShape(BaseModel):
-    features: list[Feature]
-    target: Feature | None = None
-    date: Feature | None = None
-
-
-class Dataset(BaseModel):
-    pid: uuid.UUID
-    shape: DataShape
-    data: pd.DataFrame | None = None
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-
-class Model(BaseModel):
-    pid: uuid.UUID
-    model: InferenceSession | None = None
-
-    dataset: Dataset
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
 
 class Project(BaseModel):
     pid: uuid.UUID
     name: str
-
 
 class Evaluation(BaseModel):
     pid: uuid.UUID
