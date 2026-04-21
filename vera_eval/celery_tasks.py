@@ -3,10 +3,9 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
-from typing import Any
-from functools import partial
 
 from celery import group, chain, Task
 
@@ -29,7 +28,8 @@ from vera_eval.utils import env
 
 logger = get_logger()
 
-plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX, env.PACKAGE_REGISTRY_USER,
+plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX,
+                               env.PACKAGE_REGISTRY_USER,
                                env.PACKAGE_REGISTRY_PASSWORD)
 
 def artifact_callback(name: str, content: bytes, evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID):
@@ -77,14 +77,15 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         plugin_chains.append(plugin_chain)
 
     group_task = group(plugin_chains) | finalize_evaluation.si(evaluation_pid)
-
     group_result = group_task.apply_async()
 
     return {'evaluation_pid': evaluation_pid}
 
 
 @celery_app.task(bind=True)
-def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict, input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[dict]:
+def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
+               input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[
+    dict]:
     if not plugin_loader.discovered_packages:
         plugin_loader.list_packages()
 
@@ -97,11 +98,12 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
     plugin_info = available_versions[version]
 
-    with tempfile.TemporaryDirectory(delete=False) as workspace_path:
-        workspace = Path(workspace_path)
+with tempfile.TemporaryDirectory(delete=True) as tmp_dir:
+        workspace_path = Path(tmp_dir)
 
-        input_dir = workspace / "input"
-        output_dir = workspace / "output"
+        # Setup internal workspace structure
+        input_dir = workspace_path / "input"
+        output_dir = workspace_path / "output"
         input_dir.mkdir()
         output_dir.mkdir()
 
@@ -126,62 +128,40 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             "plugin_config": plugin_config,
         }
 
-        config_path = workspace / "config.json"
+        config_path = workspace_path / "config.json"
         config_path.write_text(json.dumps(config_data, indent=2))
 
         runtime_script = Path(__file__).parent / "plugin_runtime.py"
 
-        # Create environment for subprocess that allows UV to sync dependencies
-        # Remove environment variables that interfere with UV's isolated execution
+        # Create environment for subprocess
         env_vars = dict(os.environ)
-        env_vars.pop("UV_NO_SYNC", None)  # Remove UV_NO_SYNC to allow dependency installation
-        env_vars.pop("VIRTUAL_ENV", None)  # Remove VIRTUAL_ENV to prevent path mismatch warnings
+        env_vars.pop("UV_NO_SYNC", None)
+        env_vars.pop("VIRTUAL_ENV", None)
 
-        # Handle local vs registry plugins
         if plugin_info["source"] == "local":
-            # For local plugins, copy plugin source to workspace and create isolated venv
-            plugin_dir = workspace / "plugin"
-
-            # Copy plugin files to workspace (excluding .venv and other cache dirs)
-            logger.debug(f"Copying plugin from {plugin_info['pkg_root']} to {plugin_dir}")
-            shutil.copytree(
-                plugin_info["pkg_root"],
-                plugin_dir,
-                ignore=shutil.ignore_patterns('.venv', '__pycache__', '*.pyc', '.pytest_cache', '.git')
-            )
-
-            # Sync dependencies AND install the plugin package itself
-            # By default, uv sync installs both dependencies and the project itself
-            sync_cmd = ["uv", "sync", "-v", "--directory", str(plugin_dir)]
-            logger.debug(f"Syncing plugin and dependencies: {' '.join(sync_cmd)}")
-            sync_result = subprocess.run(sync_cmd, capture_output=True, text=True, env=env_vars)
-
-            if sync_result.returncode != 0:
-                logger.error(f"Failed to sync plugin: {sync_result.stderr}")
-                raise RuntimeError(f"Failed to sync plugin: {sync_result.stderr}")
-
-            # Run from the workspace plugin directory
-            cmd = ["uv", "run", "-v", "--directory", str(plugin_dir), str(runtime_script), "--working-dir", str(workspace)]
+            install_target = str(plugin_info["pkg_root"].resolve())
         else:
-            # For registry plugins, set working directory and install package
-            cmd = [
-                "uv", "run", "-v",
-                "--directory", str(workspace),
-                "--extra-index-url", plugin_loader.client.full_index_url,
+            install_target = f"{package_name}=={version}"
 
-                "--with", f"{package_name}=={version}",
+        cmd = [
+            "uv", "run", "-v",
+            "--directory", str(workspace_path),
+            "--extra-index-url", f"{plugin_loader.client.full_index_url}/+simple/",
+            "--with", install_target,
+            "--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.2",
+            str(runtime_script),
+            "--working-dir", str(workspace_path)
+        ]
 
-                # We have to forcefully inject the interface here, once its publicly published somewhere we can remove this
-                "--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.2",
-
-                str(runtime_script),
-                "--working-dir", str(workspace)
-            ]
-
+        logger.debug(f"Running uv command: {' '.join(cmd)}")
+        start_time = time.perf_counter()
         result = subprocess.run(cmd, capture_output=True, text=True, env=env_vars)
+        end_time = time.perf_counter()
+        duration = end_time - start_time
 
         log_file = output_dir / "plugin_execution.log"
         log_content = f"=== Plugin Execution Log ===\n\n"
+        log_content += f"Execution Time: {duration:.2f} seconds\n\n"
         log_content += f"=== STDOUT ===\n{result.stdout}\n\n"
         log_content += f"=== STDERR ===\n{result.stderr}\n\n"
         log_content += f"=== Return Code ===\n{result.returncode}\n"
@@ -225,10 +205,10 @@ def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
 
 @celery_app.task
 def handle_error(
-    evaluation_id: uuid.UUID,
-    request: object,
-    exc: BaseException,
-    traceback: object,
+        evaluation_id: uuid.UUID,
+        request: object,
+        exc: BaseException,
+        traceback: object,
 ) -> None:
     logger.error(f"Error in evaluation {evaluation_id}:")
     logger.error(f"--\n\n{request} {exc} {traceback}")
