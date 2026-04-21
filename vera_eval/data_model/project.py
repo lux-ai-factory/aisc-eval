@@ -8,25 +8,30 @@ from pydantic import BaseModel
 
 from vera_plugin_interface import InputType
 
+
 class InputFile(BaseModel):
     pid: str
     name: str
     data: str
+
 
 class InputFileDefinition(BaseModel):
     name: str
     input_type: InputType
     input_file: InputFile
 
+
 class PluginConfig(BaseModel):
     id: int
-    config : dict
+    config: dict
     created_at: str
+
 
 class Plugin(BaseModel):
     name: str
     plugin_config: PluginConfig | None = None
     input_files: list[InputFileDefinition] = []
+
 
 class Project(BaseModel):
     """Represents a machine learning project with its evaluation configuration.
