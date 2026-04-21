@@ -3,7 +3,6 @@
 This module defines the Project class which serves as a container for configurations
 and associations between datasets, models, and their evaluation settings.
 """
-import enum
 
 from pydantic import BaseModel
 

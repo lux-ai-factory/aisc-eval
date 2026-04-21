@@ -62,8 +62,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         plugin_chains.append(plugin_chain)
 
     group_task = group(plugin_chains) | finalize_evaluation.si(evaluation_pid)
-
-    group_result = group_task.apply_async()
+    group_task.apply_async()
 
     return {'evaluation_pid': evaluation_pid}
 
@@ -95,7 +94,7 @@ def run_plugin(self, plugin_name: str, plugin_config: dict, input_file_definitio
 @celery_app.task
 def post_measurements(measurements_dict: list[dict], plugin_name: str, evaluation_pid: uuid.UUID):
     measurements = [Measure(**m) for m in measurements_dict]
-    response = post_measures(evaluation_pid, plugin_name, measurements)
+    post_measures(evaluation_pid, plugin_name, measurements)
 
 @celery_app.task
 def upload_evaluation_artifact(name: str, content: bytes, evaluation_pid: uuid.UUID, plugin_name: str):
