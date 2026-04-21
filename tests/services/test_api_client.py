@@ -24,7 +24,6 @@ def mock_evaluation_data() -> dict[str, any]:
     for record in metadata:
         record["pid"] = uuid.uuid4()
 
-
     data_shape = {
         "features": [
             item
