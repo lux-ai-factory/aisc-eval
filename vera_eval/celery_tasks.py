@@ -1,14 +1,14 @@
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import time
 import uuid
 from pathlib import Path
 
-from celery import group, chain, Task
+from celery import group, chain
 
+from vera_eval import plugin_runtime
 from vera_eval.celery_app import celery_app
 from vera_eval.data_model.evaluation import Evaluation
 from vera_eval.data_model.measure import Measure
@@ -23,7 +23,7 @@ from vera_eval.service.api_client import (
 from vera_eval.utils.logging import get_logger
 
 from vera_plugin_manager.loader import Loader
-from vera_plugin_interface import BaseEvaluationPlugin, TaskProgress
+from vera_plugin_interface import TaskProgress
 from vera_eval.utils import env
 
 logger = get_logger()
@@ -32,13 +32,11 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PA
                                env.PACKAGE_REGISTRY_USER,
                                env.PACKAGE_REGISTRY_PASSWORD)
 
-def artifact_callback(name: str, content: bytes, evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID):
-    upload_evaluation_artifact.delay(name, content, evaluation_pid, evaluation_plugin_pid)
 
-def progress_callback(task_progress: TaskProgress, plugin_name: str, task: Task):
-    meta = task_progress.model_dump()
-    meta["plugin_name"] = plugin_name
-    task.update_state(state='RUNNING', meta=meta)
+def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: str):
+    meta = {**task_progress.model_dump(), "plugin_name": plugin_name}
+
+    celery_app.backend.store_result(task_id, meta, state="RUNNING")
 
 
 @celery_app.task(bind=True)
@@ -122,15 +120,15 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
-            "is_registry": plugin_info["source"] != "local",
             "input_mapping": input_mapping,
             "plugin_config": plugin_config,
+            "task_id": str(self.request.id)
         }
 
         config_path = workspace_path / "config.json"
         config_path.write_text(json.dumps(config_data, indent=2))
 
-        runtime_script = Path(__file__).parent / "plugin_runtime.py"
+        runtime_script = os.path.abspath(plugin_runtime.__file__)
 
         # Create environment for subprocess
         env_vars = dict(os.environ)
@@ -148,8 +146,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             "--extra-index-url", f"{plugin_loader.client.full_index_url}/+simple/",
             "--with", install_target,
             "--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.2",
-            str(runtime_script),
-            "--working-dir", str(workspace_path)
+            str(runtime_script)
         ]
 
         logger.debug(f"Running uv command: {' '.join(cmd)}")
@@ -183,10 +180,6 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
     measurements = [Measure(**m) for m in measurements_dict]
     response = post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
-
-@celery_app.task
-def upload_evaluation_artifact(name: str, content: bytes, evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
-    upload_artifact(evaluation_pid, evaluation_plugin_uuid, name, content)
 
 
 @celery_app.task

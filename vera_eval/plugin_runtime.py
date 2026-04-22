@@ -21,6 +21,8 @@ from pathlib import Path
 
 from vera_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
 
+from vera_eval.celery_tasks import progress_callback
+
 
 def artifact_callback(name: str, content: bytes, output_dir: Path):
     """Callback that writes artifact files to the output folder."""
@@ -29,7 +31,7 @@ def artifact_callback(name: str, content: bytes, output_dir: Path):
     print(f"📄 Artifact saved: {artifact_path}")
 
 
-def load_plugin_from_registry(plugin_spec: str):
+def load_plugin(plugin_spec: str):
     """Load a BaseEvaluationPlugin subclass from an installed package.
 
     Args:
@@ -55,73 +57,8 @@ def load_plugin_from_registry(plugin_spec: str):
     return plugin_class
 
 
-def load_plugin_from_module(plugin_name: str):
-    """Load a BaseEvaluationPlugin subclass from an installed module.
-
-    This scans all installed packages to find a plugin class with the matching display_name.
-    Works for both local plugins (installed via uv in the workspace) and registry plugins.
-
-    Args:
-        plugin_name: The display name of the plugin class
-    """
-    import pkgutil
-    import inspect as insp
-
-    # Scan all available packages
-    # UV has installed the plugin package in the venv's site-packages
-    for importer, modname, ispkg in pkgutil.iter_modules():
-        # Skip obviously non-plugin packages
-        if modname.startswith('_') or modname in ('pip', 'setuptools', 'pkg_resources'):
-            continue
-
-        try:
-            module = importlib.import_module(modname)
-
-            # Check if this module exports plugin classes in __all__
-            if hasattr(module, '__all__'):
-                for class_name in module.__all__:
-                    try:
-                        obj = getattr(module, class_name)
-                        if (
-                            isinstance(obj, type)
-                            and issubclass(obj, BaseEvaluationPlugin)
-                            and obj != BaseEvaluationPlugin
-                            and obj.display_name == plugin_name
-                        ):
-                            return obj
-                    except Exception:
-                        continue
-
-            # Also check all class members
-            for name, obj in insp.getmembers(module, insp.isclass):
-                try:
-                    if (
-                        issubclass(obj, BaseEvaluationPlugin)
-                        and obj != BaseEvaluationPlugin
-                        and obj.display_name == plugin_name
-                    ):
-                        return obj
-                except Exception:
-                    continue
-
-        except Exception:
-            continue
-
-    raise ValueError(f"Could not find plugin class with display_name '{plugin_name}'")
-
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="Execute a BaseEvaluationPlugin instance"
-    )
-    parser.add_argument(
-        "--working-dir",
-        type=Path,
-        help="Working directory containing config.json, input/, and output/ folders (defaults to cwd)"
-    )
-
-    args = parser.parse_args()
-    working_dir = args.working_dir.resolve() if args.working_dir else Path.cwd()
+    working_dir =  Path.cwd()
 
     try:
         config_path = working_dir / "config.json"
@@ -130,7 +67,6 @@ def main():
             sys.exit(1)
 
         output_dir = working_dir / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         with open(config_path) as f:
             config = json.load(f)
@@ -140,19 +76,16 @@ def main():
             print("❌ Missing 'plugin_source' in config.json", file=sys.stderr)
             sys.exit(1)
 
-        is_registry = config.get("is_registry", False)
 
-        if is_registry:
-            print(f"📦 Loading plugin from registry: {plugin_source}")
-            plugin_class = load_plugin_from_registry(plugin_source)
-        else:
-            print(f"📦 Loading local plugin: {plugin_source}")
-            plugin_class = load_plugin_from_module(plugin_source)
+        print(f"📦 Loading plugin: {plugin_source}")
+        plugin_class = load_plugin(plugin_source)
 
         print(f"🔌 Instantiating plugin: {plugin_class.__name__}")
         plugin = plugin_class()
 
         plugin._set_artifact_callback(partial(artifact_callback, output_dir=output_dir))
+
+        plugin._set_progress_callback(partial(progress_callback, plugin_name=plugin.display_name, task_id=config["task_id"]))
 
         input_mapping = config.get("input_mapping", {})
         for name, path in input_mapping.items():
