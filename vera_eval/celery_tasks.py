@@ -84,8 +84,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-               input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[
-    dict]:
+               input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[dict]:
     if not plugin_loader.discovered_packages:
         plugin_loader.list_packages()
 
@@ -98,7 +97,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
     plugin_info = available_versions[version]
 
-with tempfile.TemporaryDirectory(delete=True) as tmp_dir:
+    with tempfile.TemporaryDirectory(delete=True) as tmp_dir:
         workspace_path = Path(tmp_dir)
 
         # Setup internal workspace structure
