@@ -142,14 +142,14 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         cmd = [
             "uv", "run", "-v",
             "--directory", str(workspace_path),
-            "--extra-index-url", f"{plugin_loader.client.full_index_url}/+simple/",
-            "--with", install_target,
-            str(runtime_script)
+            "--extra-index-url", plugin_loader.client.simple_index_url,
+            "--with", install_target
         ]
 
         if plugin_info["source"] != "local":
-            cmd.extend(["--with",
-                        "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.2"])
+            cmd.extend(["--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.2"])
+
+        cmd.append(str(runtime_script))
 
         logger.debug(f"Running uv command: {' '.join(cmd)}")
         start_time = time.perf_counter()
