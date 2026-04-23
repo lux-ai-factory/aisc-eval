@@ -35,7 +35,6 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PA
 
 def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: str):
     meta = {**task_progress.model_dump(), "plugin_name": plugin_name}
-
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
 
 
@@ -82,7 +81,8 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-               input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[dict]:
+               input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[
+    dict]:
     if not plugin_loader.discovered_packages:
         plugin_loader.list_packages()
 
@@ -121,8 +121,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
-            "plugin_config": plugin_config,
-            "task_id": str(self.request.id)
+            "plugin_config": plugin_config
         }
 
         config_path = workspace_path / "config.json"
@@ -145,32 +144,67 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             "--directory", str(workspace_path),
             "--extra-index-url", f"{plugin_loader.client.full_index_url}/+simple/",
             "--with", install_target,
-            "--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.2",
             str(runtime_script)
         ]
 
+        if plugin_info["source"] != "local":
+            cmd.extend(["--with",
+                        "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.2"])
+
         logger.debug(f"Running uv command: {' '.join(cmd)}")
         start_time = time.perf_counter()
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env_vars)
+
+        stdout_lines = []
+        stderr_path = workspace_path / "stderr.tmp"
+
+        with open(stderr_path, "w+") as stderr_file:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+                text=True,
+                bufsize=1,
+                env=env_vars
+            )
+
+            for line in process.stdout:
+                stdout_lines.append(line)
+                stripped_line = line.strip()
+
+                if stripped_line.startswith("{") and stripped_line.endswith("}"):
+                    try:
+                        progress_data = json.loads(stripped_line)
+                        task_progress = TaskProgress(**progress_data)
+
+                        progress_callback(task_progress, plugin_name, str(self.request.id))
+                    except Exception:
+                        pass
+
+            returncode = process.wait()
+
+            stderr_file.seek(0)
+            stderr_content = stderr_file.read()
+
         end_time = time.perf_counter()
         duration = end_time - start_time
+        stdout_content = "".join(stdout_lines)
 
         log_file = output_dir / "plugin_execution.log"
         log_content = f"=== Plugin Execution Log ===\n\n"
         log_content += f"Execution Time: {duration:.2f} seconds\n\n"
-        log_content += f"=== STDOUT ===\n{result.stdout}\n\n"
-        log_content += f"=== STDERR ===\n{result.stderr}\n\n"
-        log_content += f"=== Return Code ===\n{result.returncode}\n"
+        log_content += f"=== STDOUT ===\n{stdout_content}\n\n"
+        log_content += f"=== STDERR ===\n{stderr_content}\n\n"
+        log_content += f"=== Return Code ===\n{returncode}\n"
         log_file.write_text(log_content)
 
-        if result.returncode != 0:
-            raise RuntimeError(f"Plugin failed: {result.stderr}")
+        if returncode != 0:
+            raise RuntimeError(f"Plugin failed: {stderr_content}")
 
         measures_file = output_dir / "measures.json"
         measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
 
         for file in output_dir.iterdir():
-            if file.name != "measures.json":
+            if file.name != "measures.json" and file.name != "stderr.tmp":
                 upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
 
         return measures

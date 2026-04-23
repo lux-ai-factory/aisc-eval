@@ -11,7 +11,6 @@ Expected directory structure:
     └── output/          # Output files (created if doesn't exist)
 """
 
-import argparse
 import importlib
 import importlib.util
 import json
@@ -19,16 +18,25 @@ import sys
 from functools import partial
 from pathlib import Path
 
+from vera_plugin_interface import TaskProgress
 from vera_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
 
-from vera_eval.celery_tasks import progress_callback
 
-
-def artifact_callback(name: str, content: bytes, output_dir: Path):
+def write_artifact_file(name: str, content: bytes, output_dir: Path):
     """Callback that writes artifact files to the output folder."""
     artifact_path = output_dir / name
     artifact_path.write_bytes(content)
     print(f"📄 Artifact saved: {artifact_path}")
+
+
+def print_progress(task_progress: TaskProgress):
+    """
+    Callback that streams progress updates to the parent Celery process.
+    It serializes the Pydantic model to JSON and prints it to stdout.
+    The parent process intercepts this JSON string in real-time.
+    """
+    progress_json = task_progress.model_dump_json()
+    print(progress_json, flush=True)
 
 
 def load_plugin(plugin_spec: str):
@@ -83,9 +91,10 @@ def main():
         print(f"🔌 Instantiating plugin: {plugin_class.__name__}")
         plugin = plugin_class()
 
-        plugin._set_artifact_callback(partial(artifact_callback, output_dir=output_dir))
+        plugin._set_artifact_callback(partial(write_artifact_file, output_dir=output_dir))
 
-        plugin._set_progress_callback(partial(progress_callback, plugin_name=plugin.display_name, task_id=config["task_id"]))
+        plugin._set_progress_callback(print_progress)
+
 
         input_mapping = config.get("input_mapping", {})
         for name, path in input_mapping.items():
