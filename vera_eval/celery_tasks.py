@@ -85,6 +85,11 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
                input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[
     dict]:
+
+    if not plugin_loader.discovered_packages:
+        logger.debug(f"Worker cache empty. Fetching packages from Devpi...")
+        plugin_loader.list_packages()
+
     if package_name not in plugin_loader.discovered_packages:
         raise KeyError(f"Package '{package_name}' not found.")
 
