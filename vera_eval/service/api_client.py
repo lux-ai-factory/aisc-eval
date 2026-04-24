@@ -11,9 +11,9 @@ from vera_eval.utils.logging import get_logger
 
 logger = get_logger()
 
+
 class EvaluationStatusUpdateDTO(BaseModel):
     status: str
-
 
 
 def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
@@ -56,14 +56,11 @@ def get_evaluation(
 def post_measures(
     evaluation_pid: uuid.UUID, plugin_name: str, metrics: list[Measure]
 ) -> requests.Response:
-
     logger.debug(
         f"post_metrics called with {len(metrics)} metrics for evaluation {evaluation_pid}"
     )
 
-    payload = {
-        plugin_name: [m.model_dump() for m in metrics]
-    }
+    payload = {plugin_name: [m.model_dump() for m in metrics]}
     logger.debug(f"Payload prepared, size: {len(payload)}")
 
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/measures"
@@ -81,11 +78,14 @@ def post_measures(
 
     return response
 
-def upload_artifact(evaluation_pid: uuid.UUID, plugin_name: str, name: str, content: bytes) -> requests.Response:
+
+def upload_artifact(
+    evaluation_pid: uuid.UUID, plugin_name: str, name: str, content: bytes
+) -> requests.Response:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/artifacts"
 
-    files = {'file': (name, content)}
-    data = {'plugin_name': plugin_name}
+    files = {"file": (name, content)}
+    data = {"plugin_name": plugin_name}
     response = requests.post(url, files=files, data=data)
 
     return response
