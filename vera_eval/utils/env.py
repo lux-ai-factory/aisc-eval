@@ -28,6 +28,11 @@ CELERY_APP_NAME = os.getenv("CELERY_APP_NAME", "celery_app")
 
 PLUGIN_PATH = os.getenv("PLUGIN_PATH", "")
 
+PACKAGE_REGISTRY_URL = os.getenv('PACKAGE_REGISTRY_URL', '')
+PACKAGE_REGISTRY_INDEX = os.getenv('PACKAGE_REGISTRY_INDEX', '')
+PACKAGE_REGISTRY_USER = os.getenv('PACKAGE_REGISTRY_USER', '')
+PACKAGE_REGISTRY_PASSWORD = os.getenv('PACKAGE_REGISTRY_PASSWORD', '')
+
 
 def redis_handle_ssl_option(redis_url: str) -> str:
     # Only apply to ssl redis
