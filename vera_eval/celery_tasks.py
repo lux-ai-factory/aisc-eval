@@ -42,6 +42,8 @@ def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: st
 def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
 
+    plugin_loader.list_packages(refresh=True)
+
     evaluation: Evaluation = get_evaluation(evaluation_pid)
 
     plugin_chains = []
@@ -83,9 +85,6 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
                input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[
     dict]:
-    if not plugin_loader.discovered_packages:
-        plugin_loader.list_packages()
-
     if package_name not in plugin_loader.discovered_packages:
         raise KeyError(f"Package '{package_name}' not found.")
 
