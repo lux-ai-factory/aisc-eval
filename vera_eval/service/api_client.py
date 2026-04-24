@@ -23,6 +23,38 @@ def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
     payload = EvaluationStatusUpdateDTO(status="failed").model_dump()
     requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}", json=payload)
+    resp = requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed")
+    if not resp.ok:
+        logger.warning(
+            f"Failed to mark evaluation {evaluation_pid} as failed: {resp.text}"
+        )
+
+
+def mark_plugin_failed(
+    evaluation_pid: uuid.UUID, plugin_name: str, error_message: str = ""
+) -> None:
+    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{plugin_name}/fail"
+    resp = requests.patch(url, json={"error_message": error_message})
+    if not resp.ok:
+        logger.warning(f"Failed to mark plugin {plugin_name} as failed: {resp.text}")
+
+
+def mark_plugin_started(evaluation_pid: uuid.UUID, plugin_name: str) -> None:
+    url = (
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{plugin_name}/timestamp"
+    )
+    resp = requests.patch(url, json={"field": "started_at"})
+    if not resp.ok:
+        logger.warning(f"Failed to mark plugin {plugin_name} as started: {resp.text}")
+
+
+def mark_plugin_finished(evaluation_pid: uuid.UUID, plugin_name: str) -> None:
+    url = (
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{plugin_name}/timestamp"
+    )
+    resp = requests.patch(url, json={"field": "finished_at"})
+    if not resp.ok:
+        logger.warning(f"Failed to mark plugin {plugin_name} as finished: {resp.text}")
 
 
 def get_dataset_file_content(file_name: str) -> bytes:

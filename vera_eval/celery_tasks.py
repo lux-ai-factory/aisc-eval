@@ -10,6 +10,9 @@ from vera_eval.data_model.measure import Measure
 from vera_eval.service.api_client import (
     mark_completed,
     mark_failed,
+    mark_plugin_started,
+    mark_plugin_finished,
+    mark_plugin_failed,
     post_measures,
     get_evaluation,
     get_dataset_file_content,
@@ -71,7 +74,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         plugin_chains.append(plugin_chain)
 
     group_task = group(plugin_chains) | finalize_evaluation.si(evaluation_pid)
-    group_task.apply_async()
+    group_result = group_task.apply_async()
 
     return {"evaluation_pid": evaluation_pid}
 
@@ -108,7 +111,18 @@ def run_plugin(
 
         plugin.set_input_content(input_file_definition["name"], file_content)
 
-    evaluation_output: Any = plugin.evaluate(plugin_config)
+    mark_plugin_started(evaluation_pid, plugin_name)
+
+    try:
+        evaluation_output: Any = plugin.evaluate(plugin_config)
+    except Exception as e:
+        logger.error(
+            f"Plugin {plugin_name} failed for evaluation {evaluation_pid}: {e}"
+        )
+        mark_plugin_failed(evaluation_pid, plugin_name, str(e))
+        raise
+    finally:
+        mark_plugin_finished(evaluation_pid, plugin_name)
 
     measurements: list[Measure] = plugin.export_metrics(evaluation_output)
     measurements_dict = [m.model_dump() for m in measurements]
