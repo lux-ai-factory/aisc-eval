@@ -15,10 +15,14 @@ from vera_eval.data_model.measure import Measure
 from vera_eval.service.api_client import (
     mark_completed,
     mark_failed,
+    mark_plugin_started,
+    mark_plugin_finished,
+    mark_plugin_failed,
     post_measures,
     get_evaluation,
     get_dataset_file_content,
-    get_model_file_content, upload_artifact,
+    get_model_file_content,
+    upload_artifact,
 )
 from vera_eval.utils.logging import get_logger
 
@@ -56,9 +60,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         for input_file in evaluation_plugin.input_files:
             input_file_definitions.append(
                 {
-                    'name': input_file.name,
-                    'input_type': input_file.input_type,
-                    'data': input_file.input_file.data,
+                    "name": input_file.name,
+                    "input_type": input_file.input_type,
+                    "data": input_file.input_file.data,
                 }
             )
 
@@ -71,14 +75,15 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
             evaluation_pid,
             evaluation_plugin.pid
         )
-        post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
+        post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid
+        )
         plugin_chain = chain(run_plugin_sig, post_measurements_sig)
         plugin_chains.append(plugin_chain)
 
     group_task = group(plugin_chains) | finalize_evaluation.si(evaluation_pid)
-    group_result = group_task.apply_async()
+    group_task.apply_async()
 
-    return {'evaluation_pid': evaluation_pid}
+    return {"evaluation_pid": evaluation_pid}
 
 
 @celery_app.task(bind=True)
@@ -110,17 +115,19 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         input_mapping = {}
         for input_file_definition in input_file_definitions:
-            if input_file_definition['input_type'] == "dataset":
-                file_content = get_dataset_file_content(input_file_definition['data'])
-            elif input_file_definition['input_type'] == "model":
-                file_content = get_model_file_content(input_file_definition['data'])
+            if input_file_definition["input_type"] == "dataset":
+                file_content = get_dataset_file_content(input_file_definition["data"])
+            elif input_file_definition["input_type"] == "model":
+                file_content = get_model_file_content(input_file_definition["data"])
             else:
-                raise ValueError(f"Unsupported file type: {input_file_definition['input_type']}")
+                raise ValueError(
+                f"Unsupported file type: {input_file_definition['input_type']}"
+            )
 
             file_path = input_dir / input_file_definition['data']
             file_path.write_bytes(file_content)
 
-            input_mapping[input_file_definition['name']] = f"{input_file_definition['data']}"
+            input_mapping[input_file_definition["name"]] = f"{input_file_definition['data']}"
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
@@ -157,6 +164,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         logger.debug(f"Running uv command: {' '.join(cmd)}")
         start_time = time.perf_counter()
+        mark_plugin_started(evaluation_pid, evaluation_plugin_pid)
 
         stdout_lines = []
         stderr_path = workspace_path / "stderr.tmp"
@@ -202,6 +210,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         log_file.write_text(log_content)
 
         if returncode != 0:
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, stderr_content)
             raise RuntimeError(f"Plugin failed: {stderr_content}")
 
         measures_file = output_dir / "measures.json"
@@ -211,13 +220,16 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             if file.name != "measures.json" and file.name != "stderr.tmp":
                 upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
 
+        mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
         return measures
 
 
+
 @celery_app.task
-def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
+def post_measurements(
+    measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
     measurements = [Measure(**m) for m in measurements_dict]
-    response = post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
+    post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
 
 
 @celery_app.task

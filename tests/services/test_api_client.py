@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pandas as pd
@@ -16,7 +17,7 @@ TEST_UUIDS = {
 
 
 @pytest.fixture
-def mock_evaluation_data() -> dict[str, any]:
+def mock_evaluation_data() -> dict[str, Any]:
     metadata = pd.read_csv("tests/data/lcld_v2_metadata_api.csv")
     metadata["feature_type"] = metadata["feature_type"].str.capitalize()
     metadata = metadata.to_dict(orient="records")
@@ -50,10 +51,11 @@ def mock_evaluation_data() -> dict[str, any]:
             "frequency": "1 day",
             "window_size": "1 month",
         },
+        "evaluation_plugins": [],
     }
 
 
-def test_get_evaluation(mock_evaluation_data: dict[str, any]) -> None:
+def test_get_evaluation(mock_evaluation_data: dict[str, Any]) -> None:
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = mock_evaluation_data

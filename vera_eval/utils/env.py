@@ -26,7 +26,7 @@ MQ_USE_SSL = handle_bool_var(os.getenv("MQ_USE_SSL", "false"))
 
 CELERY_APP_NAME = os.getenv("CELERY_APP_NAME", "celery_app")
 
-PLUGIN_PATH = os.getenv('PLUGIN_PATH', '')
+PLUGIN_PATH = os.getenv("PLUGIN_PATH", "")
 
 PACKAGE_REGISTRY_URL = os.getenv('PACKAGE_REGISTRY_URL', '')
 PACKAGE_REGISTRY_INDEX = os.getenv('PACKAGE_REGISTRY_INDEX', '')
