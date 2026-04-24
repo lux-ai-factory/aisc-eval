@@ -50,6 +50,7 @@ def mock_evaluation_data() -> dict[str, any]:
             "frequency": "1 day",
             "window_size": "1 month",
         },
+        "evaluation_plugins": [],
     }
 
 

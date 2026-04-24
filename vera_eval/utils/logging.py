@@ -172,7 +172,9 @@ def setup_logging() -> None:
     and sets up the logging system accordingly. It also handles the setup
     of queue-based logging if configured.
     """
-    config_file = pathlib.Path(__file__).parent.parent.parent / "config" / "logging.yaml"
+    config_file = (
+        pathlib.Path(__file__).parent.parent.parent / "config" / "logging.yaml"
+    )
     with open(config_file) as f_in:
         logger_config = yaml.safe_load(f_in)
 
