@@ -23,6 +23,38 @@ def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
     payload = EvaluationStatusUpdateDTO(status="failed").model_dump()
     requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}", json=payload)
+    resp = requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed")
+    if not resp.ok:
+        logger.warning(
+            f"Failed to mark evaluation {evaluation_pid} as failed: {resp.text}"
+        )
+
+
+def mark_plugin_failed(
+    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_message: str = ""
+) -> None:
+    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/fail"
+    resp = requests.patch(url, json={"error_message": error_message})
+    if not resp.ok:
+        logger.warning(f"Failed to mark plugin {evaluation_plugin_pid} as failed: {resp.text}")
+
+
+def mark_plugin_started(evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> None:
+    url = (
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
+    )
+    resp = requests.patch(url, json={"field": "started_at"})
+    if not resp.ok:
+        logger.warning(f"Failed to mark plugin {evaluation_plugin_pid} as started: {resp.text}")
+
+
+def mark_plugin_finished(evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> None:
+    url = (
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
+    )
+    resp = requests.patch(url, json={"field": "finished_at"})
+    if not resp.ok:
+        logger.warning(f"Failed to mark plugin {evaluation_plugin_pid} as finished: {resp.text}")
 
 
 def get_dataset_file_content(file_name: str) -> bytes:
@@ -54,16 +86,16 @@ def get_evaluation(
 
 
 def post_measures(
-    evaluation_pid: uuid.UUID, plugin_name: str, metrics: list[Measure]
+    evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID, metrics: list[Measure]
 ) -> requests.Response:
     logger.debug(
         f"post_metrics called with {len(metrics)} metrics for evaluation {evaluation_pid}"
     )
 
-    payload = {plugin_name: [m.model_dump() for m in metrics]}
+    payload = {str(evaluation_plugin_uuid): [m.model_dump() for m in metrics]}
     logger.debug(f"Payload prepared, size: {len(payload)}")
 
-    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/measures"
+    url = f"{API_URL_PREFIX}/evaluations/{str(evaluation_pid)}/measures"
     logger.debug(f"Posting to URL: {url}")
 
     response = requests.post(url, json=payload)
@@ -80,12 +112,12 @@ def post_measures(
 
 
 def upload_artifact(
-    evaluation_pid: uuid.UUID, plugin_name: str, name: str, content: bytes
+    evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID, name: str, content: bytes
 ) -> requests.Response:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/artifacts"
 
-    files = {"file": (name, content)}
-    data = {"plugin_name": plugin_name}
+    files = {'file': (name, content)}
+    data = {'evaluation_plugin_uuid': str(evaluation_plugin_uuid)}
     response = requests.post(url, files=files, data=data)
 
     return response

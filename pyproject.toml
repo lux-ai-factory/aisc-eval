@@ -1,6 +1,6 @@
 [project]
 name = "vera-eval"
-version = "0.2.2"
+version = "0.2.3"
 description = "Evaluation service for VERA"
 authors = [
     { name = "Thibault Simonetto", email = "thibault.simonetto@uni.lu" },
@@ -13,24 +13,17 @@ dependencies = [
     "pandas>=2.2.3,<3",
     "pyarrow>=19.0.0,<20",
     "pandas-stubs>=2.2.3.241126,<3",
-    "scikit-learn>=1.6.1,<2",
     "scipy>=1.15.1,<2",
     "requests>=2.32.3,<3",
-    "onnx>=1.17.0,<2",
-    "skl2onnx>=1.18.0,<2",
-    "onnxruntime>=1.21.0,<2",
     "celery[redis]>=5.5.3",
     "flower>=2.0.1",
-    "vera-plugin-manager>=0.2.2",
-    "vera-plugin-interface>=0.2.2",
+    "vera-plugin-manager>=0.2.3",
+    "vera-plugin-interface>=0.2.3",
     "jsonschema>=4.25.1",
     "requests>=2.32.5",
-    "openai>=2.11.0",
-    "replicate>=1.0.7",
-    "ollama>=0.6.1",
     "python-dotenv>=1.2.1",
-    "gpt4all>=2.8.2",
     "pyyaml>=6.0.2",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]
@@ -51,7 +44,7 @@ test = [
     "pytest>=8.3.3,<9",
     "pytest-cov>=6.0.0,<7",
     "pytest-mock>=3.12.0,<4",
-    "httpx>=0.27.0,<0.28",
+    "httpx>=0.28.1",
 ]
 
 [build-system]
@@ -59,7 +52,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-vera-plugin-manager = { git = "https://github.com/lux-ai-factory/vera-plugin-manager", tag = "v0.2.2" }
+vera-plugin-manager = { git = "https://github.com/lux-ai-factory/vera-plugin-manager", tag = "v0.2.3" }
 
 [tool.isort]
 multi_line_output = 3
