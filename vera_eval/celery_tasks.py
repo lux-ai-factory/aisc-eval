@@ -153,12 +153,12 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         cmd = [
             "uv", "run", "-v",
             "--directory", str(workspace_path),
-            "--extra-index-url", plugin_loader.client.simple_index_url,
+            "--extra-index-url", plugin_loader.devpi_client.simple_index_url,
             "--with", install_target
         ]
 
         if plugin_info["source"] != "local":
-            cmd.extend(["--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.2"])
+            cmd.extend(["--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.3"])
 
         cmd.append(str(runtime_script))
 
