@@ -1,7 +1,11 @@
 import json
 import os
+import ssl
 import subprocess
 import tempfile
+import urllib
+from urllib.error import URLError, HTTPError
+
 import time
 import uuid
 from pathlib import Path
@@ -11,7 +15,6 @@ from celery import group, chain
 from vera_eval import plugin_runtime
 from vera_eval.celery_app import celery_app
 from vera_eval.data_model.evaluation import Evaluation
-from vera_eval.data_model.measure import Measure
 from vera_eval.service.api_client import (
     mark_completed,
     mark_failed,
@@ -27,7 +30,7 @@ from vera_eval.service.api_client import (
 from vera_eval.utils.logging import get_logger
 
 from vera_plugin_manager.loader import Loader
-from vera_plugin_interface import TaskProgress
+from vera_plugin_interface import TaskProgress, Measure
 from vera_eval.utils import env
 
 logger = get_logger()
@@ -153,10 +156,26 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         cmd = [
             "uv", "run", "-v",
             "--directory", str(workspace_path),
-            "--extra-index-url", plugin_loader.devpi_client.simple_index_url,
-            "--with", install_target
         ]
 
+        # Add devpi as an extra index if configured
+        extra_url = plugin_loader.devpi_client.simple_index_url
+        if extra_url:
+            try:
+                urllib.request.urlopen(extra_url, timeout=2.0, context=ssl._create_unverified_context())
+            except HTTPError:
+                pass
+            except (URLError, TimeoutError, ValueError):
+                logger.warning(f"'{extra_url}' is unreachable. Skipping '--extra-index-url'.")
+                extra_url = None
+
+            if extra_url:
+                cmd.extend(["--extra-index-url", extra_url])
+
+        # Add install target
+        cmd.extend(["--with", install_target])
+
+        # Add vera-plugin-interface if not installed locally
         if plugin_info["source"] != "local":
             cmd.extend(["--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.3"])
 

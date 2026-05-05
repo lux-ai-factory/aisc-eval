@@ -3,9 +3,9 @@ from typing import Any
 
 import requests
 from pydantic import BaseModel
+from vera_plugin_interface import Measure
 
 from vera_eval.data_model.evaluation import Evaluation
-from vera_eval.data_model.measure import Measure
 from vera_eval.utils.env import API_URL_PREFIX
 from vera_eval.utils.logging import get_logger
 
