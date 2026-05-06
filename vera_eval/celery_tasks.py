@@ -257,18 +257,19 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 env=env_vars
             )
 
-            for line in process.stdout:
-                stdout_lines.append(line)
-                stripped_line = line.strip()
+            if (stdout := process.stdout) is not None:
+                for line in stdout:
+                    stdout_lines.append(line)
+                    stripped_line = line.strip()
 
-                if stripped_line.startswith("{") and stripped_line.endswith("}"):
-                    try:
-                        progress_data = json.loads(stripped_line)
-                        task_progress = TaskProgress(**progress_data)
+                    if stripped_line.startswith("{") and stripped_line.endswith("}"):
+                        try:
+                            progress_data = json.loads(stripped_line)
+                            task_progress = TaskProgress(**progress_data)
 
-                        progress_callback(task_progress, plugin_name, str(self.request.id))
-                    except Exception:
-                        pass
+                            progress_callback(task_progress, plugin_name, str(self.request.id))
+                        except Exception:
+                            pass
 
             returncode = process.wait()
 
