@@ -20,6 +20,8 @@ from vera_eval.service.api_client import (
     mark_plugin_failed,
     post_measures,
     get_evaluation,
+    get_evaluation_request,
+    get_evaluation_plugins_status,
     get_dataset_file_content,
     get_model_file_content,
     upload_artifact,
@@ -162,6 +164,11 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     workflow = group(install_tasks) | group(plugin_chains) | finalize_evaluation.si(evaluation_pid)
     workflow.apply_async()
 
+    # store plugin task ids in redis so siblings can be revoked on failure
+    celery_app.backend.client.set(
+        f"eval_tasks:{evaluation_pid}", json.dumps(plugin_task_ids), ex=7200
+    )
+
     return {"evaluation_pid": evaluation_pid, "plugin_task_ids": plugin_task_ids}
 
 
@@ -172,6 +179,16 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
         plugin_loader.list_packages()
+
+    # abort early if another plugin already failed this evaluation
+    try:
+        eval_data = get_evaluation_request(evaluation_pid)
+        if eval_data.get("status") == "Failed":
+            logger.info(f"Evaluation {evaluation_pid} already failed — skipping plugin {plugin_name}")
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, "Aborted: evaluation already failed")
+            return []
+    except Exception:
+        pass
 
     if package_name not in plugin_loader.discovered_packages:
         raise KeyError(f"Package '{package_name}' not found.")
@@ -290,6 +307,15 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         if returncode != 0:
             mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, stderr_content)
+            # revoke all sibling plugin tasks
+            try:
+                raw = celery_app.backend.client.get(f"eval_tasks:{evaluation_pid}")
+                if raw:
+                    for tid in json.loads(raw):
+                        if tid != str(self.request.id):
+                            celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
+            except Exception as e:
+                logger.warning(f"Could not revoke sibling tasks: {e}")
             raise RuntimeError(f"Plugin failed: {stderr_content}")
 
         measures_file = output_dir / "measures.json"
@@ -303,7 +329,6 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         return measures
 
 
-
 @celery_app.task
 def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
     measurements = [Measure(**m) for m in measurements_dict]
@@ -314,12 +339,19 @@ def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, 
 def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
     logger.debug(f"Finalizing evaluation {evaluation_id}")
     try:
-        response = mark_completed(evaluation_id)
-        logger.debug(
-            f"Evaluation {evaluation_id} marked as completed, status: {response.status_code}"
-        )
+        # check if any plugins failed before marking as completed
+        plugin_status = get_evaluation_plugins_status(evaluation_id)
+
+        if plugin_status.get("has_failed_plugins", False):
+            logger.info(f"Evaluation {evaluation_id} has failed plugins, marking as failed")
+            mark_failed(evaluation_id)
+        else:
+            response = mark_completed(evaluation_id)
+            logger.debug(
+                f"Evaluation {evaluation_id} marked as completed, status: {response.status_code}"
+            )
     except Exception as e:
-        logger.error(f"Failed to mark evaluation {evaluation_id} as completed: {e}")
+        logger.error(f"Failed to finalize evaluation {evaluation_id}: {e}")
         mark_failed(evaluation_id)
 
 
