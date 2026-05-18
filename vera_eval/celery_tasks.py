@@ -331,8 +331,12 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
 @celery_app.task
 def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
-    measurements = [Measure(**m) for m in measurements_dict]
-    post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
+    try:
+        measurements = [Measure(**m) for m in measurements_dict]
+        post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
+    except Exception as e:
+        mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, str(e))
+        raise
 
 
 @celery_app.task
