@@ -16,6 +16,13 @@ class EvaluationStatusUpdateDTO(BaseModel):
     status: str
 
 
+def get_evaluation_plugins_status(evaluation_pid: uuid.UUID) -> dict:
+    """Get plugin status information for an evaluation."""
+    resp = requests.get(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/status")
+    resp.raise_for_status()
+    return resp.json()
+
+
 def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
     return requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done")
 
