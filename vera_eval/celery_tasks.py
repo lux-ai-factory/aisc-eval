@@ -65,7 +65,6 @@ def install_package(self, package_name: str, version: str):
     plugin_info = available_versions[version]
 
     try:
-        # Use uv run with --with to cache package and all dependencies
         if plugin_info["source"] == "local":
             install_target = str(plugin_info["pkg_root"].resolve())
         else:
@@ -74,9 +73,24 @@ def install_package(self, package_name: str, version: str):
         cmd = [
             "uv", "run", "-v",
             "--no-project",
-            "--extra-index-url", plugin_loader.devpi_client.simple_index_url,
-            "--with", install_target,
         ]
+
+        # Add devpi as an extra index if configured and reachable
+        extra_url = plugin_loader.devpi_client.simple_index_url
+        if extra_url:
+            try:
+                urllib.request.urlopen(extra_url, timeout=2.0, context=ssl._create_unverified_context())
+            except HTTPError:
+                pass
+            except (URLError, TimeoutError, ValueError):
+                logger.warning(f"'{extra_url}' is unreachable. Skipping '--extra-index-url'.")
+                extra_url = None
+
+            if extra_url:
+                cmd.extend(["--extra-index-url", extra_url])
+
+        # Add install target
+        cmd.extend(["--with", install_target])
 
         if plugin_info["source"] != "local":
             cmd.extend(["--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.3"])
@@ -252,20 +266,6 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             "uv", "run", "-v",
             "--directory", str(workspace_path),
         ]
-
-        # Add devpi as an extra index if configured
-        extra_url = plugin_loader.devpi_client.simple_index_url
-        if extra_url:
-            try:
-                urllib.request.urlopen(extra_url, timeout=2.0, context=ssl._create_unverified_context())
-            except HTTPError:
-                pass
-            except (URLError, TimeoutError, ValueError):
-                logger.warning(f"'{extra_url}' is unreachable. Skipping '--extra-index-url'.")
-                extra_url = None
-
-            if extra_url:
-                cmd.extend(["--extra-index-url", extra_url])
 
         # Add install target
         cmd.extend(["--with", install_target])
