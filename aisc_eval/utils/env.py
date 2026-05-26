@@ -8,7 +8,7 @@ variables.
 import os
 from urllib.parse import quote
 
-from vera_eval.utils.logging import get_logger
+from aisc_eval.utils.logging import get_logger
 
 logger = get_logger()
 

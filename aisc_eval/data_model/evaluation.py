@@ -2,7 +2,7 @@ import uuid
 
 from pydantic import BaseModel
 
-from vera_eval.data_model.project import Plugin
+from aisc_eval.data_model.project import Plugin
 
 class Project(BaseModel):
     pid: uuid.UUID

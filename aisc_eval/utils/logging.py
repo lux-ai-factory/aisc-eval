@@ -19,7 +19,7 @@ from typing import override
 import yaml
 
 # Main application logger instances
-app_logger = logging.getLogger("vera_eval")
+app_logger = logging.getLogger("aisc_eval")
 root_logger = logging.getLogger()
 
 

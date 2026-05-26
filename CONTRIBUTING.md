@@ -1,6 +1,6 @@
-# Contributing to VERA
+# Contributing to AISC
 
-Thank you for your interest in contributing to the VERA project!
+Thank you for your interest in contributing to the AISC project!
 
 We welcome contributions from the community, including bug reports, documentation improvements, feature suggestions, and code contributions.
 
@@ -24,4 +24,4 @@ You do not need to sign the CLA separately — by submitting a pull request, iss
 We may request changes or ask questions before merging your contribution.
 We reserve the right to reject a pull request for any reason.
 
-Thank you for contributing to the VERA project!
+Thank you for contributing to the AISC project!

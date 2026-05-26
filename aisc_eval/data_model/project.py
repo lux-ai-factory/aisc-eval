@@ -6,7 +6,7 @@ and associations between datasets, models, and their evaluation settings.
 import uuid
 from pydantic import BaseModel
 
-from vera_plugin_interface import InputType
+from aisc_plugin_interface import InputType
 
 
 class InputFile(BaseModel):
