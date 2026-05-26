@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --upgrade-package vera-plugin-manager \
+    uv sync --upgrade-package aisc-plugin-manager \
         --no-dev
 
 # Create necessary directories
@@ -44,8 +44,8 @@ COPY --from=builder /app /app
 ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
 
-CMD ["uv", "run", "celery", "-A", "vera_eval.celery_worker:celery_app", "worker", "--loglevel=debug"]
+CMD ["uv", "run", "celery", "-A", "aisc_eval.celery_worker:celery_app", "worker", "--loglevel=debug"]
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD uv run celery --app vera_eval.celery_app inspect ping -d "celery@$$HOSTNAME"
+  CMD uv run celery --app aisc_eval.celery_app inspect ping -d "celery@$$HOSTNAME"

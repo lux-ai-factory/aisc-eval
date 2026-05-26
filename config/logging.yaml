@@ -7,7 +7,7 @@ formatters:
     format: "[%(levelname)-8s|%(module)s|L%(lineno)d] %(asctime)s: %(message)s"
     datefmt: "%Y-%m-%dT%H:%M:%S%z"
   colored:
-    (): vera_eval.utils.logging.ColoredFormatter
+    (): aisc_eval.utils.logging.ColoredFormatter
     format: "%(asctime)s: [%(colored_levelname)-17s]: %(message)s"
     datefmt: "%Y-%m-%dT%H:%M:%S%z"
 handlers:
@@ -26,7 +26,7 @@ loggers:
     level: INFO
     handlers:
       - queue_handler
-  vera_eval:
+  aisc_eval:
     level: INFO
   uvicorn:
     handlers:

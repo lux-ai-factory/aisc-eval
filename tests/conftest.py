@@ -10,7 +10,7 @@ import onnxruntime as ort
 import pandas as pd
 import pytest
 
-from vera_eval.data_model.evaluation import Dataset, DataShape, Model
+from aisc_eval.data_model.evaluation import Dataset, DataShape, Model
 
 
 @pytest.fixture(scope="module")

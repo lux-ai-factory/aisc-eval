@@ -18,8 +18,8 @@ import sys
 from functools import partial
 from pathlib import Path
 
-from vera_plugin_interface import TaskProgress
-from vera_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
+from aisc_plugin_interface import TaskProgress
+from aisc_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
 
 
 def write_artifact_file(name: str, content: bytes, output_dir: Path):

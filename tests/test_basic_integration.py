@@ -9,14 +9,14 @@ from datetime import datetime
 
 import pytest
 
-from vera_eval.data_model.evaluation import Feature, FeatureType
-from vera_eval.data_model.measure import Measure
+from aisc_eval.data_model.evaluation import Feature, FeatureType
+from aisc_eval.data_model.measure import Measure
 
 
 def test_celery_tasks_import():
     """Test that Celery tasks can be imported without errors."""
     try:
-        from vera_eval import celery_tasks
+        from aisc_eval import celery_tasks
 
         # Just verify the module loads, don't try to connect to Redis
         assert hasattr(celery_tasks, "celery_app")

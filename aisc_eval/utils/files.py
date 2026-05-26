@@ -7,7 +7,7 @@ avoid redundant downloads.
 
 import os
 import pandas as pd
-from vera_eval.utils import env
+from aisc_eval.utils import env
 import requests
 
 # Directory names for caching different types of files
