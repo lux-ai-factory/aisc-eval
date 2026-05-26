@@ -1,4 +1,4 @@
-# Development Dockerfile for VERA Evaluation Service
+# Development Dockerfile for AISC Evaluation Service
 # This Dockerfile sets up a development environment with hot-reloading capabilities
 
 # Use Python slim image as base

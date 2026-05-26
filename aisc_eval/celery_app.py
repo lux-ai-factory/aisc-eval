@@ -1,7 +1,7 @@
 from celery import Celery
 
-from vera_eval.utils import env
-from vera_eval.utils.logging import get_logger
+from aisc_eval.utils import env
+from aisc_eval.utils.logging import get_logger
 
 logger = get_logger()
 

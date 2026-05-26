@@ -12,10 +12,10 @@ from pathlib import Path
 
 from celery import group, chain
 
-from vera_eval import plugin_runtime
-from vera_eval.celery_app import celery_app
-from vera_eval.data_model.evaluation import Evaluation
-from vera_eval.service.api_client import (
+from aisc_eval import plugin_runtime
+from aisc_eval.celery_app import celery_app
+from aisc_eval.data_model.evaluation import Evaluation
+from aisc_eval.service.api_client import (
     mark_completed,
     mark_failed,
     mark_plugin_started,
@@ -29,11 +29,11 @@ from vera_eval.service.api_client import (
     get_model_file_content,
     upload_artifact,
 )
-from vera_eval.utils.logging import get_logger
+from aisc_eval.utils.logging import get_logger
 
-from vera_plugin_manager.loader import Loader
-from vera_plugin_interface import TaskProgress, Measure
-from vera_eval.utils import env
+from aisc_plugin_manager.loader import Loader
+from aisc_plugin_interface import TaskProgress, Measure
+from aisc_eval.utils import env
 
 logger = get_logger()
 
@@ -93,7 +93,7 @@ def install_package(self, package_name: str, version: str):
         cmd.extend(["--with", install_target])
 
         if plugin_info["source"] != "local":
-            cmd.extend(["--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.3"])
+            cmd.extend(["--with", "aisc-plugin-interface @ git+https://github.com/lux-ai-factory/aisc-plugin-interface.git@v0.2.3"])
 
         # run a print command
         cmd.extend(["python", "-c", "print('Package and dependencies cached successfully')"])
@@ -270,9 +270,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         # Add install target
         cmd.extend(["--with", install_target])
 
-        # Add vera-plugin-interface if not installed locally
+        # Add aisc-plugin-interface if not installed locally
         if plugin_info["source"] != "local":
-            cmd.extend(["--with", "vera-plugin-interface @ git+https://github.com/lux-ai-factory/vera-plugin-interface.git@v0.2.3"])
+            cmd.extend(["--with", "aisc-plugin-interface @ git+https://github.com/lux-ai-factory/aisc-plugin-interface.git@v0.2.3"])
 
         cmd.append(str(runtime_script))
 
