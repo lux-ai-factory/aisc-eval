@@ -92,9 +92,6 @@ def install_package(self, package_name: str, version: str):
         # Add install target
         cmd.extend(["--with", install_target])
 
-        if plugin_info["source"] != "local":
-            cmd.extend(["--with", "aisc-plugin-interface @ git+https://github.com/lux-ai-factory/aisc-plugin-interface.git@v0.2.3"])
-
         # run a print command
         cmd.extend(["python", "-c", "print('Package and dependencies cached successfully')"])
 
@@ -252,29 +249,13 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         runtime_script = os.path.abspath(plugin_runtime.__file__)
 
-        # Create environment for subprocess
-        env_vars = dict(os.environ)
-        env_vars.pop("UV_NO_SYNC", None)
-        env_vars.pop("VIRTUAL_ENV", None)
-
         if plugin_info["source"] == "local":
             install_target = str(plugin_info["pkg_root"].resolve())
         else:
             install_target = f"{package_name}=={version}"
 
-        cmd = [
-            "uv", "run", "-v",
-            "--directory", str(workspace_path),
-        ]
-
-        # Add install target
-        cmd.extend(["--with", install_target])
-
-        # Add aisc-plugin-interface if not installed locally
-        if plugin_info["source"] != "local":
-            cmd.extend(["--with", "aisc-plugin-interface @ git+https://github.com/lux-ai-factory/aisc-plugin-interface.git@v0.2.3"])
-
-        cmd.append(str(runtime_script))
+        cmd = ["uv", "run", "-v", "--directory", str(workspace_path), "--offline", "--with", install_target,
+               str(runtime_script)]
 
         logger.debug(f"Running uv command: {' '.join(cmd)}")
         start_time = time.perf_counter()
@@ -289,8 +270,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 stdout=subprocess.PIPE,
                 stderr=stderr_file,
                 text=True,
-                bufsize=1,
-                env=env_vars
+                bufsize=1
             )
 
             if (stdout := process.stdout) is not None:
