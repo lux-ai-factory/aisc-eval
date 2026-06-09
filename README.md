@@ -76,3 +76,24 @@ You can also customize the message format by modifying the `formatters.colored.f
 See [official Python documentation on LogRecord attributes](https://docs.python.org/3/library/logging.html#logrecord-attributes) for a full list of available fields.
 
 Please do not push your local changes, except if necessary. For instance, DEBUG log in `logging.yaml` should not be pushed.
+
+##  Contributing
+
+We welcome community contributions! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+By submitting contributions, you agree to the [CLA](CLA/CLA_VERA.md) and license your work under [Apache 2.0](LICENSE).
+
+---
+
+##  License
+
+This project is licensed under the [Apache License 2.0](LICENSE).  
+© 2024–2025 Université du Luxembourg. Originally developed at the Serval Research Group, SnT.
+
+---
+
+## Acknowledgments
+
+This work is part of ongoing research and development efforts within the University of Luxembourg’s digital governance and AI compliance initiatives, including the AI Factory Luxembourg initiative.  
+We thank all contributors and collaborators.
+
