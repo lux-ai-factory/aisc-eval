@@ -49,7 +49,7 @@ def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: st
 
 
 @celery_app.task(bind=True)
-def install_package(self, package_name: str, version: str):
+def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID]):
     """Install a package once using uv run to cache dependencies."""
     logger.info(f"Caching package {package_name}=={version}")
 
@@ -101,6 +101,9 @@ def install_package(self, package_name: str, version: str):
         logger.info(f"Successfully cached {package_name}=={version} and all dependencies")
     except Exception as e:
         logger.error(f"Failed to cache {package_name}=={version}: {e}", exc_info=True)
+        if evaluation_pid and evaluation_plugin_pids:
+            for pid in evaluation_plugin_pids:
+                mark_plugin_failed(evaluation_pid, pid, str(e))
         raise
 
 
@@ -112,62 +115,68 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
     evaluation: Evaluation = get_evaluation(evaluation_pid)
 
-    # collect all unique packages
-    unique_packages = {}
+    # group plugins by package
+    plugins_by_pkg = {}
     for evaluation_plugin in evaluation.evaluation_plugins:
         pkg_key = f"{evaluation_plugin.package_name}=={evaluation_plugin.version}"
-        if pkg_key not in unique_packages:
-            unique_packages[pkg_key] = {
+        if pkg_key not in plugins_by_pkg:
+            plugins_by_pkg[pkg_key] = {
                 "package_name": evaluation_plugin.package_name,
-                "version": evaluation_plugin.version
+                "version": evaluation_plugin.version,
+                "plugins": [],
             }
+        plugins_by_pkg[pkg_key]["plugins"].append(evaluation_plugin)
 
-    logger.info(f"Found {len(unique_packages)} unique packages for {len(evaluation.evaluation_plugins)} plugins")
+    logger.info(f"Found {len(plugins_by_pkg)} unique packages for {len(evaluation.evaluation_plugins)} plugins")
 
-    # tasks: install packages
-    install_tasks = []
-    for pkg_info in unique_packages.values():
-        install_task = install_package.si(pkg_info["package_name"], pkg_info["version"])
-        install_tasks.append(install_task)
-
-    # tasks: run plugins
-    plugin_chains = []
+    # build per-package chains: install_pkg -> group(run_plugin -> post_measurements)
+    package_chains = []
     plugin_task_ids = []
-    for evaluation_plugin in evaluation.evaluation_plugins:
-        config = None
-        if evaluation_plugin.plugin_config:
-            config = evaluation_plugin.plugin_config.config
-
-        input_file_definitions = []
-        for input_file in evaluation_plugin.input_files:
-            input_file_definitions.append(
-                {
-                    "name": input_file.name,
-                    "input_type": input_file.input_type,
-                    "data": input_file.input_file.data,
-                }
-            )
-
-        run_plugin_sig = run_plugin.si(
-            evaluation_plugin.package_name,
-            evaluation_plugin.name,
-            evaluation_plugin.version,
-            config,
-            input_file_definitions,
+    for pkg_key, pkg_info in plugins_by_pkg.items():
+        install_sig = install_package.si(
+            pkg_info["package_name"],
+            pkg_info["version"],
             evaluation_pid,
-            evaluation_plugin.pid
+            [ep.pid for ep in pkg_info["plugins"]],
         )
 
-        # freeze to get a stable task id before dispatching
-        run_plugin_sig.freeze()
-        plugin_task_ids.append(str(run_plugin_sig.id))
+        plugin_chain_list = []
+        for evaluation_plugin in pkg_info["plugins"]:
+            config = None
+            if evaluation_plugin.plugin_config:
+                config = evaluation_plugin.plugin_config.config
 
-        post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
-        plugin_chain = chain(run_plugin_sig, post_measurements_sig)
-        plugin_chains.append(plugin_chain)
+            input_file_definitions = []
+            for input_file in evaluation_plugin.input_files:
+                input_file_definitions.append(
+                    {
+                        "name": input_file.name,
+                        "input_type": input_file.input_type,
+                        "data": input_file.input_file.data,
+                    }
+                )
 
-    # chain: install all packages -> run all plugins -> finalize
-    workflow = group(install_tasks) | group(plugin_chains) | finalize_evaluation.si(evaluation_pid)
+            run_plugin_sig = run_plugin.si(
+                evaluation_plugin.package_name,
+                evaluation_plugin.name,
+                evaluation_plugin.version,
+                config,
+                input_file_definitions,
+                evaluation_pid,
+                evaluation_plugin.pid
+            )
+
+            # freeze to get a stable task id before dispatching
+            run_plugin_sig.freeze()
+            plugin_task_ids.append(str(run_plugin_sig.id))
+
+            post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
+            plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
+
+        package_chains.append(chain(install_sig, group(plugin_chain_list)))
+
+    # dispatch: each package's plugins start after its install, no waiting for other packages
+    workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
     workflow.apply_async()
 
     # store plugin task ids in redis so siblings can be revoked on failure
