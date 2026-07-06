@@ -4,6 +4,7 @@ import ssl
 import subprocess
 import tempfile
 import urllib
+import urllib.request
 from urllib.error import URLError, HTTPError
 
 import time
@@ -48,7 +49,7 @@ def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: st
 
 
 @celery_app.task(bind=True)
-def install_package(self, package_name: str, version: str):
+def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID]):
     """Install a package once using uv run to cache dependencies."""
     logger.info(f"Caching package {package_name}=={version}")
 
@@ -70,45 +71,39 @@ def install_package(self, package_name: str, version: str):
         else:
             install_target = f"{package_name}=={version}"
 
-        cmd = [
-            "uv", "run", "-v",
-            "--no-project",
-        ]
-
-        # Add devpi as an extra index if configured and reachable
-        extra_url = plugin_loader.devpi_client.simple_index_url
-        if extra_url:
-            try:
-                urllib.request.urlopen(extra_url, timeout=2.0, context=ssl._create_unverified_context())
-            except HTTPError:
-                pass
-            except (URLError, TimeoutError, ValueError):
-                logger.warning(f"'{extra_url}' is unreachable. Skipping '--extra-index-url'.")
-                extra_url = None
-
+        with tempfile.TemporaryDirectory(delete=True) as cache_tmp:
+            cache_venv = Path(cache_tmp)
+            subprocess.run(
+                ["uv", "venv", str(cache_venv), "--python", "/usr/local/bin/python"],
+                capture_output=True, text=True, timeout=60, check=True,
+            )
+            install_cmd = ["uv", "pip", "install", "--python", str(cache_venv)]
+            extra_url = plugin_loader.devpi_client.simple_index_url
             if extra_url:
-                cmd.extend(["--extra-index-url", extra_url])
+                try:
+                    urllib.request.urlopen(extra_url, timeout=2.0, context=ssl._create_unverified_context())
+                except HTTPError:
+                    pass
+                except (URLError, TimeoutError, ValueError):
+                    logger.warning(f"'{extra_url}' is unreachable. Skipping '--extra-index-url'.")
+                    extra_url = None
+                if extra_url:
+                    install_cmd.extend(["--extra-index-url", extra_url])
+            install_cmd.append(install_target)
 
-        # Add install target
-        cmd.extend(["--with", install_target])
-
-        # run a print command
-        cmd.extend(["python", "-c", "print('Package and dependencies cached successfully')"])
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=1000,
-        )
-
-        if result.returncode != 0:
-            logger.error(f"Failed to cache {package_name}=={version}: {result.stderr}", exc_info=True)
-            raise RuntimeError(f"uv run failed: {result.stderr}")
+            result = subprocess.run(
+                install_cmd,
+                capture_output=True, text=True, timeout=1000,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr)
 
         logger.info(f"Successfully cached {package_name}=={version} and all dependencies")
     except Exception as e:
         logger.error(f"Failed to cache {package_name}=={version}: {e}", exc_info=True)
+        if evaluation_pid and evaluation_plugin_pids:
+            for pid in evaluation_plugin_pids:
+                mark_plugin_failed(evaluation_pid, pid, str(e))
         raise
 
 
@@ -120,62 +115,68 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
     evaluation: Evaluation = get_evaluation(evaluation_pid)
 
-    # collect all unique packages
-    unique_packages = {}
+    # group plugins by package
+    plugins_by_pkg = {}
     for evaluation_plugin in evaluation.evaluation_plugins:
         pkg_key = f"{evaluation_plugin.package_name}=={evaluation_plugin.version}"
-        if pkg_key not in unique_packages:
-            unique_packages[pkg_key] = {
+        if pkg_key not in plugins_by_pkg:
+            plugins_by_pkg[pkg_key] = {
                 "package_name": evaluation_plugin.package_name,
-                "version": evaluation_plugin.version
+                "version": evaluation_plugin.version,
+                "plugins": [],
             }
+        plugins_by_pkg[pkg_key]["plugins"].append(evaluation_plugin)
 
-    logger.info(f"Found {len(unique_packages)} unique packages for {len(evaluation.evaluation_plugins)} plugins")
+    logger.info(f"Found {len(plugins_by_pkg)} unique packages for {len(evaluation.evaluation_plugins)} plugins")
 
-    # tasks: install packages
-    install_tasks = []
-    for pkg_info in unique_packages.values():
-        install_task = install_package.si(pkg_info["package_name"], pkg_info["version"])
-        install_tasks.append(install_task)
-
-    # tasks: run plugins
-    plugin_chains = []
+    # build per-package chains: install_pkg -> group(run_plugin -> post_measurements)
+    package_chains = []
     plugin_task_ids = []
-    for evaluation_plugin in evaluation.evaluation_plugins:
-        config = None
-        if evaluation_plugin.plugin_config:
-            config = evaluation_plugin.plugin_config.config
-
-        input_file_definitions = []
-        for input_file in evaluation_plugin.input_files:
-            input_file_definitions.append(
-                {
-                    "name": input_file.name,
-                    "input_type": input_file.input_type,
-                    "data": input_file.input_file.data,
-                }
-            )
-
-        run_plugin_sig = run_plugin.si(
-            evaluation_plugin.package_name,
-            evaluation_plugin.name,
-            evaluation_plugin.version,
-            config,
-            input_file_definitions,
+    for pkg_key, pkg_info in plugins_by_pkg.items():
+        install_sig = install_package.si(
+            pkg_info["package_name"],
+            pkg_info["version"],
             evaluation_pid,
-            evaluation_plugin.pid
+            [ep.pid for ep in pkg_info["plugins"]],
         )
 
-        # freeze to get a stable task id before dispatching
-        run_plugin_sig.freeze()
-        plugin_task_ids.append(str(run_plugin_sig.id))
+        plugin_chain_list = []
+        for evaluation_plugin in pkg_info["plugins"]:
+            config = None
+            if evaluation_plugin.plugin_config:
+                config = evaluation_plugin.plugin_config.config
 
-        post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
-        plugin_chain = chain(run_plugin_sig, post_measurements_sig)
-        plugin_chains.append(plugin_chain)
+            input_file_definitions = []
+            for input_file in evaluation_plugin.input_files:
+                input_file_definitions.append(
+                    {
+                        "name": input_file.name,
+                        "input_type": input_file.input_type,
+                        "data": input_file.input_file.data,
+                    }
+                )
 
-    # chain: install all packages -> run all plugins -> finalize
-    workflow = group(install_tasks) | group(plugin_chains) | finalize_evaluation.si(evaluation_pid)
+            run_plugin_sig = run_plugin.si(
+                evaluation_plugin.package_name,
+                evaluation_plugin.name,
+                evaluation_plugin.version,
+                config,
+                input_file_definitions,
+                evaluation_pid,
+                evaluation_plugin.pid
+            )
+
+            # freeze to get a stable task id before dispatching
+            run_plugin_sig.freeze()
+            plugin_task_ids.append(str(run_plugin_sig.id))
+
+            post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
+            plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
+
+        package_chains.append(chain(install_sig, group(plugin_chain_list)))
+
+    # dispatch: each package's plugins start after its install, no waiting for other packages
+    workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
     workflow.apply_async()
 
     # store plugin task ids in redis so siblings can be revoked on failure
@@ -254,10 +255,31 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         else:
             install_target = f"{package_name}=={version}"
 
-        cmd = ["uv", "run", "-v", "--directory", str(workspace_path), "--offline", "--with", install_target,
-               str(runtime_script)]
+        venv_dir = workspace_path / "venv"
+        venv_python = venv_dir / "bin" / "python"
 
-        logger.debug(f"Running uv command: {' '.join(cmd)}")
+        # Step 1: Create isolated venv
+        logger.debug(f"Creating isolated venv at {venv_dir}")
+        venv_result = subprocess.run(
+            ["uv", "venv", str(venv_dir), "--python", "/usr/local/bin/python"],
+            capture_output=True, text=True, timeout=1000,
+        )
+        if venv_result.returncode != 0:
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, venv_result.stderr)
+            raise RuntimeError(f"Failed to create venv: {venv_result.stderr}")
+
+        # Step 2: Install plugin and dependencies into the venv
+        logger.debug(f"Installing {install_target} into isolated venv")
+        install_result = subprocess.run(
+            ["uv", "pip", "install", "--python", str(venv_dir), "--offline", install_target],
+            capture_output=True, text=True, timeout=1000,
+        )
+        if install_result.returncode != 0:
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, install_result.stderr)
+            raise RuntimeError(f"Failed to install plugin: {install_result.stderr}")
+
+        # Step 3: Run plugin script with the isolated venv's Python
+        logger.debug(f"Running plugin with: {venv_python} {runtime_script}")
         start_time = time.perf_counter()
         mark_plugin_started(evaluation_pid, evaluation_plugin_pid)
 
@@ -266,7 +288,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         with open(stderr_path, "w+") as stderr_file:
             process = subprocess.Popen(
-                cmd,
+                [str(venv_python), str(runtime_script)],
+                cwd=str(workspace_path),
                 stdout=subprocess.PIPE,
                 stderr=stderr_file,
                 text=True,
@@ -296,11 +319,22 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         duration = end_time - start_time
         stdout_content = "".join(stdout_lines)
 
+        log_stdout_content = (
+            "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
+            "====== Step 2: Plugin Install ======\n" + (install_result.stdout or "") + "\n\n"
+            "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
+        )
+        log_stderr_content = (
+            "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
+            "====== Step 2: Plugin Install ======\n" + (install_result.stderr or "") + "\n\n"
+            "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
+        )
+
         log_file = output_dir / "plugin_execution.log"
         log_content = "=== Plugin Execution Log ===\n\n"
         log_content += f"Execution Time: {duration:.2f} seconds\n\n"
-        log_content += f"=== STDOUT ===\n{stdout_content}\n\n"
-        log_content += f"=== STDERR ===\n{stderr_content}\n\n"
+        log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
+        log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
         log_content += f"=== Return Code ===\n{returncode}\n"
         log_file.write_text(log_content)
 
@@ -315,7 +349,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                             celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
             except Exception as e:
                 logger.warning(f"Could not revoke sibling tasks: {e}")
-            raise RuntimeError(f"Plugin failed: {stderr_content}")
+            raise RuntimeError(f"Plugin failed: {log_stderr_content}")
 
         measures_file = output_dir / "measures.json"
         measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
