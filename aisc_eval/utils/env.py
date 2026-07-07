@@ -17,8 +17,8 @@ def handle_bool_var(envvar: str) -> bool:
     return str(envvar).lower() == "true"
 
 
-API_URL = os.getenv("API_URL", "http://backend:8000")
-API_PREFIX = os.getenv("API_PREFIX", "/api/v1")
+API_URL = os.getenv("API_URL", "http://backend")
+API_PREFIX = os.getenv("API_PREFIX", "/api/v1/internal")
 API_URL_PREFIX = f"{API_URL}{API_PREFIX}"
 CACHE_DIR = os.getenv("CACHE_DIR", "/tmp/cache")
 
