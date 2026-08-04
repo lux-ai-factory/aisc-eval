@@ -34,6 +34,7 @@ class Plugin(BaseModel):
     version: str
     plugin_config: PluginConfig | None = None
     input_files: list[InputFileDefinition] = []
+    datashape_pid: uuid.UUID | None = None
 
 
 class Project(BaseModel):

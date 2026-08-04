@@ -1,5 +1,7 @@
 import json
 import os
+import io
+import re
 import ssl
 import subprocess
 import tempfile
@@ -29,14 +31,56 @@ from aisc_eval.service.api_client import (
     get_dataset_file_content,
     get_model_file_content,
     upload_artifact,
+    get_project_settings,
 )
 from aisc_eval.utils.logging import get_logger
 
 from aisc_plugin_manager.loader import Loader
 from aisc_plugin_interface import TaskProgress, Measure
 from aisc_eval.utils import env
+from aisc_eval.utils.encryption import decrypt_value
+from aisc_eval.services.datashape_validation import validate_dataframe_against_datashape
 
 logger = get_logger()
+
+SETTING_PATTERN = re.compile(r"\{\{\s*project_settings\.([\w_]+)\s*\}\}")
+
+
+def resolve_plugin_config(project_pid: uuid.UUID, config: dict | None) -> dict | None:
+    if config is None:
+        return None
+    settings = get_project_settings(project_pid)
+    values = {}
+    for setting in settings:
+        if setting["category"] == "api_key" and setting.get("encrypted_value"):
+            values[setting["key"]] = decrypt_value(setting["encrypted_value"])
+        elif setting["category"] == "general":
+            values[setting["key"]] = setting.get("json_value", {}).get("value")
+
+    resolved = {}
+    for key, value in config.items():
+        if not isinstance(value, str):
+            resolved[key] = value
+            continue
+        match = SETTING_PATTERN.fullmatch(value.strip())
+        if match and match.group(1) in values:
+            resolved[key] = values[match.group(1)]
+        else:
+            resolved[key] = SETTING_PATTERN.sub(
+                lambda item: str(values.get(item.group(1), item.group(0))), value
+            )
+    return resolved
+
+
+def validate_input_file(content: bytes, file_name: str, datashape: dict) -> dict:
+    suffix = Path(file_name).suffix.lower()
+    if suffix == ".csv":
+        frame = __import__("pandas").read_csv(io.BytesIO(content))
+    elif suffix == ".parquet":
+        frame = __import__("pandas").read_parquet(io.BytesIO(content))
+    else:
+        return {"errors": [], "warnings": []}
+    return validate_dataframe_against_datashape(frame, datashape)
 
 plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX,
                                env.PACKAGE_REGISTRY_USER,
@@ -163,7 +207,8 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 config,
                 input_file_definitions,
                 evaluation_pid,
-                evaluation_plugin.pid
+                evaluation_plugin.pid,
+                evaluation_plugin.datashape_pid,
             )
 
             # freeze to get a stable task id before dispatching
@@ -189,7 +234,8 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-               input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[dict]:
+               input_file_definitions: list[dict], evaluation_pid: uuid.UUID,
+               evaluation_plugin_pid: uuid.UUID, datashape_pid: uuid.UUID | None = None) -> list[dict]:
 
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
@@ -239,10 +285,41 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
             input_mapping[input_file_definition["name"]] = f"{input_file_definition['data']}"
 
+        datashape = None
+        if datashape_pid:
+            datashape = next(
+                (setting["json_value"] for setting in get_project_settings(evaluation.project.pid)
+                 if str(setting.get("pid")) == str(datashape_pid)),
+                None,
+            )
+            if datashape is None:
+                raise ValueError(f"Datashape {datashape_pid} was not found")
+            reports = [validate_input_file(file_content, definition["data"], datashape)
+                       for definition, file_content in zip(input_file_definitions, [
+                           get_dataset_file_content(definition["data"])
+                           if definition["input_type"] == "dataset" else b""
+                           for definition in input_file_definitions
+                       ])]
+            errors = [error for report in reports for error in report["errors"]]
+            warnings = [warning for report in reports for warning in report["warnings"]]
+            if errors:
+                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, "; ".join(errors))
+                raise ValueError("Datashape validation failed: " + "; ".join(errors))
+            for warning in warnings:
+                logger.warning("Datashape validation warning: %s", warning)
+
+        resolved_config = resolve_plugin_config(evaluation_pid, plugin_config)
+        if datashape:
+            plugin_class = plugin_loader.load_plugin(package_name, plugin_name, version)
+            datashape_names = [definition.name for definition in plugin_class.setting_definitions
+                               if definition.category.value == "datashape"]
+            if datashape_names:
+                resolved_config = {**(resolved_config or {}), datashape_names[0]: datashape}
+
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
-            "plugin_config": plugin_config
+            "plugin_config": resolved_config
         }
 
         config_path = workspace_path / "config.json"

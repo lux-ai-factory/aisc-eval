@@ -16,6 +16,12 @@ headers = {
 }
 
 
+def get_project_settings(project_pid: uuid.UUID) -> list[dict]:
+    resp = requests.get(f"{API_URL_PREFIX}/projects/{project_pid}/settings", headers=headers)
+    resp.raise_for_status()
+    return resp.json()
+
+
 class EvaluationStatusUpdateDTO(BaseModel):
     status: str
 
