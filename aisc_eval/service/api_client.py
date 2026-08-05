@@ -17,7 +17,19 @@ headers = {
 
 
 def get_project_settings(project_pid: uuid.UUID) -> list[dict]:
-    resp = requests.get(f"{API_URL_PREFIX}/projects/{project_pid}/settings", headers=headers)
+    resp = requests.get(f"{API_URL_PREFIX}/projects/settings/{project_pid}", headers=headers)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_project_settings_by_pid(
+    project_pid: uuid.UUID, project_setting_selections: list[dict]
+) -> list[dict]:
+    resp = requests.post(
+        f"{API_URL_PREFIX}/projects/settings/{project_pid}/by-pid",
+        json={"project_setting_selections": project_setting_selections},
+        headers=headers,
+    )
     resp.raise_for_status()
     return resp.json()
 

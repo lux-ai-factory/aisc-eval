@@ -1,7 +1,6 @@
 import json
 import os
 import io
-import re
 import ssl
 import subprocess
 import tempfile
@@ -31,7 +30,7 @@ from aisc_eval.service.api_client import (
     get_dataset_file_content,
     get_model_file_content,
     upload_artifact,
-    get_project_settings,
+    get_project_settings_by_pid,
 )
 from aisc_eval.utils.logging import get_logger
 
@@ -43,33 +42,33 @@ from aisc_eval.services.datashape_validation import validate_dataframe_against_d
 
 logger = get_logger()
 
-SETTING_PATTERN = re.compile(r"\{\{\s*project_settings\.([\w_]+)\s*\}\}")
+SECRET_ENV_PREFIX = "AISC_SECRET_"
 
 
-def resolve_plugin_config(project_pid: uuid.UUID, config: dict | None) -> dict | None:
-    if config is None:
-        return None
-    settings = get_project_settings(project_pid)
+def build_project_settings(settings: list[dict]) -> dict:
+    """Build the non-secret runtime settings exposed through the plugin API."""
+    values: dict = {}
+    for setting in settings:
+        if setting["category"] in {"general", "datashape"}:
+            values[setting["plugin_setting_key"]] = (
+                setting.get("json_value", {}).get("value")
+                if setting["category"] == "general"
+                else setting.get("json_value", {})
+            )
+    return values
+
+
+def build_secret_environment(settings: list[dict]) -> dict[str, str]:
+    """Decrypt selected secrets under their persisted plugin-defined names."""
     values = {}
     for setting in settings:
-        if setting["category"] == "api_key" and setting.get("encrypted_value"):
-            values[setting["key"]] = decrypt_value(setting["encrypted_value"])
-        elif setting["category"] == "general":
-            values[setting["key"]] = setting.get("json_value", {}).get("value")
-
-    resolved = {}
-    for key, value in config.items():
-        if not isinstance(value, str):
-            resolved[key] = value
-            continue
-        match = SETTING_PATTERN.fullmatch(value.strip())
-        if match and match.group(1) in values:
-            resolved[key] = values[match.group(1)]
-        else:
-            resolved[key] = SETTING_PATTERN.sub(
-                lambda item: str(values.get(item.group(1), item.group(0))), value
+        if setting["category"] == "secrets" and setting.get("encrypted_value"):
+            env_key = SECRET_ENV_PREFIX + "".join(
+                character.upper() if character.isalnum() else "_"
+                for character in setting["plugin_setting_key"]
             )
-    return resolved
+            values[env_key] = decrypt_value(setting["encrypted_value"])
+    return values
 
 
 def validate_input_file(content: bytes, file_name: str, datashape: dict) -> dict:
@@ -187,8 +186,10 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         plugin_chain_list = []
         for evaluation_plugin in pkg_info["plugins"]:
             config = None
+            project_setting_selections = []
             if evaluation_plugin.plugin_config:
                 config = evaluation_plugin.plugin_config.config
+                project_setting_selections = evaluation_plugin.plugin_config.project_setting_selections
 
             input_file_definitions = []
             for input_file in evaluation_plugin.input_files:
@@ -206,9 +207,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 evaluation_plugin.version,
                 config,
                 input_file_definitions,
+                get_project_settings_by_pid(evaluation.project.pid, project_setting_selections),
                 evaluation_pid,
                 evaluation_plugin.pid,
-                evaluation_plugin.datashape_pid,
             )
 
             # freeze to get a stable task id before dispatching
@@ -234,8 +235,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-               input_file_definitions: list[dict], evaluation_pid: uuid.UUID,
-               evaluation_plugin_pid: uuid.UUID, datashape_pid: uuid.UUID | None = None) -> list[dict]:
+               input_file_definitions: list[dict], project_settings: list[dict],
+               evaluation_pid: uuid.UUID,
+               evaluation_plugin_pid: uuid.UUID) -> list[dict]:
 
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
@@ -285,41 +287,11 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
             input_mapping[input_file_definition["name"]] = f"{input_file_definition['data']}"
 
-        datashape = None
-        if datashape_pid:
-            datashape = next(
-                (setting["json_value"] for setting in get_project_settings(evaluation.project.pid)
-                 if str(setting.get("pid")) == str(datashape_pid)),
-                None,
-            )
-            if datashape is None:
-                raise ValueError(f"Datashape {datashape_pid} was not found")
-            reports = [validate_input_file(file_content, definition["data"], datashape)
-                       for definition, file_content in zip(input_file_definitions, [
-                           get_dataset_file_content(definition["data"])
-                           if definition["input_type"] == "dataset" else b""
-                           for definition in input_file_definitions
-                       ])]
-            errors = [error for report in reports for error in report["errors"]]
-            warnings = [warning for report in reports for warning in report["warnings"]]
-            if errors:
-                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, "; ".join(errors))
-                raise ValueError("Datashape validation failed: " + "; ".join(errors))
-            for warning in warnings:
-                logger.warning("Datashape validation warning: %s", warning)
-
-        resolved_config = resolve_plugin_config(evaluation_pid, plugin_config)
-        if datashape:
-            plugin_class = plugin_loader.load_plugin(package_name, plugin_name, version)
-            datashape_names = [definition.name for definition in plugin_class.setting_definitions
-                               if definition.category.value == "datashape"]
-            if datashape_names:
-                resolved_config = {**(resolved_config or {}), datashape_names[0]: datashape}
-
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
-            "plugin_config": resolved_config
+            "project_settings": build_project_settings(project_settings),
+            "plugin_config": plugin_config or {},
         }
 
         config_path = workspace_path / "config.json"
@@ -364,11 +336,14 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         stderr_path = workspace_path / "stderr.tmp"
 
         with open(stderr_path, "w+") as stderr_file:
+            child_env = os.environ.copy()
+            child_env.update(build_secret_environment(project_settings))
             process = subprocess.Popen(
                 [str(venv_python), str(runtime_script)],
                 cwd=str(workspace_path),
                 stdout=subprocess.PIPE,
                 stderr=stderr_file,
+                env=child_env,
                 text=True,
                 bufsize=1
             )

@@ -25,6 +25,7 @@ class PluginConfig(BaseModel):
     id: int
     config: dict
     created_at: str
+    project_setting_selections: list[dict] = []
 
 
 class Plugin(BaseModel):
@@ -34,7 +35,6 @@ class Plugin(BaseModel):
     version: str
     plugin_config: PluginConfig | None = None
     input_files: list[InputFileDefinition] = []
-    datashape_pid: uuid.UUID | None = None
 
 
 class Project(BaseModel):
