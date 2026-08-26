@@ -1,5 +1,6 @@
 import json
 import os
+import io
 import ssl
 import subprocess
 import tempfile
@@ -29,14 +30,56 @@ from aisc_eval.service.api_client import (
     get_dataset_file_content,
     get_model_file_content,
     upload_artifact,
+    get_project_settings_by_pid,
 )
 from aisc_eval.utils.logging import get_logger
 
 from aisc_plugin_manager.loader import Loader
 from aisc_plugin_interface import TaskProgress, Measure
 from aisc_eval.utils import env
+from aisc_eval.utils.encryption import decrypt_value
+from aisc_eval.services.datashape_validation import validate_dataframe_against_datashape
 
 logger = get_logger()
+
+SECRET_ENV_PREFIX = "AISC_SECRET_"
+
+
+def build_project_settings(settings: list[dict]) -> dict:
+    """Build the non-secret runtime settings exposed through the plugin API."""
+    values: dict = {}
+    for setting in settings:
+        if setting["category"] in {"general", "datashape"}:
+            values[setting["plugin_setting_key"]] = (
+                setting.get("json_value", {}).get("value")
+                if setting["category"] == "general"
+                else setting.get("json_value", {})
+            )
+    return values
+
+
+def build_secret_environment(settings: list[dict]) -> dict[str, str]:
+    """Decrypt selected secrets under their persisted plugin-defined names."""
+    values = {}
+    for setting in settings:
+        if setting["category"] == "secrets" and setting.get("encrypted_value"):
+            env_key = SECRET_ENV_PREFIX + "".join(
+                character.upper() if character.isalnum() else "_"
+                for character in setting["plugin_setting_key"]
+            )
+            values[env_key] = decrypt_value(setting["encrypted_value"])
+    return values
+
+
+def validate_input_file(content: bytes, file_name: str, datashape: dict) -> dict:
+    suffix = Path(file_name).suffix.lower()
+    if suffix == ".csv":
+        frame = __import__("pandas").read_csv(io.BytesIO(content))
+    elif suffix == ".parquet":
+        frame = __import__("pandas").read_parquet(io.BytesIO(content))
+    else:
+        return {"errors": [], "warnings": []}
+    return validate_dataframe_against_datashape(frame, datashape)
 
 plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX,
                                env.PACKAGE_REGISTRY_USER,
@@ -143,8 +186,10 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         plugin_chain_list = []
         for evaluation_plugin in pkg_info["plugins"]:
             config = None
+            project_setting_selections = []
             if evaluation_plugin.plugin_config:
                 config = evaluation_plugin.plugin_config.config
+                project_setting_selections = evaluation_plugin.plugin_config.project_setting_selections
 
             input_file_definitions = []
             for input_file in evaluation_plugin.input_files:
@@ -162,8 +207,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 evaluation_plugin.version,
                 config,
                 input_file_definitions,
+                get_project_settings_by_pid(evaluation.project.pid, project_setting_selections),
                 evaluation_pid,
-                evaluation_plugin.pid
+                evaluation_plugin.pid,
             )
 
             # freeze to get a stable task id before dispatching
@@ -189,7 +235,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-               input_file_definitions: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> list[dict]:
+               input_file_definitions: list[dict], project_settings: list[dict],
+               evaluation_pid: uuid.UUID,
+               evaluation_plugin_pid: uuid.UUID) -> list[dict]:
 
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
@@ -242,7 +290,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
-            "plugin_config": plugin_config
+            "project_settings": build_project_settings(project_settings),
+            "plugin_config": plugin_config or {},
         }
 
         config_path = workspace_path / "config.json"
@@ -287,11 +336,14 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         stderr_path = workspace_path / "stderr.tmp"
 
         with open(stderr_path, "w+") as stderr_file:
+            child_env = os.environ.copy()
+            child_env.update(build_secret_environment(project_settings))
             process = subprocess.Popen(
                 [str(venv_python), str(runtime_script)],
                 cwd=str(workspace_path),
                 stdout=subprocess.PIPE,
                 stderr=stderr_file,
+                env=child_env,
                 text=True,
                 bufsize=1
             )
