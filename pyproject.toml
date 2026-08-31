@@ -21,8 +21,8 @@ dependencies = [
     "requests>=2.32.3,<3",
     "celery[redis]>=5.5.3",
     "flower>=2.0.1",
-    "aisc-plugin-manager>=0.2.5",
-    "aisc-plugin-interface>=0.2.5",
+    "aisc-plugin-manager>=0.2.7",
+    "aisc-plugin-interface>=0.2.6",
     "jsonschema>=4.25.1",
     "requests>=2.32.5",
     "cryptography>=44.0.0",
@@ -57,7 +57,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-aisc-plugin-manager = { git = "https://github.com/lux-ai-factory/aisc-plugin-manager", tag = "v0.2.6" }
+aisc-plugin-manager = { git = "https://github.com/lux-ai-factory/aisc-plugin-manager", tag = "v0.2.7" }
 
 [tool.isort]
 multi_line_output = 3
