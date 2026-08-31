@@ -25,6 +25,7 @@ class PluginConfig(BaseModel):
     id: int
     config: dict
     created_at: str
+    project_setting_selections: list[dict] = []
 
 
 class Plugin(BaseModel):

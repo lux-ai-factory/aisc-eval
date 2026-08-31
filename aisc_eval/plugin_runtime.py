@@ -94,7 +94,8 @@ def main():
         plugin._set_artifact_callback(partial(write_artifact_file, output_dir=output_dir))
 
         plugin._set_progress_callback(print_progress)
-
+        if hasattr(plugin, "_set_project_settings"):
+            plugin._set_project_settings(config.get("project_settings", {}))
 
         input_mapping = config.get("input_mapping", {})
         for name, path in input_mapping.items():
