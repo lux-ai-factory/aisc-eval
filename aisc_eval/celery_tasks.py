@@ -91,6 +91,39 @@ def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: st
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
 
 
+def _terminate_process(process: subprocess.Popen | None) -> None:
+    if process is not None and process.poll() is None:
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        except Exception:
+            pass
+
+
+def _revoke_sibling_tasks(evaluation_pid: uuid.UUID, current_task_id: str) -> None:
+    try:
+        raw = celery_app.backend.client.get(f"eval_tasks:{evaluation_pid}")
+        if raw:
+            for tid in json.loads(raw):
+                if tid != str(current_task_id):
+                    celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
+    except Exception as e:
+        logger.warning(f"Could not revoke sibling tasks: {e}")
+
+
+def _fail_plugin_and_revoke(
+    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_msg: str, current_task_id: str
+) -> None:
+    try:
+        mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, error_msg)
+    except Exception:
+        pass
+    _revoke_sibling_tasks(evaluation_pid, current_task_id)
+
+
 @celery_app.task(bind=True)
 def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID]):
     """Install a package once using uv run to cache dependencies."""
@@ -332,86 +365,88 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         start_time = time.perf_counter()
         mark_plugin_started(evaluation_pid, evaluation_plugin_pid)
 
-        stdout_lines = []
+        stdout_lines: list[str] = []
         stderr_path = workspace_path / "stderr.tmp"
+        process: subprocess.Popen | None = None
+        returncode: int | None = None
+        stderr_content = ""
+        try:
+            with open(stderr_path, "w+") as stderr_file:
+                child_env = os.environ.copy()
+                child_env.update(build_secret_environment(project_settings))
+                process = subprocess.Popen(
+                    [str(venv_python), str(runtime_script)],
+                    cwd=str(workspace_path),
+                    stdout=subprocess.PIPE,
+                    stderr=stderr_file,
+                    env=child_env,
+                    text=True,
+                    bufsize=1
+                )
 
-        with open(stderr_path, "w+") as stderr_file:
-            child_env = os.environ.copy()
-            child_env.update(build_secret_environment(project_settings))
-            process = subprocess.Popen(
-                [str(venv_python), str(runtime_script)],
-                cwd=str(workspace_path),
-                stdout=subprocess.PIPE,
-                stderr=stderr_file,
-                env=child_env,
-                text=True,
-                bufsize=1
+                if (stdout := process.stdout) is not None:
+                    for line in stdout:
+                        stdout_lines.append(line)
+                        stripped_line = line.strip()
+
+                        if stripped_line.startswith("{") and stripped_line.endswith("}"):
+                            try:
+                                progress_data = json.loads(stripped_line)
+                                task_progress = TaskProgress(**progress_data)
+
+                                progress_callback(task_progress, plugin_name, str(self.request.id))
+                            except Exception:
+                                pass
+
+                returncode = process.wait()
+
+                stderr_file.seek(0)
+                stderr_content = stderr_file.read()
+
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            stdout_content = "".join(stdout_lines)
+
+            log_stdout_content = (
+                "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
+                "====== Step 2: Plugin Install ======\n" + (install_result.stdout or "") + "\n\n"
+                "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
+            )
+            log_stderr_content = (
+                "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
+                "====== Step 2: Plugin Install ======\n" + (install_result.stderr or "") + "\n\n"
+                "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
             )
 
-            if (stdout := process.stdout) is not None:
-                for line in stdout:
-                    stdout_lines.append(line)
-                    stripped_line = line.strip()
+            log_file = output_dir / "plugin_execution.log"
+            log_content = "=== Plugin Execution Log ===\n\n"
+            log_content += f"Execution Time: {duration:.2f} seconds\n\n"
+            log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
+            log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
+            log_content += f"=== Return Code ===\n{returncode}\n"
+            log_file.write_text(log_content)
 
-                    if stripped_line.startswith("{") and stripped_line.endswith("}"):
-                        try:
-                            progress_data = json.loads(stripped_line)
-                            task_progress = TaskProgress(**progress_data)
+            if returncode != 0:
+                _fail_plugin_and_revoke(
+                    evaluation_pid, evaluation_plugin_pid, stderr_content, str(self.request.id)
+                )
+                raise RuntimeError(f"Plugin failed: {log_stderr_content}")
 
-                            progress_callback(task_progress, plugin_name, str(self.request.id))
-                        except Exception:
-                            pass
+            measures_file = output_dir / "measures.json"
+            measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
 
-            returncode = process.wait()
+            for file in output_dir.iterdir():
+                if file.name != "measures.json" and file.name != "stderr.tmp":
+                    upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
 
-            stderr_file.seek(0)
-            stderr_content = stderr_file.read()
-
-        end_time = time.perf_counter()
-        duration = end_time - start_time
-        stdout_content = "".join(stdout_lines)
-
-        log_stdout_content = (
-            "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
-            "====== Step 2: Plugin Install ======\n" + (install_result.stdout or "") + "\n\n"
-            "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
-        )
-        log_stderr_content = (
-            "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
-            "====== Step 2: Plugin Install ======\n" + (install_result.stderr or "") + "\n\n"
-            "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
-        )
-
-        log_file = output_dir / "plugin_execution.log"
-        log_content = "=== Plugin Execution Log ===\n\n"
-        log_content += f"Execution Time: {duration:.2f} seconds\n\n"
-        log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
-        log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
-        log_content += f"=== Return Code ===\n{returncode}\n"
-        log_file.write_text(log_content)
-
-        if returncode != 0:
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, stderr_content)
-            # revoke all sibling plugin tasks
-            try:
-                raw = celery_app.backend.client.get(f"eval_tasks:{evaluation_pid}")
-                if raw:
-                    for tid in json.loads(raw):
-                        if tid != str(self.request.id):
-                            celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
-            except Exception as e:
-                logger.warning(f"Could not revoke sibling tasks: {e}")
-            raise RuntimeError(f"Plugin failed: {log_stderr_content}")
-
-        measures_file = output_dir / "measures.json"
-        measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
-
-        for file in output_dir.iterdir():
-            if file.name != "measures.json" and file.name != "stderr.tmp":
-                upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
-
-        mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
-        return measures
+            mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
+            return measures
+        except Exception as exc:
+            _terminate_process(process)
+            _fail_plugin_and_revoke(
+                evaluation_pid, evaluation_plugin_pid, str(exc) or exc.__class__.__name__, str(self.request.id)
+            )
+            raise
 
 
 @celery_app.task
