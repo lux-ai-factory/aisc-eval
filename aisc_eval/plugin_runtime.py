@@ -110,6 +110,14 @@ def main():
             else:
                 print(f"⚠️  Input file not found: {file_path}", file=sys.stderr)
 
+        for name, payload in config.get("input_payloads", {}).items():
+            print(f"📥 Loading datashape input '{name}'")
+            plugin.set_input_payload(name, payload)
+
+        for name, endpoint in config.get("input_endpoints", {}).items():
+            print(f"📥 Binding endpoint input '{name}'")
+            plugin.set_endpoint_input(name, endpoint)
+
         print("🚀 Running evaluation...")
         plugin_config = config.get("plugin_config", {})
         output = plugin.evaluate(plugin_config)

@@ -31,6 +31,7 @@ from aisc_eval.service.api_client import (
     get_model_file_content,
     upload_artifact,
     get_project_settings_by_pid,
+    get_evaluation_inputs,
 )
 from aisc_eval.utils.logging import get_logger
 
@@ -49,10 +50,10 @@ def build_project_settings(settings: list[dict]) -> dict:
     """Build the non-secret runtime settings exposed through the plugin API."""
     values: dict = {}
     for setting in settings:
-        if setting["category"] in {"general", "datashape"}:
-            values[setting["plugin_setting_key"]] = (
+        if setting["category"] in {"variables", "datashape"}:
+            values[setting["plugin_config_key"]] = (
                 setting.get("json_value", {}).get("value")
-                if setting["category"] == "general"
+                if setting["category"] == "variables"
                 else setting.get("json_value", {})
             )
     return values
@@ -65,7 +66,7 @@ def build_secret_environment(settings: list[dict]) -> dict[str, str]:
         if setting["category"] == "secrets" and setting.get("encrypted_value"):
             env_key = SECRET_ENV_PREFIX + "".join(
                 character.upper() if character.isalnum() else "_"
-                for character in setting["plugin_setting_key"]
+                for character in setting["plugin_config_key"]
             )
             values[env_key] = decrypt_value(setting["encrypted_value"])
     return values
@@ -157,6 +158,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     plugin_loader.list_packages(refresh=True)
 
     evaluation: Evaluation = get_evaluation(evaluation_pid)
+    inputs_by_plugin: dict[str, list[dict]] = get_evaluation_inputs(evaluation_pid)
 
     # group plugins by package
     plugins_by_pkg = {}
@@ -186,28 +188,20 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         plugin_chain_list = []
         for evaluation_plugin in pkg_info["plugins"]:
             config = None
-            project_setting_selections = []
+            project_config_selections = []
             if evaluation_plugin.plugin_config:
                 config = evaluation_plugin.plugin_config.config
-                project_setting_selections = evaluation_plugin.plugin_config.project_setting_selections
+                project_config_selections = evaluation_plugin.plugin_config.project_config_selections
 
-            input_file_definitions = []
-            for input_file in evaluation_plugin.input_files:
-                input_file_definitions.append(
-                    {
-                        "name": input_file.name,
-                        "input_type": input_file.input_type,
-                        "data": input_file.input_file.data,
-                    }
-                )
+            input_components = inputs_by_plugin.get(str(evaluation_plugin.pid), [])
 
             run_plugin_sig = run_plugin.si(
                 evaluation_plugin.package_name,
                 evaluation_plugin.name,
                 evaluation_plugin.version,
                 config,
-                input_file_definitions,
-                get_project_settings_by_pid(evaluation.project.pid, project_setting_selections),
+                input_components,
+                get_project_settings_by_pid(evaluation.project.pid, project_config_selections),
                 evaluation_pid,
                 evaluation_plugin.pid,
             )
@@ -235,7 +229,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-               input_file_definitions: list[dict], project_settings: list[dict],
+               input_components: list[dict], project_settings: list[dict],
                evaluation_pid: uuid.UUID,
                evaluation_plugin_pid: uuid.UUID) -> list[dict]:
 
@@ -272,24 +266,42 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         output_dir.mkdir()
 
         input_mapping = {}
-        for input_file_definition in input_file_definitions:
-            if input_file_definition["input_type"] == "dataset":
-                file_content = get_dataset_file_content(input_file_definition["data"])
-            elif input_file_definition["input_type"] == "model":
-                file_content = get_model_file_content(input_file_definition["data"])
+        input_payloads = {}
+        input_endpoints = {}
+        for component in input_components:
+            component_type = component["component_type"]
+            name = component["name"]
+            if component_type == "dataset":
+                file_content = get_dataset_file_content(component["data"])
+            elif component_type == "model":
+                file_content = get_model_file_content(component["data"])
+            elif component_type == "datashape":
+                input_payloads[name] = component["json_value"]
+                continue
+            elif component_type in {"llm", "rest"}:
+                api_key = None
+                if component.get("secret_encrypted_value"):
+                    api_key = decrypt_value(component["secret_encrypted_value"])
+                input_endpoints[name] = {
+                    "endpoint_url": component.get("endpoint_url"),
+                    "api_key": api_key,
+                }
+                continue
             else:
                 raise ValueError(
-                    f"Unsupported file type: {input_file_definition['input_type']}"
+                    f"Unsupported component type: {component_type}"
                 )
 
-            file_path = input_dir / input_file_definition['data']
+            file_path = input_dir / component['data']
             file_path.write_bytes(file_content)
 
-            input_mapping[input_file_definition["name"]] = f"{input_file_definition['data']}"
+            input_mapping[name] = f"{component['data']}"
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
+            "input_payloads": input_payloads,
+            "input_endpoints": input_endpoints,
             "project_settings": build_project_settings(project_settings),
             "plugin_config": plugin_config or {},
         }
