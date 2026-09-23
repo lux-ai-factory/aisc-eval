@@ -12,6 +12,37 @@ class RuntimePlugin(BaseEvaluationPlugin[RuntimeConfig]):
         return config_data
 
 
+def test_plugin_description_defaults_to_empty_and_reads_class_attribute():
+    assert RuntimePlugin().description == ""
+
+    class DescribedPlugin(BaseEvaluationPlugin[RuntimeConfig]):
+        description = "## Purpose\n\nEvaluates examples."
+
+        def evaluate(self, config_data):
+            return config_data
+
+    assert DescribedPlugin().description == "## Purpose\n\nEvaluates examples."
+
+
+def test_plugin_help_text_dedents_indented_triple_quoted_description():
+    class IndentedPlugin(BaseEvaluationPlugin[RuntimeConfig]):
+        description = """
+        Reuses the same **project configs** as the Project Config plugin.
+
+        - **API Key** - secret
+        - **Base URL** - shared base URL
+        """
+
+        def evaluate(self, config_data):
+            return config_data
+
+    assert IndentedPlugin().help_text == (
+        "Reuses the same **project configs** as the Project Config plugin.\n\n"
+        "- **API Key** - secret\n"
+        "- **Base URL** - shared base URL"
+    )
+
+
 def test_build_project_settings_excludes_secrets():
     settings = build_project_settings([
         {"key": "threshold", "category": "variables", "json_value": {"value": 0.8}},

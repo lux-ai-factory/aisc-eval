@@ -60,13 +60,20 @@ def build_project_settings(settings: list[dict]) -> dict:
 
 
 def build_secret_environment(settings: list[dict]) -> dict[str, str]:
-    """Decrypt selected secrets under their persisted plugin-defined names."""
+    """Decrypt selected secrets under their environment names.
+
+    A secret's env var is named after the plugin declared key (plugin_config_key)
+    when present, otherwise the project config key under which it is stored.
+    """
     values = {}
     for setting in settings:
         if setting["category"] == "secrets" and setting.get("encrypted_value"):
+            name_source = setting.get("plugin_config_key") or setting.get("key")
+            if not name_source:
+                continue
             env_key = SECRET_ENV_PREFIX + "".join(
                 character.upper() if character.isalnum() else "_"
-                for character in setting["plugin_config_key"]
+                for character in name_source
             )
             values[env_key] = decrypt_value(setting["encrypted_value"])
     return values
@@ -266,42 +273,41 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         output_dir.mkdir()
 
         input_mapping = {}
-        input_payloads = {}
-        input_endpoints = {}
+        llm_secret_settings = []
         for component in input_components:
             component_type = component["component_type"]
             name = component["name"]
             if component_type == "dataset":
                 file_content = get_dataset_file_content(component["data"])
+                relative_path = component["data"]
             elif component_type == "model":
                 file_content = get_model_file_content(component["data"])
-            elif component_type == "datashape":
-                input_payloads[name] = component["json_value"]
-                continue
-            elif component_type in {"llm", "rest"}:
-                api_key = None
-                if component.get("secret_encrypted_value"):
-                    api_key = decrypt_value(component["secret_encrypted_value"])
-                input_endpoints[name] = {
-                    "endpoint_url": component.get("endpoint_url"),
-                    "api_key": api_key,
-                }
-                continue
+                relative_path = component["data"]
+            elif component_type in {"datashape", "llm", "resource"}:
+                payload = dict(component.get("json_value") or {})
+                if component_type == "llm":
+                    run_model = (component.get("value") or {}).get("model")
+                    if run_model:
+                        payload["model"] = run_model
+                    if component.get("secret_key") and component.get("secret_encrypted_value"):
+                        llm_secret_settings.append({
+                            "category": "secrets",
+                            "key": component["secret_key"],
+                            "encrypted_value": component["secret_encrypted_value"],
+                        })
+                file_content = json.dumps(payload).encode("utf-8")
+                relative_path = f"{name}.json"
             else:
                 raise ValueError(
                     f"Unsupported component type: {component_type}"
                 )
 
-            file_path = input_dir / component['data']
-            file_path.write_bytes(file_content)
-
-            input_mapping[name] = f"{component['data']}"
+            (input_dir / relative_path).write_bytes(file_content)
+            input_mapping[name] = relative_path
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
-            "input_payloads": input_payloads,
-            "input_endpoints": input_endpoints,
             "project_settings": build_project_settings(project_settings),
             "plugin_config": plugin_config or {},
         }
@@ -349,7 +355,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         with open(stderr_path, "w+") as stderr_file:
             child_env = os.environ.copy()
-            child_env.update(build_secret_environment(project_settings))
+            child_env.update(
+                build_secret_environment(project_settings + llm_secret_settings)
+            )
             process = subprocess.Popen(
                 [str(venv_python), str(runtime_script)],
                 cwd=str(workspace_path),
