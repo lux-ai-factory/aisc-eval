@@ -25,7 +25,7 @@ class PluginConfig(BaseModel):
     id: int
     config: dict
     created_at: str
-    project_setting_selections: list[dict] = []
+    project_config_selections: list[dict] = []
 
 
 class Plugin(BaseModel):
@@ -34,7 +34,7 @@ class Plugin(BaseModel):
     package_name: str
     version: str
     plugin_config: PluginConfig | None = None
-    input_files: list[InputFileDefinition] = []
+    evaluation_inputs: list[InputFileDefinition] = []
 
 
 class Project(BaseModel):
