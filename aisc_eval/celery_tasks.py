@@ -31,6 +31,7 @@ from aisc_eval.service.api_client import (
     get_model_file_content,
     upload_artifact,
     get_project_settings_by_pid,
+    get_evaluation_inputs,
 )
 from aisc_eval.utils.logging import get_logger
 
@@ -49,23 +50,30 @@ def build_project_settings(settings: list[dict]) -> dict:
     """Build the non-secret runtime settings exposed through the plugin API."""
     values: dict = {}
     for setting in settings:
-        if setting["category"] in {"general", "datashape"}:
-            values[setting["plugin_setting_key"]] = (
+        if setting["category"] in {"variables", "datashape"}:
+            values[setting["plugin_config_key"]] = (
                 setting.get("json_value", {}).get("value")
-                if setting["category"] == "general"
+                if setting["category"] == "variables"
                 else setting.get("json_value", {})
             )
     return values
 
 
 def build_secret_environment(settings: list[dict]) -> dict[str, str]:
-    """Decrypt selected secrets under their persisted plugin-defined names."""
+    """Decrypt selected secrets under their environment names.
+
+    A secret's env var is named after the plugin declared key (plugin_config_key)
+    when present, otherwise the project config key under which it is stored.
+    """
     values = {}
     for setting in settings:
         if setting["category"] == "secrets" and setting.get("encrypted_value"):
+            name_source = setting.get("plugin_config_key") or setting.get("key")
+            if not name_source:
+                continue
             env_key = SECRET_ENV_PREFIX + "".join(
                 character.upper() if character.isalnum() else "_"
-                for character in setting["plugin_setting_key"]
+                for character in name_source
             )
             values[env_key] = decrypt_value(setting["encrypted_value"])
     return values
@@ -89,6 +97,39 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PA
 def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: str):
     meta = {**task_progress.model_dump(), "plugin_name": plugin_name}
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
+
+
+def _terminate_process(process: subprocess.Popen | None) -> None:
+    if process is not None and process.poll() is None:
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        except Exception:
+            pass
+
+
+def _revoke_sibling_tasks(evaluation_pid: uuid.UUID, current_task_id: str) -> None:
+    try:
+        raw = celery_app.backend.client.get(f"eval_tasks:{evaluation_pid}")
+        if raw:
+            for tid in json.loads(raw):
+                if tid != str(current_task_id):
+                    celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
+    except Exception as e:
+        logger.warning(f"Could not revoke sibling tasks: {e}")
+
+
+def _fail_plugin_and_revoke(
+    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_msg: str, current_task_id: str
+) -> None:
+    try:
+        mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, error_msg)
+    except Exception:
+        pass
+    _revoke_sibling_tasks(evaluation_pid, current_task_id)
 
 
 @celery_app.task(bind=True)
@@ -157,6 +198,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     plugin_loader.list_packages(refresh=True)
 
     evaluation: Evaluation = get_evaluation(evaluation_pid)
+    inputs_by_plugin: dict[str, list[dict]] = get_evaluation_inputs(evaluation_pid)
 
     # group plugins by package
     plugins_by_pkg = {}
@@ -186,28 +228,20 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         plugin_chain_list = []
         for evaluation_plugin in pkg_info["plugins"]:
             config = None
-            project_setting_selections = []
+            project_config_selections = []
             if evaluation_plugin.plugin_config:
                 config = evaluation_plugin.plugin_config.config
-                project_setting_selections = evaluation_plugin.plugin_config.project_setting_selections
+                project_config_selections = evaluation_plugin.plugin_config.project_config_selections
 
-            input_file_definitions = []
-            for input_file in evaluation_plugin.input_files:
-                input_file_definitions.append(
-                    {
-                        "name": input_file.name,
-                        "input_type": input_file.input_type,
-                        "data": input_file.input_file.data,
-                    }
-                )
+            input_components = inputs_by_plugin.get(str(evaluation_plugin.pid), [])
 
             run_plugin_sig = run_plugin.si(
                 evaluation_plugin.package_name,
                 evaluation_plugin.name,
                 evaluation_plugin.version,
                 config,
-                input_file_definitions,
-                get_project_settings_by_pid(evaluation.project.pid, project_setting_selections),
+                input_components,
+                get_project_settings_by_pid(evaluation.project.pid, project_config_selections),
                 evaluation_pid,
                 evaluation_plugin.pid,
             )
@@ -235,7 +269,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-               input_file_definitions: list[dict], project_settings: list[dict],
+               input_components: list[dict], project_settings: list[dict],
                evaluation_pid: uuid.UUID,
                evaluation_plugin_pid: uuid.UUID) -> list[dict]:
 
@@ -272,20 +306,37 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         output_dir.mkdir()
 
         input_mapping = {}
-        for input_file_definition in input_file_definitions:
-            if input_file_definition["input_type"] == "dataset":
-                file_content = get_dataset_file_content(input_file_definition["data"])
-            elif input_file_definition["input_type"] == "model":
-                file_content = get_model_file_content(input_file_definition["data"])
+        llm_secret_settings = []
+        for component in input_components:
+            component_type = component["component_type"]
+            name = component["name"]
+            if component_type == "dataset":
+                file_content = get_dataset_file_content(component["data"])
+                relative_path = component["data"]
+            elif component_type == "model":
+                file_content = get_model_file_content(component["data"])
+                relative_path = component["data"]
+            elif component_type in {"datashape", "llm", "resource"}:
+                payload = dict(component.get("json_value") or {})
+                if component_type == "llm":
+                    run_model = (component.get("value") or {}).get("model")
+                    if run_model:
+                        payload["model"] = run_model
+                    if component.get("secret_key") and component.get("secret_encrypted_value"):
+                        llm_secret_settings.append({
+                            "category": "secrets",
+                            "key": component["secret_key"],
+                            "encrypted_value": component["secret_encrypted_value"],
+                        })
+                file_content = json.dumps(payload).encode("utf-8")
+                relative_path = f"{name}.json"
             else:
                 raise ValueError(
-                    f"Unsupported file type: {input_file_definition['input_type']}"
+                    f"Unsupported component type: {component_type}"
                 )
 
-            file_path = input_dir / input_file_definition['data']
-            file_path.write_bytes(file_content)
-
-            input_mapping[input_file_definition["name"]] = f"{input_file_definition['data']}"
+            (input_dir / relative_path).write_bytes(file_content)
+            input_mapping[name] = relative_path
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
@@ -332,86 +383,90 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         start_time = time.perf_counter()
         mark_plugin_started(evaluation_pid, evaluation_plugin_pid)
 
-        stdout_lines = []
+        stdout_lines: list[str] = []
         stderr_path = workspace_path / "stderr.tmp"
+        process: subprocess.Popen | None = None
+        returncode: int | None = None
+        stderr_content = ""
+        try:
+            with open(stderr_path, "w+") as stderr_file:
+                child_env = os.environ.copy()
+                child_env.update(
+                build_secret_environment(project_settings + llm_secret_settings)
+            )
+                process = subprocess.Popen(
+                    [str(venv_python), str(runtime_script)],
+                    cwd=str(workspace_path),
+                    stdout=subprocess.PIPE,
+                    stderr=stderr_file,
+                    env=child_env,
+                    text=True,
+                    bufsize=1
+                )
 
-        with open(stderr_path, "w+") as stderr_file:
-            child_env = os.environ.copy()
-            child_env.update(build_secret_environment(project_settings))
-            process = subprocess.Popen(
-                [str(venv_python), str(runtime_script)],
-                cwd=str(workspace_path),
-                stdout=subprocess.PIPE,
-                stderr=stderr_file,
-                env=child_env,
-                text=True,
-                bufsize=1
+                if (stdout := process.stdout) is not None:
+                    for line in stdout:
+                        stdout_lines.append(line)
+                        stripped_line = line.strip()
+
+                        if stripped_line.startswith("{") and stripped_line.endswith("}"):
+                            try:
+                                progress_data = json.loads(stripped_line)
+                                task_progress = TaskProgress(**progress_data)
+
+                                progress_callback(task_progress, plugin_name, str(self.request.id))
+                            except Exception:
+                                pass
+
+                returncode = process.wait()
+
+                stderr_file.seek(0)
+                stderr_content = stderr_file.read()
+
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            stdout_content = "".join(stdout_lines)
+
+            log_stdout_content = (
+                "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
+                "====== Step 2: Plugin Install ======\n" + (install_result.stdout or "") + "\n\n"
+                "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
+            )
+            log_stderr_content = (
+                "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
+                "====== Step 2: Plugin Install ======\n" + (install_result.stderr or "") + "\n\n"
+                "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
             )
 
-            if (stdout := process.stdout) is not None:
-                for line in stdout:
-                    stdout_lines.append(line)
-                    stripped_line = line.strip()
+            log_file = output_dir / "plugin_execution.log"
+            log_content = "=== Plugin Execution Log ===\n\n"
+            log_content += f"Execution Time: {duration:.2f} seconds\n\n"
+            log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
+            log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
+            log_content += f"=== Return Code ===\n{returncode}\n"
+            log_file.write_text(log_content)
 
-                    if stripped_line.startswith("{") and stripped_line.endswith("}"):
-                        try:
-                            progress_data = json.loads(stripped_line)
-                            task_progress = TaskProgress(**progress_data)
+            if returncode != 0:
+                _fail_plugin_and_revoke(
+                    evaluation_pid, evaluation_plugin_pid, stderr_content, str(self.request.id)
+                )
+                raise RuntimeError(f"Plugin failed: {log_stderr_content}")
 
-                            progress_callback(task_progress, plugin_name, str(self.request.id))
-                        except Exception:
-                            pass
+            measures_file = output_dir / "measures.json"
+            measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
 
-            returncode = process.wait()
+            for file in output_dir.iterdir():
+                if file.name != "measures.json" and file.name != "stderr.tmp":
+                    upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
 
-            stderr_file.seek(0)
-            stderr_content = stderr_file.read()
-
-        end_time = time.perf_counter()
-        duration = end_time - start_time
-        stdout_content = "".join(stdout_lines)
-
-        log_stdout_content = (
-            "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
-            "====== Step 2: Plugin Install ======\n" + (install_result.stdout or "") + "\n\n"
-            "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
-        )
-        log_stderr_content = (
-            "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
-            "====== Step 2: Plugin Install ======\n" + (install_result.stderr or "") + "\n\n"
-            "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
-        )
-
-        log_file = output_dir / "plugin_execution.log"
-        log_content = "=== Plugin Execution Log ===\n\n"
-        log_content += f"Execution Time: {duration:.2f} seconds\n\n"
-        log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
-        log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
-        log_content += f"=== Return Code ===\n{returncode}\n"
-        log_file.write_text(log_content)
-
-        if returncode != 0:
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, stderr_content)
-            # revoke all sibling plugin tasks
-            try:
-                raw = celery_app.backend.client.get(f"eval_tasks:{evaluation_pid}")
-                if raw:
-                    for tid in json.loads(raw):
-                        if tid != str(self.request.id):
-                            celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
-            except Exception as e:
-                logger.warning(f"Could not revoke sibling tasks: {e}")
-            raise RuntimeError(f"Plugin failed: {log_stderr_content}")
-
-        measures_file = output_dir / "measures.json"
-        measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
-
-        for file in output_dir.iterdir():
-            if file.name != "measures.json" and file.name != "stderr.tmp":
-                upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
-
-        mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
-        return measures
+            mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
+            return measures
+        except Exception as exc:
+            _terminate_process(process)
+            _fail_plugin_and_revoke(
+                evaluation_pid, evaluation_plugin_pid, str(exc) or exc.__class__.__name__, str(self.request.id)
+            )
+            raise
 
 
 @celery_app.task
