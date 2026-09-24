@@ -23,11 +23,11 @@ def get_project_settings(project_pid: uuid.UUID) -> list[dict]:
 
 
 def get_project_settings_by_pid(
-    project_pid: uuid.UUID, project_setting_selections: list[dict]
+    project_pid: uuid.UUID, project_config_selections: list[dict]
 ) -> list[dict]:
     resp = requests.post(
         f"{API_URL_PREFIX}/projects/settings/{project_pid}/by-pid",
-        json={"project_setting_selections": project_setting_selections},
+        json={"project_config_selections": project_config_selections},
         headers=headers,
     )
     resp.raise_for_status()
@@ -109,6 +109,14 @@ def get_model_file_content(file_name: str) -> bytes:
 
 def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
     resp = requests.get(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,plugin", headers=headers)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_evaluation_inputs(evaluation_pid: uuid.UUID) -> dict[str, Any]:
+    resp = requests.get(
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs", headers=headers
+    )
     resp.raise_for_status()
     return resp.json()
 
