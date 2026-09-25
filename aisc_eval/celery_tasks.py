@@ -368,12 +368,15 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, venv_result.stderr)
             raise RuntimeError(f"Failed to create venv: {venv_result.stderr}")
 
-        # Step 2: Install plugin and dependencies into the venv (offline, from the warmed cache).
-        # Pass the devpi index too, so cached registry packages (installed from a custom index by
-        # install_package) can be resolved offline — otherwise uv only looks in the PyPI cache and
-        # reports the plugin "not found in the cache".
+        # Step 2: Install plugin and dependencies into the venv (online, from devpi).
+        # NOTE: we do NOT use --offline here. The evaluation run needs the network anyway (e.g.
+        # GPT4ALL downloads its model at run time), so offline isolation gave nothing, and it broke
+        # for registry plugins whose shared dep (aisc-plugin-interface) is resolved via a local
+        # workspace source and therefore never cached under the devpi index for the offline resolver.
+        # Installing online resolves everything from the devpi index (root/public bases root/pypi),
+        # exactly like install_package already does successfully.
         logger.debug(f"Installing {install_target} into isolated venv")
-        install_cmd = ["uv", "pip", "install", "--python", str(venv_dir), "--offline"]
+        install_cmd = ["uv", "pip", "install", "--python", str(venv_dir)]
         extra_url = plugin_loader.devpi_client.simple_index_url
         if extra_url:
             install_cmd.extend(["--extra-index-url", extra_url])
