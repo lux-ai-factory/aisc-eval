@@ -161,18 +161,15 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
                 ["uv", "venv", str(cache_venv), "--python", "/usr/local/bin/python"],
                 capture_output=True, text=True, timeout=60, check=True,
             )
+            # Always pass the devpi index. (We used to probe it with a 2s urlopen and drop
+            # --extra-index-url on timeout, but that probe hits the FULL /+simple/ root — which
+            # lists the whole PyPI mirror and is slow — so it intermittently timed out and silently
+            # dropped devpi, making registry plugins "not found". If devpi is truly down, let uv
+            # fail loudly instead.)
             install_cmd = ["uv", "pip", "install", "--python", str(cache_venv)]
             extra_url = plugin_loader.devpi_client.simple_index_url
             if extra_url:
-                try:
-                    urllib.request.urlopen(extra_url, timeout=2.0, context=ssl._create_unverified_context())
-                except HTTPError:
-                    pass
-                except (URLError, TimeoutError, ValueError):
-                    logger.warning(f"'{extra_url}' is unreachable. Skipping '--extra-index-url'.")
-                    extra_url = None
-                if extra_url:
-                    install_cmd.extend(["--extra-index-url", extra_url])
+                install_cmd.extend(["--extra-index-url", extra_url])
             install_cmd.append(install_target)
 
             result = subprocess.run(
