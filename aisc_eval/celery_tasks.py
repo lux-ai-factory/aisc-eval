@@ -405,6 +405,12 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 child_env.update(
                 build_secret_environment(project_settings + llm_secret_settings)
             )
+                # Some plugins (e.g. LangBiTe) construct an OpenAI client at init even when a local
+                # model (GPT4ALL) is selected and no LLM judge is used. The OpenAI client only
+                # validates the key on an actual request, so a non-empty placeholder lets it
+                # instantiate without a real key; any real key already in the environment is kept.
+                if not child_env.get("API_KEY_OPENAI"):
+                    child_env["API_KEY_OPENAI"] = "sk-local-model-no-openai-call"
                 process = subprocess.Popen(
                     [str(venv_python), str(runtime_script)],
                     cwd=str(workspace_path),
