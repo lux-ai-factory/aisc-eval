@@ -19,8 +19,8 @@ logger.debug("=== CELERY APP CREATED ===")
 celery_config = {
     "task_acks_late": True,  # Acknowledge task only after completion
     "worker_prefetch_multiplier": 1,  # Process one task at a time
-    "task_soft_time_limit": 1800,  # 30 minutes soft limit
-    "task_time_limit": 2100,  # 35 minutes hard limit (buffer for cleanup)
+    "task_soft_time_limit": 7200,  # 120 min soft limit (first GPT4ALL run downloads a ~2GB model + CPU inference)
+    "task_time_limit": 7500,  # 125 min hard limit (buffer for cleanup)
     "broker_connection_max_retries": 10,
     "redis_retry_on_timeout": True,
     "redis_socket_keepalive": True,
