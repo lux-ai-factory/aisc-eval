@@ -17,6 +17,7 @@ from celery import group, chain
 from aisc_eval import plugin_runtime
 from aisc_eval.celery_app import celery_app
 from aisc_eval.data_model.evaluation import Evaluation
+from aisc_eval.service import api_client
 from aisc_eval.service.api_client import (
     mark_completed,
     mark_failed,
@@ -94,14 +95,26 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PA
                                env.PACKAGE_REGISTRY_PASSWORD)
 
 
+def _run(platform_pid, evaluation_pid, ticket) -> api_client.Run:
+    """The run a task works for (I7.3): every internal call inside names it."""
+    return api_client.Run(str(platform_pid).lower(), str(evaluation_pid).lower(), str(ticket))
+
+
 def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: str):
     meta = {**task_progress.model_dump(), "plugin_name": plugin_name}
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
 
 
 @celery_app.task(bind=True)
-def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID]):
+def install_package(self, package_name: str, version: str, platform_pid: uuid.UUID, evaluation_pid: uuid.UUID,
+                    ticket: str, evaluation_plugin_pids: list[uuid.UUID]):
     """Install a package once using uv run to cache dependencies."""
+    with api_client.acting_for(_run(platform_pid, evaluation_pid, ticket)):
+        return _install_package(package_name, version, evaluation_pid, evaluation_plugin_pids)
+
+
+def _install_package(package_name: str, version: str, evaluation_pid: uuid.UUID,
+                     evaluation_plugin_pids: list[uuid.UUID]):
     logger.info(f"Caching package {package_name}=={version}")
 
     if not plugin_loader.discovered_packages:
@@ -159,7 +172,18 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
 
 
 @celery_app.task(bind=True)
-def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
+def run_evaluation(self, platform_pid: uuid.UUID, evaluation_pid: uuid.UUID, ticket: str) -> dict:
+    """Dispatch the plugins of one evaluation (I7.3).
+
+    `platform_pid` names the project whose database holds the evaluation and
+    `ticket` is the run ticket the backend minted for it; both go with every
+    internal call and every task dispatched from here. No DSN is ever sent.
+    """
+    with api_client.acting_for(_run(platform_pid, evaluation_pid, ticket)):
+        return _run_evaluation(platform_pid, evaluation_pid, ticket)
+
+
+def _run_evaluation(platform_pid: uuid.UUID, evaluation_pid: uuid.UUID, ticket: str) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
 
     plugin_loader.list_packages(refresh=True)
@@ -188,7 +212,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         install_sig = install_package.si(
             pkg_info["package_name"],
             pkg_info["version"],
+            platform_pid,
             evaluation_pid,
+            ticket,
             [ep.pid for ep in pkg_info["plugins"]],
         )
 
@@ -209,7 +235,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 config,
                 input_components,
                 get_project_settings_by_pid(evaluation.project.pid, project_config_selections),
+                platform_pid,
                 evaluation_pid,
+                ticket,
                 evaluation_plugin.pid,
             )
 
@@ -217,13 +245,13 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
             run_plugin_sig.freeze()
             plugin_task_ids.append(str(run_plugin_sig.id))
 
-            post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
+            post_measurements_sig = post_measurements.s(platform_pid, evaluation_pid, ticket, evaluation_plugin.pid)
             plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
 
         package_chains.append(chain(install_sig, group(plugin_chain_list)))
 
     # dispatch: each package's plugins start after its install, no waiting for other packages
-    workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
+    workflow = group(package_chains) | finalize_evaluation.si(platform_pid, evaluation_pid, ticket)
     workflow.apply_async()
 
     # store plugin task ids in redis so siblings can be revoked on failure
@@ -237,8 +265,19 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
                input_components: list[dict], project_settings: list[dict],
+               platform_pid: uuid.UUID,
                evaluation_pid: uuid.UUID,
+               ticket: str,
                evaluation_plugin_pid: uuid.UUID) -> list[dict]:
+    with api_client.acting_for(_run(platform_pid, evaluation_pid, ticket)):
+        return _run_plugin(self, package_name, plugin_name, version, plugin_config, input_components,
+                           project_settings, evaluation_pid, evaluation_plugin_pid)
+
+
+def _run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
+                input_components: list[dict], project_settings: list[dict],
+                evaluation_pid: uuid.UUID,
+                evaluation_plugin_pid: uuid.UUID) -> list[dict]:
 
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
@@ -435,17 +474,24 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
 
 @celery_app.task
-def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
-    try:
-        measurements = [Measure(**m) for m in measurements_dict]
-        post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
-    except Exception as e:
-        mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, str(e))
-        raise
+def post_measurements(measurements_dict: list[dict], platform_pid: uuid.UUID, evaluation_pid: uuid.UUID,
+                      ticket: str, evaluation_plugin_uuid: uuid.UUID):
+    with api_client.acting_for(_run(platform_pid, evaluation_pid, ticket)):
+        try:
+            measurements = [Measure(**m) for m in measurements_dict]
+            post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
+        except Exception as e:
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, str(e))
+            raise
 
 
 @celery_app.task
-def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
+def finalize_evaluation(platform_pid: uuid.UUID, evaluation_id: uuid.UUID, ticket: str) -> None:
+    with api_client.acting_for(_run(platform_pid, evaluation_id, ticket)):
+        _finalize_evaluation(evaluation_id)
+
+
+def _finalize_evaluation(evaluation_id: uuid.UUID) -> None:
     logger.debug(f"Finalizing evaluation {evaluation_id}")
     try:
         # check if any plugins failed before marking as completed
@@ -466,12 +512,15 @@ def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
 
 @celery_app.task
 def handle_error(
+        platform_pid: uuid.UUID,
         evaluation_id: uuid.UUID,
+        ticket: str,
         request: object,
         exc: BaseException,
         traceback: object,
 ) -> None:
-    logger.error(f"Error in evaluation {evaluation_id}:")
-    logger.error(f"--\n\n{request} {exc} {traceback}")
-    mark_failed(evaluation_id)
-    logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
+    with api_client.acting_for(_run(platform_pid, evaluation_id, ticket)):
+        logger.error(f"Error in evaluation {evaluation_id}:")
+        logger.error(f"--\n\n{request} {exc} {traceback}")
+        mark_failed(evaluation_id)
+        logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
