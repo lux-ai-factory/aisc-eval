@@ -11,7 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gh \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# The code sits at /app/apps/eval, as in the aisc repo, because pyproject.toml takes the
+# shared packages from ../../shared: that path must resolve, to /app/shared, which compose
+# mounts. They are installed from the mount when the container starts (the compose
+# command), so the build leaves them out. The environment stays at /app/.venv.
+WORKDIR /app/apps/eval
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 
 # Builder stage for dependencies and compilation
 FROM base AS builder
@@ -19,14 +24,15 @@ FROM base AS builder
 # Install production dependencies with caching
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev \
+        --no-install-package aisc-plugin-interface --no-install-package aisc-plugin-manager
 
 # Copy application code
 COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --upgrade-package aisc-plugin-manager \
-        --no-dev
+    uv sync --frozen --no-dev \
+        --no-install-package aisc-plugin-interface --no-install-package aisc-plugin-manager
 
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs && \
