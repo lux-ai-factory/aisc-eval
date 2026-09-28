@@ -259,7 +259,8 @@ def test_i7_3_configurator_run_evaluation_calls_with_the_run_of_its_header(backe
 
 @configurator_only
 def test_i7_3_configurator_every_dispatched_task_is_published_inside_the_run(backend, dispatched, acting):
-    """What _forward copies into each child's aisc_run header is the context at publish time."""
+    """The context is the run at each publish. This cannot show that a child inherits the run:
+    nothing is sent over a broker here. Only test_run_context_broker.py proves inheritance."""
     _run()
     _assert_arguments_carry_no_run(dispatched, "configurator")
     assert dispatched.published_in and all(run == RUN for run in dispatched.published_in), (

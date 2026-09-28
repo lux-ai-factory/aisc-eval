@@ -33,3 +33,40 @@ def test_standalone_publishes_no_header():
     headers = {}
     run_context._forward(headers=headers)
     assert headers == {}
+
+
+def _task(run):
+    return SimpleNamespace(request=SimpleNamespace(aisc_run=run))
+
+
+def test_enter_sets_the_run_of_the_task_and_leave_clears_it():
+    run = {"project": "p", "evaluation": "e", "ticket": "t"}
+    task = _task(run)
+    run_context._enter(task=task)
+    assert run_context.current() == run
+    run_context._leave(task=task)
+    assert run_context.current() is None
+
+
+def test_a_nested_enter_and_leave_restores_the_outer_run():
+    outer_run = {"project": "p", "evaluation": "outer", "ticket": "t"}
+    inner_run = {"project": "p", "evaluation": "inner", "ticket": "t"}
+    outer, inner = _task(outer_run), _task(inner_run)
+    run_context._enter(task=outer)
+    run_context._enter(task=inner)  # an eager call inside a running task
+    assert run_context.current() == inner_run
+    run_context._leave(task=inner)
+    assert run_context.current() == outer_run
+    run_context._leave(task=outer)
+    assert run_context.current() is None
+
+
+def test_leave_without_a_stored_token_still_clears():
+    token = run_context._current.set({"project": "p", "evaluation": "e", "ticket": "t"})
+    try:
+        run_context._leave(task=_task(None))
+        assert run_context.current() is None
+        run_context._leave()
+        assert run_context.current() is None
+    finally:
+        run_context._current.reset(token)

@@ -21,14 +21,30 @@ def current() -> dict | None:
     return _current.get()
 
 
+#: where _enter keeps the token of its set(), on the task's request, so _leave can reset to
+#: what was current before (an eager task run inside another task gets the outer run back)
+_TOKEN = "_aisc_run_token"
+
+
 @task_prerun.connect
 def _enter(task=None, **_):
-    _current.set(run_of(task.request) if task is not None else None)
+    token = _current.set(run_of(task.request) if task is not None else None)
+    if task is not None:
+        setattr(task.request, _TOKEN, token)
 
 
 @task_postrun.connect
-def _leave(**_):
-    _current.set(None)
+def _leave(task=None, **_):
+    request = getattr(task, "request", None)
+    token = getattr(request, _TOKEN, None)
+    if token is None:
+        _current.set(None)
+        return
+    setattr(request, _TOKEN, None)
+    try:
+        _current.reset(token)
+    except ValueError:  # the token belongs to another context: clear rather than guess
+        _current.set(None)
 
 
 @before_task_publish.connect

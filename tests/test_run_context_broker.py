@@ -4,7 +4,8 @@ A run_evaluation-like task, sent with the aisc_run header as the backend sends i
 publishes a chain whose last step is a chord callback, like run_evaluation's
 workflow (install -> group of plugin chains | finalize). Every task records
 run_context.current(); all of them must equal the header that was sent, and a
-message sent without the header (standalone) must record None.
+message sent without the header (standalone), before the run and again after it on the
+same worker, must record None.
 
 Skipped unless AISC_TEST_BROKER_URL is set (and AISC_TEST_RESULT_BACKEND, which the
 chord needs, e.g. a throwaway redis). Never point these at a live stack.
@@ -74,11 +75,13 @@ def test_every_task_of_the_run_acts_for_the_header_sent(app_and_seen):
     app.send_task("t.standalone").get(timeout=30)
     app.send_task("t.run_evaluation", args=[RUN["evaluation"]], headers={"aisc_run": RUN})
     assert done.wait(60), f"the chord callback never ran; seen: {seen}"
+    # after the run, on the same worker: a message without the header acts for nobody
+    app.send_task("t.standalone").get(timeout=30)
 
     by_name = {}
     for name, _id, current, header in seen:
         by_name.setdefault(name, []).append((current, header))
-    assert by_name["standalone"] == [(None, None)]
+    assert by_name["standalone"] == [(None, None), (None, None)], "before and after the run"
     assert [n for n in ("run_evaluation", "install", "plugin", "finalize") if n in by_name] == [
         "run_evaluation", "install", "plugin", "finalize"]
     assert len(by_name["plugin"]) == 2
