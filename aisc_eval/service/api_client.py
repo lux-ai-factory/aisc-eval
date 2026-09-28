@@ -1,14 +1,11 @@
 import uuid
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 import requests
 from pydantic import BaseModel
 from aisc_plugin_interface import Measure
 
-from aisc_eval import deployment
+from aisc_eval import deployment, run_context
 from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.utils.env import API_URL_PREFIX, INTERNAL_API_KEY
 from aisc_eval.utils.logging import get_logger
@@ -16,51 +13,24 @@ from aisc_eval.utils.logging import get_logger
 logger = get_logger()
 
 
-@dataclass(frozen=True)
-class Run:
-    """The run a task acts for (I7.3, configurator only).
-
-    The backend keeps each project's data in the project's own database, and its
-    door opens the one named by X-AISC-Project. It accepts an internal call only
-    with the ticket it minted for this project and this evaluation when the run
-    was started (X-AISC-Run); the worker carries the ticket and never makes one.
-    """
-
-    project: str
-    evaluation: str
-    ticket: str
-
-
-current_run: ContextVar[Run | None] = ContextVar("aisc_eval_current_run", default=None)
-
-
-@contextmanager
-def acting_for(run: Run) -> Iterator[Run]:
-    """Every internal call made inside this block acts for this run."""
-    token = current_run.set(run)
-    try:
-        yield run
-    finally:
-        current_run.reset(token)
-
-
-def headers(run: Run | None = None) -> dict[str, str]:
+def headers(run: dict | None = None) -> dict[str, str]:
     """The headers of an internal call, read at call time.
 
     Standalone: Sean's secret alone. Configurator: the same secret, plus the
     project, run ticket and evaluation the backend's door checks (I7.3). `run`
-    defaults to whatever task currently acts_for one.
+    defaults to the run of the task being executed (run_context.current(), set
+    from the task's aisc_run Celery header); with none, no door header is sent.
     """
     found = {"X-Internal-Secret": INTERNAL_API_KEY}
     if deployment.MODE != deployment.CONFIGURATOR:
         return found
     if run is None:
-        run = current_run.get()
+        run = run_context.current()
     if run is not None:
         found.update({
-            "X-AISC-Project": run.project,
-            "X-AISC-Run": run.ticket,
-            "X-AISC-Evaluation": run.evaluation,
+            "X-AISC-Project": str(run["project"]),
+            "X-AISC-Run": str(run["ticket"]),
+            "X-AISC-Evaluation": str(run["evaluation"]),
         })
     return found
 

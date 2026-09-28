@@ -1,10 +1,17 @@
 """I7.3, by mode: the configurator worker names its project and carries a run
-ticket on every internal call and every task it dispatches; the standalone worker
-keeps master's shape untouched (a single evaluation_pid, no project headers).
+ticket on every internal call; the standalone worker keeps master's shape
+untouched (a single evaluation_pid, no project headers).
 
-Ported from definitive/2026-09-27's tests/test_run_ticket.py, split by mode.
-deployment.MODE (read once at import, per the brief) picks which half of this
-file runs; run this file twice, once per mode, to cover both halves.
+Since adapt Task 4 (2026-09-28) the run no longer travels as task arguments:
+the backend puts it in the `aisc_run` Celery header of run_evaluation, every
+task published while a task runs inherits it (aisc_eval.run_context), and the
+api_client reads it from run_context.current(). So the task signatures are
+Meril's tip (96a8ec7) exactly, in both modes, and these tests set the run
+context the way task_prerun does on a real worker (a broker-backed check of
+the inheritance itself is tests/test_run_context_broker.py).
+
+deployment.MODE (read once at import) picks which half of this file runs; run
+this file twice, once per mode, to cover both halves.
 
 The engine's data lives in one database per project. The worker has no database
 access: it calls the backend's /api/v1/internal/* routes, and the backend's door
@@ -27,7 +34,7 @@ import pytest
 import requests
 from celery import canvas
 
-from aisc_eval import celery_tasks, deployment
+from aisc_eval import celery_tasks, deployment, run_context
 from aisc_eval.utils import env
 
 PLATFORM_PID = "3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b"
@@ -35,6 +42,7 @@ ENGINE_PROJECT_PID = "afb49e3f-813d-8888-9919-ee179d1090e6"
 EVALUATION_PID = "afb49e3f-813d-4260-9919-ee179d1090e6"
 PLUGIN_PID = "750ec557-fd8c-4f94-92b9-28796591fd40"
 TICKET = "0" * 16 + "a-ticket-minted-by-the-backend" + "f" * 16
+RUN = {"project": PLATFORM_PID, "evaluation": EVALUATION_PID, "ticket": TICKET}
 
 WORKER_ROOT = Path(__file__).resolve().parents[1]
 DSN_PATTERN = re.compile(r"postgres(ql)?(\+\w+)?://|dbname=|DATABASE_URL|_DSN\b", re.IGNORECASE)
@@ -99,13 +107,34 @@ def backend(monkeypatch):
     return fake
 
 
+class _Sent(list):
+    """What was handed to Celery, and the run context each piece was published in
+    (what run_context._forward copies into its aisc_run header)."""
+
+    def __init__(self):
+        super().__init__()
+        self.published_in = []
+
+
+@pytest.fixture
+def acting():
+    """The run context task_prerun sets on a real worker from the aisc_run header."""
+    token = run_context._current.set(RUN)
+    try:
+        yield RUN
+    finally:
+        run_context._current.reset(token)
+
+
 @pytest.fixture
 def dispatched(monkeypatch):
     """Everything run_evaluation hands to Celery, captured instead of sent."""
-    sent = []
+    sent = _Sent()
+    published_in = sent.published_in
 
     def capture(self, *args, **kwargs):
         sent.append(self)
+        published_in.append(run_context.current())
         return MagicMock()
 
     for cls in (canvas.Signature, canvas._chain, canvas.group, canvas._chord):
@@ -138,20 +167,13 @@ def _values(sig):
     return [str(v) for v in list(sig.args) + list(sig.kwargs.values())]
 
 
-def _run_configurator():
-    run = celery_tasks.run_evaluation.run
-    try:
-        return run(uuid.UUID(PLATFORM_PID), uuid.UUID(EVALUATION_PID), TICKET)
-    except TypeError as exc:
-        pytest.fail(f"I7.3: run_evaluation does not take (platform_pid, evaluation_pid, ticket): {exc}")
-
-
-def _run_standalone():
+def _run():
+    """Sean's call, in both modes: run_evaluation(evaluation_pid)."""
     run = celery_tasks.run_evaluation.run
     try:
         return run(uuid.UUID(EVALUATION_PID))
     except TypeError as exc:
-        pytest.fail(f"standalone: run_evaluation does not take (evaluation_pid), as Sean's worker did: {exc}")
+        pytest.fail(f"run_evaluation does not take (evaluation_pid), as Sean's worker does: {exc}")
 
 
 def _assert_configurator_headers(calls, what):
@@ -177,6 +199,20 @@ def _assert_standalone_headers(calls, what):
         assert "X-AISC-Evaluation" not in headers, f"standalone: {what}: {method} {url} names an evaluation"
 
 
+def _assert_arguments_carry_no_run(dispatched, what):
+    """The run is in the headers, never in the arguments (adapt item 5)."""
+    assert dispatched, f"{what}: run_evaluation dispatched nothing"
+    leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
+    names = {leaf.task.rsplit(".", 1)[-1] for leaf in leaves}
+    assert {"install_package", "run_plugin", "post_measurements", "finalize_evaluation"} <= names
+    for leaf in leaves:
+        values = _values(leaf)
+        assert PLATFORM_PID not in values, f"{what}: {leaf.task} carries a platform pid argument"
+        assert TICKET not in values, f"{what}: {leaf.task} carries a run ticket argument"
+        assert "None" not in values[-2:], f"{what}: {leaf.task} carries trailing None arguments"
+    return leaves
+
+
 # ---------------------------------------------------------------------------
 # Both modes
 # ---------------------------------------------------------------------------
@@ -193,40 +229,55 @@ def test_i7_3_the_worker_settings_name_no_database_and_no_ticket_key():
             assert "DJANGO_SECRET_KEY" not in text, f"I7.3: {source.name} reads the ticket key"
 
 
+def test_the_three_argument_call_fails_clearly_and_calls_nothing(backend, dispatched):
+    """Both modes now take Sean's single argument; the old configurator shape is a stale caller."""
+    with pytest.raises(TypeError):
+        celery_tasks.run_evaluation.run(uuid.UUID(PLATFORM_PID), uuid.UUID(EVALUATION_PID), TICKET)
+    assert backend.calls == [], "a three-argument call reached the backend"
+    assert list(dispatched) == [], "a three-argument call dispatched work"
+
+
+def test_every_task_keeps_merils_signature():
+    """The task signatures are 96a8ec7's: no platform_pid, no ticket, anywhere."""
+    import inspect
+
+    for task in (celery_tasks.install_package, celery_tasks.run_evaluation, celery_tasks.run_plugin,
+                 celery_tasks.post_measurements, celery_tasks.finalize_evaluation, celery_tasks.handle_error):
+        params = inspect.signature(task.run).parameters
+        assert "platform_pid" not in params and "ticket" not in params, task.name
+
+
 # ---------------------------------------------------------------------------
 # Configurator only
 # ---------------------------------------------------------------------------
 
 @configurator_only
-def test_i7_3_configurator_run_evaluation_takes_platform_pid_evaluation_pid_and_ticket(backend, dispatched):
-    _run_configurator()
+def test_i7_3_configurator_run_evaluation_calls_with_the_run_of_its_header(backend, dispatched, acting):
+    _run()
     _assert_configurator_headers(backend.internal_calls(), "run_evaluation")
 
 
 @configurator_only
-def test_i7_3_configurator_the_old_one_argument_call_fails_clearly_and_calls_nothing(backend, dispatched):
-    with pytest.raises(TypeError):
-        celery_tasks.run_evaluation.run(uuid.UUID(EVALUATION_PID))
-    assert backend.calls == [], "I7.3: an old-style task reached the backend"
-    assert dispatched == [], "I7.3: an old-style task dispatched work"
+def test_i7_3_configurator_every_dispatched_task_is_published_inside_the_run(backend, dispatched, acting):
+    """What _forward copies into each child's aisc_run header is the context at publish time."""
+    _run()
+    _assert_arguments_carry_no_run(dispatched, "configurator")
+    assert dispatched.published_in and all(run == RUN for run in dispatched.published_in), (
+        "I7.3: run_evaluation published work outside its run, so the children would lose the ticket")
 
 
 @configurator_only
-def test_i7_3_configurator_every_dispatched_task_carries_the_project_and_the_ticket(backend, dispatched):
-    _run_configurator()
-    assert dispatched, "I7.3: run_evaluation dispatched nothing"
-    leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
-    names = {leaf.task.rsplit(".", 1)[-1] for leaf in leaves}
-    assert {"install_package", "run_plugin", "post_measurements", "finalize_evaluation"} <= names
-    for leaf in leaves:
-        values = _values(leaf)
-        assert PLATFORM_PID in values, f"I7.3: {leaf.task} is dispatched without the platform pid"
-        assert TICKET in values, f"I7.3: {leaf.task} is dispatched without the run ticket"
+def test_i7_3_configurator_without_a_header_names_no_project(backend, dispatched):
+    """No aisc_run header, no run: the calls go out without the door headers (and the door refuses them)."""
+    _run()
+    assert backend.internal_calls()
+    for _, _, headers in backend.internal_calls():
+        assert "X-AISC-Project" not in headers and "X-AISC-Run" not in headers
 
 
 @configurator_only
-def test_i7_3_no_dispatched_task_carries_a_dsn(backend, dispatched):
-    _run_configurator()
+def test_i7_3_no_dispatched_task_carries_a_dsn(backend, dispatched, acting):
+    _run()
     for sent in dispatched:
         for leaf in _leaves(sent):
             for value in _values(leaf):
@@ -236,9 +287,9 @@ def test_i7_3_no_dispatched_task_carries_a_dsn(backend, dispatched):
 @configurator_only
 @pytest.mark.parametrize("has_failed_plugins", [False, True], ids=["completed", "failed"])
 def test_i7_3_configurator_finalize_and_post_measurements_send_the_project_and_the_ticket(
-    backend, dispatched, has_failed_plugins
+    backend, dispatched, acting, has_failed_plugins
 ):
-    _run_configurator()
+    _run()
     leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
     backend.has_failed_plugins = has_failed_plugins
     backend.calls.clear()
@@ -265,12 +316,12 @@ class _Failed:
 
 @configurator_only
 def test_i7_3_configurator_run_plugin_downloads_and_reports_with_the_project_and_the_ticket(
-    backend, dispatched, monkeypatch, tmp_path
+    backend, dispatched, acting, monkeypatch, tmp_path
 ):
     """run_plugin fetches its input files and reports a failure through the
     internal API; each of those calls names the project and carries the ticket.
     The venv step is faked to fail, so no plugin runs."""
-    _run_configurator()
+    _run()
     leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
     runs = [leaf for leaf in leaves if leaf.task.endswith("run_plugin")]
     assert runs, "I7.3: no run_plugin dispatched"
@@ -290,9 +341,9 @@ def test_i7_3_configurator_run_plugin_downloads_and_reports_with_the_project_and
 
 @configurator_only
 def test_i7_3_configurator_install_package_reports_a_failure_with_the_project_and_the_ticket(
-    backend, dispatched, monkeypatch, tmp_path
+    backend, dispatched, acting, monkeypatch, tmp_path
 ):
-    _run_configurator()
+    _run()
     leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
     installs = [leaf for leaf in leaves if leaf.task.endswith("install_package")]
     assert installs, "I7.3: no install_package dispatched"
@@ -317,29 +368,22 @@ def test_i7_3_configurator_install_package_reports_a_failure_with_the_project_an
 @standalone_only
 def test_i7_3_standalone_run_evaluation_takes_only_evaluation_pid(backend, dispatched):
     """As Sean's worker always took it: master's call, master's headers."""
-    _run_standalone()
+    _run()
     _assert_standalone_headers(backend.internal_calls(), "run_evaluation")
 
 
 @standalone_only
-def test_i7_3_standalone_the_three_argument_call_fails_clearly_and_calls_nothing(backend, dispatched):
-    with pytest.raises(TypeError):
-        celery_tasks.run_evaluation.run(uuid.UUID(PLATFORM_PID), uuid.UUID(EVALUATION_PID), TICKET)
-    assert backend.calls == [], "standalone: a configurator-style call reached the backend"
-    assert dispatched == [], "standalone: a configurator-style call dispatched work"
+def test_i7_3_standalone_ignores_a_run_header_if_one_ever_arrives(backend, dispatched, acting):
+    """Standalone never sets the header; even if a message carried one, no door header goes out."""
+    _run()
+    _assert_standalone_headers(backend.internal_calls(), "run_evaluation")
 
 
 @standalone_only
 def test_i7_3_standalone_dispatched_tasks_carry_no_project_or_ticket(backend, dispatched):
-    _run_standalone()
-    assert dispatched, "standalone: run_evaluation dispatched nothing"
-    leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
-    names = {leaf.task.rsplit(".", 1)[-1] for leaf in leaves}
-    assert {"install_package", "run_plugin", "post_measurements", "finalize_evaluation"} <= names
-    for leaf in leaves:
-        values = _values(leaf)
-        assert PLATFORM_PID not in values, f"standalone: {leaf.task} carries a platform pid"
-        assert TICKET not in values, f"standalone: {leaf.task} carries a run ticket"
+    _run()
+    _assert_arguments_carry_no_run(dispatched, "standalone")
+    assert all(run is None for run in dispatched.published_in), "standalone: work published inside a run"
 
 
 @standalone_only
@@ -347,7 +391,7 @@ def test_i7_3_standalone_dispatched_tasks_carry_no_project_or_ticket(backend, di
 def test_i7_3_standalone_finalize_and_post_measurements_send_no_project_headers(
     backend, dispatched, has_failed_plugins
 ):
-    _run_standalone()
+    _run()
     leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
     backend.has_failed_plugins = has_failed_plugins
     backend.calls.clear()

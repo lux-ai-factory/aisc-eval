@@ -1,5 +1,3 @@
-import functools
-import inspect
 import json
 import os
 import io
@@ -8,7 +6,6 @@ import subprocess
 import tempfile
 import urllib
 import urllib.request
-from contextlib import nullcontext
 from urllib.error import URLError, HTTPError
 
 import time
@@ -17,10 +14,10 @@ from pathlib import Path
 
 from celery import group, chain
 
-from aisc_eval import deployment, plugin_runtime
+from aisc_eval import plugin_runtime
+from aisc_eval import run_context  # noqa: F401  (registers the run header handlers)
 from aisc_eval.celery_app import celery_app
 from aisc_eval.data_model.evaluation import Evaluation
-from aisc_eval.service import api_client
 from aisc_eval.service.api_client import (
     mark_completed,
     mark_failed,
@@ -136,41 +133,8 @@ def _fail_plugin_and_revoke(
     _revoke_sibling_tasks(evaluation_pid, current_task_id)
 
 
-def _acting(platform_pid, evaluation_pid, ticket):
-    """The context every internal call inside a task is made in (I7.3): none in
-    standalone (platform_pid is None there), the run's project/evaluation/ticket
-    in configurator, so the backend's door can check it even from another worker
-    process than the one that dispatched the task."""
-    if platform_pid is None:
-        return nullcontext()
-    return api_client.acting_for(
-        api_client.Run(project=str(platform_pid), evaluation=str(evaluation_pid), ticket=str(ticket))
-    )
-
-
-def _carries_run(func):
-    """Decorate a task so it acts_for its own run for as long as it runs: read its
-    platform_pid/evaluation_pid (or evaluation_id)/ticket parameters once (all None
-    in standalone) and set them as the run every api_client call inside it acts for.
-    Leaves the task's body untouched."""
-    signature = inspect.signature(func)
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        arguments = signature.bind(*args, **kwargs).arguments
-        platform_pid = arguments.get("platform_pid")
-        ticket = arguments.get("ticket")
-        evaluation_pid = arguments.get("evaluation_pid", arguments.get("evaluation_id"))
-        with _acting(platform_pid, evaluation_pid, ticket):
-            return func(*args, **kwargs)
-
-    return wrapper
-
-
 @celery_app.task(bind=True)
-@_carries_run
-def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID],
-                    platform_pid: uuid.UUID | None = None, ticket: str | None = None):
+def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID]):
     """Install a package once using uv run to cache dependencies."""
     logger.info(f"Caching package {package_name}=={version}")
 
@@ -226,38 +190,7 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
 
 
 @celery_app.task(bind=True)
-def run_evaluation(self, *args) -> dict:
-    """Dispatch the plugins of one evaluation.
-
-    Standalone: run_evaluation(evaluation_pid), as Sean's worker always took it.
-    Configurator: run_evaluation(platform_pid, evaluation_pid, ticket) (I7.3): the
-    ticket the backend minted for this project and this evaluation goes with every
-    internal call this task makes and with every task it dispatches, so a plugin
-    task running on another worker process can still act for this run.
-
-    The call shape is fixed by the mode, not chosen per call, so a wrong one means
-    a stale caller: it fails clearly and touches nothing.
-    """
-    if deployment.MODE == deployment.CONFIGURATOR:
-        if len(args) != 3:
-            raise TypeError(
-                "run_evaluation in configurator mode takes (platform_pid, evaluation_pid, ticket), "
-                f"got {len(args)} argument(s)"
-            )
-        platform_pid, evaluation_pid, ticket = args
-    else:
-        if len(args) != 1:
-            raise TypeError(
-                f"run_evaluation in standalone mode takes (evaluation_pid), got {len(args)} argument(s)"
-            )
-        (evaluation_pid,) = args
-        platform_pid = ticket = None
-
-    with _acting(platform_pid, evaluation_pid, ticket):
-        return _run_evaluation(evaluation_pid, platform_pid, ticket)
-
-
-def _run_evaluation(evaluation_pid: uuid.UUID, platform_pid: uuid.UUID | None, ticket: str | None) -> dict:
+def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
 
     plugin_loader.list_packages(refresh=True)
@@ -288,8 +221,6 @@ def _run_evaluation(evaluation_pid: uuid.UUID, platform_pid: uuid.UUID | None, t
             pkg_info["version"],
             evaluation_pid,
             [ep.pid for ep in pkg_info["plugins"]],
-            platform_pid,
-            ticket,
         )
 
         plugin_chain_list = []
@@ -311,23 +242,19 @@ def _run_evaluation(evaluation_pid: uuid.UUID, platform_pid: uuid.UUID | None, t
                 get_project_settings_by_pid(evaluation.project.pid, project_config_selections),
                 evaluation_pid,
                 evaluation_plugin.pid,
-                platform_pid,
-                ticket,
             )
 
             # freeze to get a stable task id before dispatching
             run_plugin_sig.freeze()
             plugin_task_ids.append(str(run_plugin_sig.id))
 
-            post_measurements_sig = post_measurements.s(
-                evaluation_pid, evaluation_plugin.pid, platform_pid, ticket
-            )
+            post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
             plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
 
         package_chains.append(chain(install_sig, group(plugin_chain_list)))
 
     # dispatch: each package's plugins start after its install, no waiting for other packages
-    workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid, platform_pid, ticket)
+    workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
     workflow.apply_async()
 
     # store plugin task ids in redis so siblings can be revoked on failure
@@ -339,13 +266,10 @@ def _run_evaluation(evaluation_pid: uuid.UUID, platform_pid: uuid.UUID | None, t
 
 
 @celery_app.task(bind=True)
-@_carries_run
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
                input_components: list[dict], project_settings: list[dict],
                evaluation_pid: uuid.UUID,
-               evaluation_plugin_pid: uuid.UUID,
-               platform_pid: uuid.UUID | None = None,
-               ticket: str | None = None) -> list[dict]:
+               evaluation_plugin_pid: uuid.UUID) -> list[dict]:
 
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
@@ -561,9 +485,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
 
 @celery_app.task
-@_carries_run
-def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID,
-                      platform_pid: uuid.UUID | None = None, ticket: str | None = None):
+def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
     try:
         measurements = [Measure(**m) for m in measurements_dict]
         post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
@@ -573,9 +495,7 @@ def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, 
 
 
 @celery_app.task
-@_carries_run
-def finalize_evaluation(evaluation_id: uuid.UUID, platform_pid: uuid.UUID | None = None,
-                        ticket: str | None = None) -> None:
+def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
     logger.debug(f"Finalizing evaluation {evaluation_id}")
     try:
         # check if any plugins failed before marking as completed
@@ -595,14 +515,11 @@ def finalize_evaluation(evaluation_id: uuid.UUID, platform_pid: uuid.UUID | None
 
 
 @celery_app.task
-@_carries_run
 def handle_error(
         evaluation_id: uuid.UUID,
         request: object,
         exc: BaseException,
         traceback: object,
-        platform_pid: uuid.UUID | None = None,
-        ticket: str | None = None,
 ) -> None:
     logger.error(f"Error in evaluation {evaluation_id}:")
     logger.error(f"--\n\n{request} {exc} {traceback}")
