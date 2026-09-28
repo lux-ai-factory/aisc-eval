@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -14,6 +15,8 @@ logger = get_logger()
 headers = {
     "X-Internal-Secret": INTERNAL_API_KEY
 }
+
+DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
 
 
 def get_project_settings(project_pid: uuid.UUID) -> list[dict]:
@@ -105,6 +108,28 @@ def get_model_file_content(file_name: str) -> bytes:
     resp.raise_for_status()
 
     return resp.content
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Stream a backend file to ``dest`` without buffering it fully in memory."""
+    with requests.get(url, stream=True, headers=headers) as resp:
+        resp.raise_for_status()
+        try:
+            with open(dest, "wb") as out_f:
+                for chunk in resp.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                    if chunk:
+                        out_f.write(chunk)
+        except Exception:
+            dest.unlink(missing_ok=True)
+            raise
+
+
+def download_dataset_file(file_name: str, dest: Path) -> None:
+    _download_file(f"{API_URL_PREFIX}/files/dataset/{file_name}", dest)
+
+
+def download_model_file(file_name: str, dest: Path) -> None:
+    _download_file(f"{API_URL_PREFIX}/files/model/{file_name}", dest)
 
 
 def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
