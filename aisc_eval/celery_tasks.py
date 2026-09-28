@@ -15,9 +15,9 @@ from pathlib import Path
 from celery import group, chain
 
 from aisc_eval import plugin_runtime
+from aisc_eval import run_context  # noqa: F401  (registers the run header handlers)
 from aisc_eval.celery_app import celery_app
 from aisc_eval.data_model.evaluation import Evaluation
-from aisc_eval.service import api_client
 from aisc_eval.service.api_client import (
     mark_completed,
     mark_failed,
@@ -95,26 +95,47 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PA
                                env.PACKAGE_REGISTRY_PASSWORD)
 
 
-def _run(platform_pid, evaluation_pid, ticket) -> api_client.Run:
-    """The run a task works for (I7.3): every internal call inside names it."""
-    return api_client.Run(str(platform_pid).lower(), str(evaluation_pid).lower(), str(ticket))
-
-
 def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: str):
     meta = {**task_progress.model_dump(), "plugin_name": plugin_name}
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
 
 
+def _terminate_process(process: subprocess.Popen | None) -> None:
+    if process is not None and process.poll() is None:
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        except Exception:
+            pass
+
+
+def _revoke_sibling_tasks(evaluation_pid: uuid.UUID, current_task_id: str) -> None:
+    try:
+        raw = celery_app.backend.client.get(f"eval_tasks:{evaluation_pid}")
+        if raw:
+            for tid in json.loads(raw):
+                if tid != str(current_task_id):
+                    celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
+    except Exception as e:
+        logger.warning(f"Could not revoke sibling tasks: {e}")
+
+
+def _fail_plugin_and_revoke(
+    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_msg: str, current_task_id: str
+) -> None:
+    try:
+        mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, error_msg)
+    except Exception:
+        pass
+    _revoke_sibling_tasks(evaluation_pid, current_task_id)
+
+
 @celery_app.task(bind=True)
-def install_package(self, package_name: str, version: str, platform_pid: uuid.UUID, evaluation_pid: uuid.UUID,
-                    ticket: str, evaluation_plugin_pids: list[uuid.UUID]):
+def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID]):
     """Install a package once using uv run to cache dependencies."""
-    with api_client.acting_for(_run(platform_pid, evaluation_pid, ticket)):
-        return _install_package(package_name, version, evaluation_pid, evaluation_plugin_pids)
-
-
-def _install_package(package_name: str, version: str, evaluation_pid: uuid.UUID,
-                     evaluation_plugin_pids: list[uuid.UUID]):
     logger.info(f"Caching package {package_name}=={version}")
 
     if not plugin_loader.discovered_packages:
@@ -141,18 +162,15 @@ def _install_package(package_name: str, version: str, evaluation_pid: uuid.UUID,
                 ["uv", "venv", str(cache_venv), "--python", "/usr/local/bin/python"],
                 capture_output=True, text=True, timeout=60, check=True,
             )
+            # Always pass the devpi index. (We used to probe it with a 2s urlopen and drop
+            # --extra-index-url on timeout, but that probe hits the FULL /+simple/ root — which
+            # lists the whole PyPI mirror and is slow — so it intermittently timed out and silently
+            # dropped devpi, making registry plugins "not found". If devpi is truly down, let uv
+            # fail loudly instead.)
             install_cmd = ["uv", "pip", "install", "--python", str(cache_venv)]
             extra_url = plugin_loader.devpi_client.simple_index_url
             if extra_url:
-                try:
-                    urllib.request.urlopen(extra_url, timeout=2.0, context=ssl._create_unverified_context())
-                except HTTPError:
-                    pass
-                except (URLError, TimeoutError, ValueError):
-                    logger.warning(f"'{extra_url}' is unreachable. Skipping '--extra-index-url'.")
-                    extra_url = None
-                if extra_url:
-                    install_cmd.extend(["--extra-index-url", extra_url])
+                install_cmd.extend(["--extra-index-url", extra_url])
             install_cmd.append(install_target)
 
             result = subprocess.run(
@@ -172,18 +190,7 @@ def _install_package(package_name: str, version: str, evaluation_pid: uuid.UUID,
 
 
 @celery_app.task(bind=True)
-def run_evaluation(self, platform_pid: uuid.UUID, evaluation_pid: uuid.UUID, ticket: str) -> dict:
-    """Dispatch the plugins of one evaluation (I7.3).
-
-    `platform_pid` names the project whose database holds the evaluation and
-    `ticket` is the run ticket the backend minted for it; both go with every
-    internal call and every task dispatched from here. No DSN is ever sent.
-    """
-    with api_client.acting_for(_run(platform_pid, evaluation_pid, ticket)):
-        return _run_evaluation(platform_pid, evaluation_pid, ticket)
-
-
-def _run_evaluation(platform_pid: uuid.UUID, evaluation_pid: uuid.UUID, ticket: str) -> dict:
+def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
 
     plugin_loader.list_packages(refresh=True)
@@ -212,9 +219,7 @@ def _run_evaluation(platform_pid: uuid.UUID, evaluation_pid: uuid.UUID, ticket: 
         install_sig = install_package.si(
             pkg_info["package_name"],
             pkg_info["version"],
-            platform_pid,
             evaluation_pid,
-            ticket,
             [ep.pid for ep in pkg_info["plugins"]],
         )
 
@@ -235,9 +240,7 @@ def _run_evaluation(platform_pid: uuid.UUID, evaluation_pid: uuid.UUID, ticket: 
                 config,
                 input_components,
                 get_project_settings_by_pid(evaluation.project.pid, project_config_selections),
-                platform_pid,
                 evaluation_pid,
-                ticket,
                 evaluation_plugin.pid,
             )
 
@@ -245,13 +248,13 @@ def _run_evaluation(platform_pid: uuid.UUID, evaluation_pid: uuid.UUID, ticket: 
             run_plugin_sig.freeze()
             plugin_task_ids.append(str(run_plugin_sig.id))
 
-            post_measurements_sig = post_measurements.s(platform_pid, evaluation_pid, ticket, evaluation_plugin.pid)
+            post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
             plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
 
         package_chains.append(chain(install_sig, group(plugin_chain_list)))
 
     # dispatch: each package's plugins start after its install, no waiting for other packages
-    workflow = group(package_chains) | finalize_evaluation.si(platform_pid, evaluation_pid, ticket)
+    workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
     workflow.apply_async()
 
     # store plugin task ids in redis so siblings can be revoked on failure
@@ -265,19 +268,8 @@ def _run_evaluation(platform_pid: uuid.UUID, evaluation_pid: uuid.UUID, ticket: 
 @celery_app.task(bind=True)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
                input_components: list[dict], project_settings: list[dict],
-               platform_pid: uuid.UUID,
                evaluation_pid: uuid.UUID,
-               ticket: str,
                evaluation_plugin_pid: uuid.UUID) -> list[dict]:
-    with api_client.acting_for(_run(platform_pid, evaluation_pid, ticket)):
-        return _run_plugin(self, package_name, plugin_name, version, plugin_config, input_components,
-                           project_settings, evaluation_pid, evaluation_plugin_pid)
-
-
-def _run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-                input_components: list[dict], project_settings: list[dict],
-                evaluation_pid: uuid.UUID,
-                evaluation_plugin_pid: uuid.UUID) -> list[dict]:
 
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
@@ -374,10 +366,21 @@ def _run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_
             mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, venv_result.stderr)
             raise RuntimeError(f"Failed to create venv: {venv_result.stderr}")
 
-        # Step 2: Install plugin and dependencies into the venv
+        # Step 2: Install plugin and dependencies into the venv (online, from devpi).
+        # NOTE: we do NOT use --offline here. The evaluation run needs the network anyway (e.g.
+        # GPT4ALL downloads its model at run time), so offline isolation gave nothing, and it broke
+        # for registry plugins whose shared dep (aisc-plugin-interface) is resolved via a local
+        # workspace source and therefore never cached under the devpi index for the offline resolver.
+        # Installing online resolves everything from the devpi index (root/public bases root/pypi),
+        # exactly like install_package already does successfully.
         logger.debug(f"Installing {install_target} into isolated venv")
+        install_cmd = ["uv", "pip", "install", "--python", str(venv_dir)]
+        extra_url = plugin_loader.devpi_client.simple_index_url
+        if extra_url:
+            install_cmd.extend(["--extra-index-url", extra_url])
+        install_cmd.append(install_target)
         install_result = subprocess.run(
-            ["uv", "pip", "install", "--python", str(venv_dir), "--offline", install_target],
+            install_cmd,
             capture_output=True, text=True, timeout=1000,
         )
         if install_result.returncode != 0:
@@ -389,109 +392,110 @@ def _run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_
         start_time = time.perf_counter()
         mark_plugin_started(evaluation_pid, evaluation_plugin_pid)
 
-        stdout_lines = []
+        stdout_lines: list[str] = []
         stderr_path = workspace_path / "stderr.tmp"
-
-        with open(stderr_path, "w+") as stderr_file:
-            child_env = os.environ.copy()
-            child_env.update(
+        process: subprocess.Popen | None = None
+        returncode: int | None = None
+        stderr_content = ""
+        try:
+            with open(stderr_path, "w+") as stderr_file:
+                child_env = os.environ.copy()
+                child_env.update(
                 build_secret_environment(project_settings + llm_secret_settings)
             )
-            process = subprocess.Popen(
-                [str(venv_python), str(runtime_script)],
-                cwd=str(workspace_path),
-                stdout=subprocess.PIPE,
-                stderr=stderr_file,
-                env=child_env,
-                text=True,
-                bufsize=1
+                # Some plugins (e.g. LangBiTe) construct an OpenAI client at init even when a local
+                # model (GPT4ALL) is selected and no LLM judge is used. The OpenAI client only
+                # validates the key on an actual request, so a non-empty placeholder lets it
+                # instantiate without a real key; any real key already in the environment is kept.
+                if not child_env.get("API_KEY_OPENAI"):
+                    child_env["API_KEY_OPENAI"] = "sk-local-model-no-openai-call"
+                process = subprocess.Popen(
+                    [str(venv_python), str(runtime_script)],
+                    cwd=str(workspace_path),
+                    stdout=subprocess.PIPE,
+                    stderr=stderr_file,
+                    env=child_env,
+                    text=True,
+                    bufsize=1
+                )
+
+                if (stdout := process.stdout) is not None:
+                    for line in stdout:
+                        stdout_lines.append(line)
+                        stripped_line = line.strip()
+
+                        if stripped_line.startswith("{") and stripped_line.endswith("}"):
+                            try:
+                                progress_data = json.loads(stripped_line)
+                                task_progress = TaskProgress(**progress_data)
+
+                                progress_callback(task_progress, plugin_name, str(self.request.id))
+                            except Exception:
+                                pass
+
+                returncode = process.wait()
+
+                stderr_file.seek(0)
+                stderr_content = stderr_file.read()
+
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            stdout_content = "".join(stdout_lines)
+
+            log_stdout_content = (
+                "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
+                "====== Step 2: Plugin Install ======\n" + (install_result.stdout or "") + "\n\n"
+                "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
+            )
+            log_stderr_content = (
+                "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
+                "====== Step 2: Plugin Install ======\n" + (install_result.stderr or "") + "\n\n"
+                "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
             )
 
-            if (stdout := process.stdout) is not None:
-                for line in stdout:
-                    stdout_lines.append(line)
-                    stripped_line = line.strip()
+            log_file = output_dir / "plugin_execution.log"
+            log_content = "=== Plugin Execution Log ===\n\n"
+            log_content += f"Execution Time: {duration:.2f} seconds\n\n"
+            log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
+            log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
+            log_content += f"=== Return Code ===\n{returncode}\n"
+            log_file.write_text(log_content)
 
-                    if stripped_line.startswith("{") and stripped_line.endswith("}"):
-                        try:
-                            progress_data = json.loads(stripped_line)
-                            task_progress = TaskProgress(**progress_data)
+            if returncode != 0:
+                _fail_plugin_and_revoke(
+                    evaluation_pid, evaluation_plugin_pid, stderr_content, str(self.request.id)
+                )
+                raise RuntimeError(f"Plugin failed: {log_stderr_content}")
 
-                            progress_callback(task_progress, plugin_name, str(self.request.id))
-                        except Exception:
-                            pass
+            measures_file = output_dir / "measures.json"
+            measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
 
-            returncode = process.wait()
+            for file in output_dir.iterdir():
+                if file.name != "measures.json" and file.name != "stderr.tmp":
+                    upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
 
-            stderr_file.seek(0)
-            stderr_content = stderr_file.read()
-
-        end_time = time.perf_counter()
-        duration = end_time - start_time
-        stdout_content = "".join(stdout_lines)
-
-        log_stdout_content = (
-            "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
-            "====== Step 2: Plugin Install ======\n" + (install_result.stdout or "") + "\n\n"
-            "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
-        )
-        log_stderr_content = (
-            "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
-            "====== Step 2: Plugin Install ======\n" + (install_result.stderr or "") + "\n\n"
-            "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
-        )
-
-        log_file = output_dir / "plugin_execution.log"
-        log_content = "=== Plugin Execution Log ===\n\n"
-        log_content += f"Execution Time: {duration:.2f} seconds\n\n"
-        log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
-        log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
-        log_content += f"=== Return Code ===\n{returncode}\n"
-        log_file.write_text(log_content)
-
-        if returncode != 0:
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, stderr_content)
-            # revoke all sibling plugin tasks
-            try:
-                raw = celery_app.backend.client.get(f"eval_tasks:{evaluation_pid}")
-                if raw:
-                    for tid in json.loads(raw):
-                        if tid != str(self.request.id):
-                            celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
-            except Exception as e:
-                logger.warning(f"Could not revoke sibling tasks: {e}")
-            raise RuntimeError(f"Plugin failed: {log_stderr_content}")
-
-        measures_file = output_dir / "measures.json"
-        measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
-
-        for file in output_dir.iterdir():
-            if file.name != "measures.json" and file.name != "stderr.tmp":
-                upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
-
-        mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
-        return measures
-
-
-@celery_app.task
-def post_measurements(measurements_dict: list[dict], platform_pid: uuid.UUID, evaluation_pid: uuid.UUID,
-                      ticket: str, evaluation_plugin_uuid: uuid.UUID):
-    with api_client.acting_for(_run(platform_pid, evaluation_pid, ticket)):
-        try:
-            measurements = [Measure(**m) for m in measurements_dict]
-            post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
-        except Exception as e:
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, str(e))
+            mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
+            return measures
+        except Exception as exc:
+            _terminate_process(process)
+            _fail_plugin_and_revoke(
+                evaluation_pid, evaluation_plugin_pid, str(exc) or exc.__class__.__name__, str(self.request.id)
+            )
             raise
 
 
 @celery_app.task
-def finalize_evaluation(platform_pid: uuid.UUID, evaluation_id: uuid.UUID, ticket: str) -> None:
-    with api_client.acting_for(_run(platform_pid, evaluation_id, ticket)):
-        _finalize_evaluation(evaluation_id)
+def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
+    try:
+        measurements = [Measure(**m) for m in measurements_dict]
+        post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
+    except Exception as e:
+        mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, str(e))
+        raise
 
 
-def _finalize_evaluation(evaluation_id: uuid.UUID) -> None:
+@celery_app.task
+def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
     logger.debug(f"Finalizing evaluation {evaluation_id}")
     try:
         # check if any plugins failed before marking as completed
@@ -512,15 +516,12 @@ def _finalize_evaluation(evaluation_id: uuid.UUID) -> None:
 
 @celery_app.task
 def handle_error(
-        platform_pid: uuid.UUID,
         evaluation_id: uuid.UUID,
-        ticket: str,
         request: object,
         exc: BaseException,
         traceback: object,
 ) -> None:
-    with api_client.acting_for(_run(platform_pid, evaluation_id, ticket)):
-        logger.error(f"Error in evaluation {evaluation_id}:")
-        logger.error(f"--\n\n{request} {exc} {traceback}")
-        mark_failed(evaluation_id)
-        logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
+    logger.error(f"Error in evaluation {evaluation_id}:")
+    logger.error(f"--\n\n{request} {exc} {traceback}")
+    mark_failed(evaluation_id)
+    logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
