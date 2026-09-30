@@ -224,6 +224,8 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
             evaluation_pid,
             [ep.pid for ep in pkg_info["plugins"]],
         )
+        # errback: chord body is skipped on task error, so this must mark the eval failed or it stays Pending forever.
+        install_sig.link_error(handle_error.s(evaluation_pid))
 
         plugin_chain_list = []
         for evaluation_plugin in pkg_info["plugins"]:
@@ -245,12 +247,15 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 evaluation_pid,
                 evaluation_plugin.pid,
             )
+            # errback: mark evaluation failed if run_plugin ever errors
+            run_plugin_sig.link_error(handle_error.s(evaluation_pid))
 
             # freeze to get a stable task id before dispatching
             run_plugin_sig.freeze()
             plugin_task_ids.append(str(run_plugin_sig.id))
 
             post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
+            post_measurements_sig.link_error(handle_error.s(evaluation_pid))
             plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
 
         package_chains.append(chain(install_sig, group(plugin_chain_list)))
