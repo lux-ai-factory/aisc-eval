@@ -224,6 +224,8 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
             evaluation_pid,
             [ep.pid for ep in pkg_info["plugins"]],
         )
+        # errback: chord body is skipped on task error, so this must mark the eval failed or it stays Pending forever.
+        install_sig.link_error(handle_error.s(evaluation_pid))
 
         plugin_chain_list = []
         for evaluation_plugin in pkg_info["plugins"]:
@@ -245,12 +247,15 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 evaluation_pid,
                 evaluation_plugin.pid,
             )
+            # errback: mark evaluation failed if run_plugin ever errors
+            run_plugin_sig.link_error(handle_error.s(evaluation_pid))
 
             # freeze to get a stable task id before dispatching
             run_plugin_sig.freeze()
             plugin_task_ids.append(str(run_plugin_sig.id))
 
             post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
+            post_measurements_sig.link_error(handle_error.s(evaluation_pid))
             plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
 
         package_chains.append(chain(install_sig, group(plugin_chain_list)))
@@ -307,36 +312,43 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         input_mapping = {}
         llm_secret_settings = []
-        for component in input_components:
-            component_type = component["component_type"]
-            name = component["name"]
-            if component_type == "dataset":
-                file_content = get_dataset_file_content(component["data"])
-                relative_path = component["data"]
-            elif component_type == "model":
-                file_content = get_model_file_content(component["data"])
-                relative_path = component["data"]
-            elif component_type in {"datashape", "llm", "resource"}:
-                payload = dict(component.get("json_value") or {})
-                if component_type == "llm":
-                    run_model = (component.get("value") or {}).get("model")
-                    if run_model:
-                        payload["model"] = run_model
-                    if component.get("secret_key") and component.get("secret_encrypted_value"):
-                        llm_secret_settings.append({
-                            "category": "secrets",
-                            "key": component["secret_key"],
-                            "encrypted_value": component["secret_encrypted_value"],
-                        })
-                file_content = json.dumps(payload).encode("utf-8")
-                relative_path = f"{name}.json"
-            else:
-                raise ValueError(
-                    f"Unsupported component type: {component_type}"
-                )
+        try:
+            for component in input_components:
+                component_type = component["component_type"]
+                name = component["name"]
+                if component_type == "dataset":
+                    file_content = get_dataset_file_content(component["data"])
+                    relative_path = component["data"]
+                elif component_type == "model":
+                    file_content = get_model_file_content(component["data"])
+                    relative_path = component["data"]
+                elif component_type in {"datashape", "llm", "resource"}:
+                    payload = dict(component.get("json_value") or {})
+                    if component_type == "llm":
+                        run_model = (component.get("value") or {}).get("model")
+                        if run_model:
+                            payload["model"] = run_model
+                        if component.get("secret_key") and component.get("secret_encrypted_value"):
+                            llm_secret_settings.append({
+                                "category": "secrets",
+                                "key": component["secret_key"],
+                                "encrypted_value": component["secret_encrypted_value"],
+                            })
+                    file_content = json.dumps(payload).encode("utf-8")
+                    relative_path = f"{name}.json"
+                else:
+                    raise ValueError(
+                        f"Unsupported component type: {component_type}"
+                    )
 
-            (input_dir / relative_path).write_bytes(file_content)
-            input_mapping[name] = relative_path
+                (input_dir / relative_path).write_bytes(file_content)
+                input_mapping[name] = relative_path
+        except Exception as exc:
+            _fail_plugin_and_revoke(
+                evaluation_pid, evaluation_plugin_pid,
+                str(exc) or exc.__class__.__name__, str(self.request.id)
+            )
+            raise
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
