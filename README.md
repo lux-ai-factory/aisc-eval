@@ -1,45 +1,85 @@
 # AISC Evaluation module
 
-# Quickstart for Evaluation module
+`aisc-eval` is the Celery worker of the AISC execution engine (step 4 of the AI Assessment
+Sandbox Configurator). It takes evaluation tasks from the broker (RabbitMQ), installs each
+plugin into its own virtual environment from the stack's package index (devpi), runs it, and
+reports status and results back to the backend's internal API (`/api/v1/internal`). It has no
+database of its own.
+
+## In the AISC stack
+
+From the root of the [aisc](https://github.com/lux-ai-factory/aisc) repository, follow its
+README (`./scripts/secrets.sh` once, then Docker Compose with
+`docker-compose.plugin_downloader.yml`, `docker-compose-infra.development.yml` and
+`docker-compose.development.yml`). This repo is built into the image `aisc-eval`, used by two
+services of `docker-compose.development.yml`:
+
+- **`aisc-eval-worker`**: `celery -A aisc_eval.celery_worker worker`, after installing the
+  `shared/plugin-manager` and `shared/plugin-interface` packages of the aisc repo.
+- **`aisc-eval-flower`**: Flower, the Celery monitor, behind the gateway at `/flower/`.
+
+Both are started with `AISC_DEPLOYMENT: configurator`. To run the engine on its own, the aisc
+repo has `docker-compose.engine-standalone.yml`, where the variable is unset.
+
+## Two deployment modes
+
+`AISC_DEPLOYMENT`, read once in `aisc_eval/deployment.py`:
+
+- `standalone` (default, variable unset): calls to the backend carry only `X-Internal-Secret`.
+- `configurator`: every internal call also carries `X-AISC-Project`, `X-AISC-Evaluation` and
+  `X-AISC-Run`, which the backend checks before it opens the project's database. The backend
+  puts these values in the Celery message headers of `run_evaluation`
+  (`aisc_eval/run_context.py`), and every task published during the run inherits them.
+
+Any other value stops the worker.
+
+## Configuration
+
+Read from the environment (`aisc_eval/utils/env.py`, `aisc_eval/deployment.py`):
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `AISC_DEPLOYMENT` | `standalone` or `configurator` | `standalone` |
+| `API_URL` | address of the backend | `http://backend` |
+| `API_PREFIX` | path of the backend's internal API | `/api/v1/internal` |
+| `INTERNAL_API_KEY` | shared secret sent as `X-Internal-Secret` | none |
+| `CELERY_BROKER_URL`, `REDIS_BACKEND_URL` | broker and result backend | see `utils/env.py` |
+| `PLUGIN_PATH` | folder with local plugins | empty |
+| `PACKAGE_REGISTRY_URL`, `PACKAGE_REGISTRY_INDEX`, `PACKAGE_REGISTRY_USER`, `PACKAGE_REGISTRY_PASSWORD` | package index plugins are installed from | empty |
+| `CACHE_DIR` | cache of plugin environments | `/tmp/cache` |
 
 ## How to run within local development environment
 
 ### Prerequisites
-To run the local development environment, you need first to launch the services containers (database, redis, etc.). Please checkout API repo for instructions on how to do this.
+Start the infrastructure (RabbitMQ, Redis, ...) first, from the aisc repo root:
+`docker compose --env-file env.development -f docker-compose-infra.development.yml up`.
+The backend must also be running for the worker to report to.
 
 ### Configuration of development environment
-We use `uv` as environment manager, you can configure python dependencies with the following command:
+We use `uv` as environment manager (Python 3.12), you can configure python dependencies with the following command:
 
 ```bash
 uv sync --frozen --group dev
 ```
 
-<!-- We provide a pre-commit hook to automatically check and format your code before each commit. You can install the pre-commit hooks with the following command:
+To use the local `plugin-manager` and `plugin-interface` from the aisc repo:
 
 ```bash
-uv run pre-commit install
-``` -->
-
-### Launching locally the AISC Evaluation API
-With the services running, you can now launch the AISC Evaluation API locally.
-
-```bash
-uv sync --frozen --group dev
-bash tasks/start_api.sh
+uv pip install --no-deps -e ../../shared/plugin-manager -e ../../shared/plugin-interface
 ```
 
 ### Launching locally the AISC Evaluation Worker
-With the services running, you can now launch the AISC Evaluation Worker locally.
 
 ```bash
 uv sync --frozen --group dev
 bash tasks/start_worker.sh
 ```
 
+The script loads `.env.dev` and then `.env.dev-local` if they exist (`env.development` is an
+example of the variables), and starts the worker with `--pool=solo --concurrency=1`.
+
 ### How to manually run linter
 We use ruff for linting. This step is automatically run before each commit if the pre-commit hooks are configured.
-
-To manually run the linter, you can use the following command:
 
 ```bash
 uv sync --frozen --group dev
@@ -48,12 +88,15 @@ uv run ruff format .
 ```
 
 ### How to run tests
-To run the unit tests, you can use the following command:
 
 ```bash
 uv sync --frozen --group test
 uv run pytest tests/
 ```
+
+The tests need no database and no running stack. `tests/test_run_context_broker.py` skips
+unless `AISC_TEST_BROKER_URL` and `AISC_TEST_RESULT_BACKEND` point at a throwaway broker and
+Redis; never point them at a running stack.
 
 ### How to log and customise logs
 
@@ -68,25 +111,41 @@ get_logger().info("This is an info message")
 get_logger().error("This is an error message")
 ```
 
-You can customize the logging configuration by modifying the `./config/logging.yaml` file.
-
-For instance, in the loggers section, you can customize the level of logging for different loggers, such as the `a4s_api` logger (containing our messages) or the `uvicorn` and `sqlalchemy` loggers.
-
-You can also customize the message format by modifying the `formatters.colored.format` field in the loggers section.
-See [official Python documentation on LogRecord attributes](https://docs.python.org/3/library/logging.html#logrecord-attributes) for a full list of available fields.
+You can customize the logging configuration by modifying the `./config/logging.yaml` file: the
+level of each logger in its `loggers` section, and the message format in its `formatters`
+section. See [official Python documentation on LogRecord attributes](https://docs.python.org/3/library/logging.html#logrecord-attributes) for a full list of available fields.
 
 Please do not push your local changes, except if necessary. For instance, DEBUG log in `logging.yaml` should not be pushed.
 
-##  Contributing
+## Changes on feat/unified-modules
+
+`feat/unified-modules` is the branch the Configurator uses. Compared with `origin/master` (the
+list of files and reasons is `scripts/guard-frozen-intended.txt` in the aisc repo):
+
+- **Deployment mode and run headers**: `aisc_eval/deployment.py`, `aisc_eval/run_context.py`, and
+  `aisc_eval/service/api_client.py`, which builds the headers of each internal call at call time.
+  Task signatures are as on master.
+- **Plugin installs** (from the `feat/dev-catalogue-staging` branch): plugins are installed online
+  from the package index in `run_plugin` (no `--offline`), and the index is always passed to
+  `uv pip install` instead of being probed first.
+- **Placeholder `API_KEY_OPENAI`** in a plugin's environment when none is set, for plugins that
+  build an OpenAI client even when a local model is used.
+- **Task time limits** raised to 400 minutes soft, 405 hard (`aisc_eval/celery_app.py`), for long
+  first runs that download a model.
+- **Tests**: `tests/test_deployment_mode.py`, `tests/test_run_context.py`,
+  `tests/test_run_context_broker.py`, `tests/test_run_ticket.py`.
+
+## Contributing
 
 We welcome community contributions! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-By submitting contributions, you agree to the [CLA](CLA/CLA_VERA.md) and license your work under [Apache 2.0](LICENSE).
+By submitting contributions, you agree to the contributor license agreement
+([individuals](<AISC ICLA (Individuals).txt>), [entities](<AISC CCLA (Entities).txt>)) and license
+your work under [Apache 2.0](LICENSE.md).
 
 ---
 
-##  License
+## License
 
-This project is licensed under the [Apache License 2.0](LICENSE).  
+This project is licensed under the [Apache License 2.0](LICENSE.md).
 © 2024–2026 Université du Luxembourg and Luxembourg Institute of Science and Technology (LIST).
-
