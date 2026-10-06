@@ -146,6 +146,21 @@ def get_evaluation(
     return Evaluation.model_validate(get_evaluation_request(evaluation_pid))
 
 
+#: the engine's Measurement text columns and their length; one longer text makes it refuse the whole batch
+MEASURE_TEXT_FIELDS = ("name", "description", "unit", "error")
+MEASURE_TEXT_MAX = 255
+
+
+def fit_measure(measure: dict) -> dict:
+    """A dumped measure with every text the engine stores within MEASURE_TEXT_MAX, cut with an ellipsis."""
+    out = dict(measure)
+    for field in MEASURE_TEXT_FIELDS:
+        text = out.get(field)
+        if isinstance(text, str) and len(text) > MEASURE_TEXT_MAX:
+            out[field] = text[:MEASURE_TEXT_MAX - 1].rstrip() + "…"
+    return out
+
+
 def post_measures(
     evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID, metrics: list[Measure]
 ) -> requests.Response:
@@ -153,7 +168,7 @@ def post_measures(
         f"post_metrics called with {len(metrics)} metrics for evaluation {evaluation_pid}"
     )
 
-    payload = {str(evaluation_plugin_uuid): [m.model_dump(mode="json") for m in metrics]}
+    payload = {str(evaluation_plugin_uuid): [fit_measure(m.model_dump(mode="json")) for m in metrics]}
     logger.debug(f"Payload prepared, size: {len(payload)}")
 
     url = f"{API_URL_PREFIX}/evaluations/{str(evaluation_pid)}/measures"
