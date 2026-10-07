@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from typing import Any
 
@@ -13,7 +14,7 @@ from aisc_eval.utils.logging import get_logger
 logger = get_logger()
 
 
-def headers(run: dict | None = None) -> dict[str, str]:
+def headers(run: dict[str, str] | None = None) -> dict[str, str | None]:
     """The headers of an internal call, read at call time.
 
     Standalone: Sean's secret alone. Configurator: the same secret, plus the
@@ -22,7 +23,7 @@ def headers(run: dict | None = None) -> dict[str, str]:
     from the task's aisc_run Celery header); with none, no door header is sent.
     """
     found = {"X-Internal-Secret": INTERNAL_API_KEY}
-    if deployment.MODE != deployment.CONFIGURATOR:
+    if not deployment.is_configurator():
         return found
     if run is None:
         run = run_context.current()
@@ -151,13 +152,26 @@ MEASURE_TEXT_FIELDS = ("name", "description", "unit", "error")
 MEASURE_TEXT_MAX = 255
 
 
-def fit_measure(measure: dict) -> dict:
-    """A dumped measure with every text the engine stores within MEASURE_TEXT_MAX, cut with an ellipsis."""
+def fit_measure(measure: dict[str, Any]) -> dict[str, Any]:
+    """A dumped measure whose texts the engine can store: no NUL (Postgres refuses it) and
+    within MEASURE_TEXT_MAX, cut with an ellipsis. The engine finds a metric by its exact
+    name, so a cut name ends with a short hash of the whole one: two long names that start
+    alike stay two metrics, and the same name is always cut the same way."""
     out = dict(measure)
     for field in MEASURE_TEXT_FIELDS:
         text = out.get(field)
-        if isinstance(text, str) and len(text) > MEASURE_TEXT_MAX:
-            out[field] = text[:MEASURE_TEXT_MAX - 1].rstrip() + "…"
+        if not isinstance(text, str):
+            continue
+        text = out[field] = text.replace("\x00", "")
+        if len(text) > MEASURE_TEXT_MAX:
+            if field == "name":
+                tag = "…[" + hashlib.sha256(text.encode()).hexdigest()[:8] + "]"
+                out[field] = text[:MEASURE_TEXT_MAX - len(tag)].rstrip() + tag
+            else:
+                out[field] = text[:MEASURE_TEXT_MAX - 1].rstrip() + "…"
+            logger.warning(
+                f"measure {field} cut from {len(text)} to {MEASURE_TEXT_MAX} characters: {text[:80]!r}…"
+            )
     return out
 
 

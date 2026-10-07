@@ -6,9 +6,16 @@ from aisc_eval import celery_tasks, run_context
 
 
 def test_seans_signatures_are_back():
-    assert list(inspect.signature(celery_tasks.run_evaluation.run).parameters) == ["evaluation_pid"]
-    assert "platform_pid" not in inspect.signature(celery_tasks.install_package.run).parameters
-    assert "ticket" not in inspect.signature(celery_tasks.install_package.run).parameters
+    assert list(inspect.signature(celery_tasks.run_evaluation.run).parameters) == [
+        "evaluation_pid"
+    ]
+    assert (
+        "platform_pid"
+        not in inspect.signature(celery_tasks.install_package.run).parameters
+    )
+    assert (
+        "ticket" not in inspect.signature(celery_tasks.install_package.run).parameters
+    )
 
 
 def test_run_of_reads_the_header_either_way():
@@ -70,3 +77,15 @@ def test_leave_without_a_stored_token_still_clears():
         assert run_context.current() is None
     finally:
         run_context._current.reset(token)
+
+
+def test_a_run_missing_one_of_its_three_keys_is_no_run():
+    """A partial header (an older backend, a hand-made task) must not reach headers(), where
+    run["ticket"] would raise KeyError on every internal call, failure reports included."""
+    for missing in ("project", "evaluation", "ticket"):
+        run = {"project": "p", "evaluation": "e", "ticket": "t"}
+        del run[missing]
+        assert run_context.run_of(SimpleNamespace(aisc_run=run)) is None, missing
+        assert (
+            run_context.run_of(SimpleNamespace(headers={"aisc_run": run})) is None
+        ), missing

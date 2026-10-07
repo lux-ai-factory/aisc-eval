@@ -8,8 +8,11 @@ This is the worker's own copy of the backend's aisc_backend.deployment contract
 not import Django settings, and it has no .env loader (aisc_eval.utils.env reads
 os.environ directly, so there is nothing to read this after).
 """
+
 import os
 from collections.abc import Mapping
+
+from celery.signals import worker_init
 
 STANDALONE = "standalone"
 CONFIGURATOR = "configurator"
@@ -31,10 +34,20 @@ def mode(env: Mapping[str, str] = os.environ) -> str:
 
 
 def check_environment(env: Mapping[str, str] = os.environ) -> None:
-    """The worker has no database of its own (I7.3): unlike the backend, there is no
-    Postgres/project-databases constraint to check here. Kept for the same contract;
-    it only validates AISC_DEPLOYMENT itself, same as mode()."""
+    """What the worker needs before it takes a task. It has no database of its own (I7.3),
+    so unlike the backend there is no Postgres constraint here: AISC_DEPLOYMENT must be
+    valid, and INTERNAL_API_KEY set, since every internal call carries it in both modes."""
     mode(env)
+    if not (env.get("INTERNAL_API_KEY") or "").strip():
+        raise RuntimeError(
+            "INTERNAL_API_KEY is not set: every call to the backend would be refused"
+        )
+
+
+@worker_init.connect
+def _check_on_worker_start(**_: object) -> None:
+    """Only a worker process fires worker_init; flower imports the same app and is not checked."""
+    check_environment()
 
 
 def is_configurator() -> bool:

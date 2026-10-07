@@ -25,6 +25,7 @@ No broker, no backend, no database: requests and the Celery canvas are faked.
 These tests need none of tests/conftest.py (its imports are broken on master
 itself, independently of this task): run with --noconftest.
 """
+
 import re
 import uuid
 from pathlib import Path
@@ -45,10 +46,16 @@ TICKET = "0" * 16 + "a-ticket-minted-by-the-backend" + "f" * 16
 RUN = {"project": PLATFORM_PID, "evaluation": EVALUATION_PID, "ticket": TICKET}
 
 WORKER_ROOT = Path(__file__).resolve().parents[1]
-DSN_PATTERN = re.compile(r"postgres(ql)?(\+\w+)?://|dbname=|DATABASE_URL|_DSN\b", re.IGNORECASE)
+DSN_PATTERN = re.compile(
+    r"postgres(ql)?(\+\w+)?://|dbname=|DATABASE_URL|_DSN\b", re.IGNORECASE
+)
 
-configurator_only = pytest.mark.skipif(deployment.MODE != deployment.CONFIGURATOR, reason="configurator run")
-standalone_only = pytest.mark.skipif(deployment.MODE != deployment.STANDALONE, reason="standalone run")
+configurator_only = pytest.mark.skipif(
+    deployment.MODE != deployment.CONFIGURATOR, reason="configurator run"
+)
+standalone_only = pytest.mark.skipif(
+    deployment.MODE != deployment.STANDALONE, reason="standalone run"
+)
 
 
 class FakeBackend:
@@ -71,19 +78,42 @@ class FakeBackend:
 
     def handle(self, method, url, headers=None, **_kwargs):
         self.calls.append((method, url, dict(headers or {})))
-        if method == "GET" and url.endswith(f"/evaluations/{EVALUATION_PID}?include=project,plugin"):
-            return self._response(200, {
-                "pid": EVALUATION_PID,
-                "project": {"pid": ENGINE_PROJECT_PID, "name": "MCAS"},
-                "evaluation_plugins": [{
-                    "pid": PLUGIN_PID, "name": "probe", "package_name": "aisc-probe", "version": "1.0.0",
-                }],
-            })
+        if method == "GET" and url.endswith(
+            f"/evaluations/{EVALUATION_PID}?include=project,plugin"
+        ):
+            return self._response(
+                200,
+                {
+                    "pid": EVALUATION_PID,
+                    "project": {"pid": ENGINE_PROJECT_PID, "name": "MCAS"},
+                    "evaluation_plugins": [
+                        {
+                            "pid": PLUGIN_PID,
+                            "name": "probe",
+                            "package_name": "aisc-probe",
+                            "version": "1.0.0",
+                        }
+                    ],
+                },
+            )
         if method == "GET" and url.endswith("/inputs"):
-            return self._response(200, {PLUGIN_PID: [
-                {"component_type": "dataset", "name": "train", "data": "d0c5e7a1-dataset.csv"},
-                {"component_type": "model", "name": "clf", "data": "m0c5e7a1-model.onnx"},
-            ]})
+            return self._response(
+                200,
+                {
+                    PLUGIN_PID: [
+                        {
+                            "component_type": "dataset",
+                            "name": "train",
+                            "data": "d0c5e7a1-dataset.csv",
+                        },
+                        {
+                            "component_type": "model",
+                            "name": "clf",
+                            "data": "m0c5e7a1-model.onnx",
+                        },
+                    ]
+                },
+            )
         if url.endswith("/by-pid"):
             return self._response(200, [])
         if url.endswith("/plugins/status"):
@@ -93,7 +123,11 @@ class FakeBackend:
         return self._response(200, {})
 
     def internal_calls(self):
-        return [c for c in self.calls if "/api/v1/internal/" in c[1] or c[1].startswith(env.API_URL_PREFIX)]
+        return [
+            c
+            for c in self.calls
+            if "/api/v1/internal/" in c[1] or c[1].startswith(env.API_URL_PREFIX)
+        ]
 
 
 @pytest.fixture
@@ -101,8 +135,11 @@ def backend(monkeypatch):
     fake = FakeBackend()
     for verb in ("get", "post", "put", "patch", "delete"):
         monkeypatch.setattr(
-            requests, verb,
-            (lambda method: (lambda url, *a, **kw: fake.handle(method, url, **kw)))(verb.upper()),
+            requests,
+            verb,
+            (lambda method: (lambda url, *a, **kw: fake.handle(method, url, **kw)))(
+                verb.upper()
+            ),
         )
     return fake
 
@@ -142,7 +179,9 @@ def dispatched(monkeypatch):
         monkeypatch.setattr(cls, "delay", lambda self, *a, **kw: capture(self))
     fake_app = MagicMock()
     monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
-    monkeypatch.setattr(celery_tasks.plugin_loader, "list_packages", lambda *a, **kw: {})
+    monkeypatch.setattr(
+        celery_tasks.plugin_loader, "list_packages", lambda *a, **kw: {}
+    )
     return sent
 
 
@@ -173,30 +212,43 @@ def _run():
     try:
         return run(uuid.UUID(EVALUATION_PID))
     except TypeError as exc:
-        pytest.fail(f"run_evaluation does not take (evaluation_pid), as Sean's worker does: {exc}")
+        pytest.fail(
+            f"run_evaluation does not take (evaluation_pid), as Sean's worker does: {exc}"
+        )
 
 
 def _assert_configurator_headers(calls, what):
     assert calls, f"I7.3: {what} made no internal call at all"
     for method, url, headers in calls:
-        assert headers.get("X-Internal-Secret") == env.INTERNAL_API_KEY, (
-            f"I7.3: {what}: {method} {url} lacks X-Internal-Secret")
-        assert headers.get("X-AISC-Project") == PLATFORM_PID, (
-            f"I7.3: {what}: {method} {url} does not name its project in X-AISC-Project")
-        assert headers.get("X-AISC-Run") == TICKET, (
-            f"I7.3: {what}: {method} {url} does not carry the run ticket in X-AISC-Run")
-        assert headers.get("X-AISC-Evaluation") == EVALUATION_PID, (
-            f"I7.3 (E-G1): {what}: {method} {url} does not name its evaluation in X-AISC-Evaluation")
+        assert (
+            headers.get("X-Internal-Secret") == env.INTERNAL_API_KEY
+        ), f"I7.3: {what}: {method} {url} lacks X-Internal-Secret"
+        assert (
+            headers.get("X-AISC-Project") == PLATFORM_PID
+        ), f"I7.3: {what}: {method} {url} does not name its project in X-AISC-Project"
+        assert (
+            headers.get("X-AISC-Run") == TICKET
+        ), f"I7.3: {what}: {method} {url} does not carry the run ticket in X-AISC-Run"
+        assert (
+            headers.get("X-AISC-Evaluation") == EVALUATION_PID
+        ), f"I7.3 (E-G1): {what}: {method} {url} does not name its evaluation in X-AISC-Evaluation"
 
 
 def _assert_standalone_headers(calls, what):
     assert calls, f"standalone: {what} made no internal call at all"
     for method, url, headers in calls:
-        assert headers.get("X-Internal-Secret") == env.INTERNAL_API_KEY, (
-            f"standalone: {what}: {method} {url} lacks X-Internal-Secret")
-        assert "X-AISC-Project" not in headers, f"standalone: {what}: {method} {url} names a project"
-        assert "X-AISC-Run" not in headers, f"standalone: {what}: {method} {url} carries a run ticket"
-        assert "X-AISC-Evaluation" not in headers, f"standalone: {what}: {method} {url} names an evaluation"
+        assert (
+            headers.get("X-Internal-Secret") == env.INTERNAL_API_KEY
+        ), f"standalone: {what}: {method} {url} lacks X-Internal-Secret"
+        assert (
+            "X-AISC-Project" not in headers
+        ), f"standalone: {what}: {method} {url} names a project"
+        assert (
+            "X-AISC-Run" not in headers
+        ), f"standalone: {what}: {method} {url} carries a run ticket"
+        assert (
+            "X-AISC-Evaluation" not in headers
+        ), f"standalone: {what}: {method} {url} names an evaluation"
 
 
 def _assert_arguments_carry_no_run(dispatched, what):
@@ -204,12 +256,23 @@ def _assert_arguments_carry_no_run(dispatched, what):
     assert dispatched, f"{what}: run_evaluation dispatched nothing"
     leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
     names = {leaf.task.rsplit(".", 1)[-1] for leaf in leaves}
-    assert {"install_package", "run_plugin", "post_measurements", "finalize_evaluation"} <= names
+    assert {
+        "install_package",
+        "run_plugin",
+        "post_measurements",
+        "finalize_evaluation",
+    } <= names
     for leaf in leaves:
         values = _values(leaf)
-        assert PLATFORM_PID not in values, f"{what}: {leaf.task} carries a platform pid argument"
-        assert TICKET not in values, f"{what}: {leaf.task} carries a run ticket argument"
-        assert "None" not in values[-2:], f"{what}: {leaf.task} carries trailing None arguments"
+        assert (
+            PLATFORM_PID not in values
+        ), f"{what}: {leaf.task} carries a platform pid argument"
+        assert (
+            TICKET not in values
+        ), f"{what}: {leaf.task} carries a run ticket argument"
+        assert (
+            "None" not in values[-2:]
+        ), f"{what}: {leaf.task} carries trailing None arguments"
     return leaves
 
 
@@ -217,22 +280,30 @@ def _assert_arguments_carry_no_run(dispatched, what):
 # Both modes
 # ---------------------------------------------------------------------------
 
+
 def test_i7_3_the_worker_settings_name_no_database_and_no_ticket_key():
     """Guard (passes today, must keep passing): no DSN in the worker's settings,
     and the worker cannot mint tickets (DJANGO_SECRET_KEY is the backend's)."""
-    sources = [WORKER_ROOT / "aisc_eval" / "utils" / "env.py", WORKER_ROOT / "aisc_eval" / "celery_app.py"]
+    sources = [
+        WORKER_ROOT / "aisc_eval" / "utils" / "env.py",
+        WORKER_ROOT / "aisc_eval" / "celery_app.py",
+    ]
     sources += [p for p in (WORKER_ROOT / "env.development",) if p.exists()]
     for source in sources:
         text = source.read_text()
         assert not DSN_PATTERN.search(text), f"I7.3: {source.name} names a database"
         if source.suffix == ".py":
-            assert "DJANGO_SECRET_KEY" not in text, f"I7.3: {source.name} reads the ticket key"
+            assert (
+                "DJANGO_SECRET_KEY" not in text
+            ), f"I7.3: {source.name} reads the ticket key"
 
 
 def test_the_three_argument_call_fails_clearly_and_calls_nothing(backend, dispatched):
     """Both modes now take Sean's single argument; the old configurator shape is a stale caller."""
     with pytest.raises(TypeError):
-        celery_tasks.run_evaluation.run(uuid.UUID(PLATFORM_PID), uuid.UUID(EVALUATION_PID), TICKET)
+        celery_tasks.run_evaluation.run(
+            uuid.UUID(PLATFORM_PID), uuid.UUID(EVALUATION_PID), TICKET
+        )
     assert backend.calls == [], "a three-argument call reached the backend"
     assert list(dispatched) == [], "a three-argument call dispatched work"
 
@@ -241,8 +312,14 @@ def test_every_task_keeps_merils_signature():
     """The task signatures are 96a8ec7's: no platform_pid, no ticket, anywhere."""
     import inspect
 
-    for task in (celery_tasks.install_package, celery_tasks.run_evaluation, celery_tasks.run_plugin,
-                 celery_tasks.post_measurements, celery_tasks.finalize_evaluation, celery_tasks.handle_error):
+    for task in (
+        celery_tasks.install_package,
+        celery_tasks.run_evaluation,
+        celery_tasks.run_plugin,
+        celery_tasks.post_measurements,
+        celery_tasks.finalize_evaluation,
+        celery_tasks.handle_error,
+    ):
         params = inspect.signature(task.run).parameters
         assert "platform_pid" not in params and "ticket" not in params, task.name
 
@@ -251,20 +328,26 @@ def test_every_task_keeps_merils_signature():
 # Configurator only
 # ---------------------------------------------------------------------------
 
+
 @configurator_only
-def test_i7_3_configurator_run_evaluation_calls_with_the_run_of_its_header(backend, dispatched, acting):
+def test_i7_3_configurator_run_evaluation_calls_with_the_run_of_its_header(
+    backend, dispatched, acting
+):
     _run()
     _assert_configurator_headers(backend.internal_calls(), "run_evaluation")
 
 
 @configurator_only
-def test_i7_3_configurator_every_dispatched_task_is_published_inside_the_run(backend, dispatched, acting):
+def test_i7_3_configurator_every_dispatched_task_is_published_inside_the_run(
+    backend, dispatched, acting
+):
     """The context is the run at each publish. This cannot show that a child inherits the run:
     nothing is sent over a broker here. Only test_run_context_broker.py proves inheritance."""
     _run()
     _assert_arguments_carry_no_run(dispatched, "configurator")
-    assert dispatched.published_in and all(run == RUN for run in dispatched.published_in), (
-        "I7.3: run_evaluation published work outside its run, so the children would lose the ticket")
+    assert (
+        dispatched.published_in and all(run == RUN for run in dispatched.published_in)
+    ), "I7.3: run_evaluation published work outside its run, so the children would lose the ticket"
 
 
 @configurator_only
@@ -282,11 +365,15 @@ def test_i7_3_no_dispatched_task_carries_a_dsn(backend, dispatched, acting):
     for sent in dispatched:
         for leaf in _leaves(sent):
             for value in _values(leaf):
-                assert not DSN_PATTERN.search(value), f"I7.3: {leaf.task} carries a DSN-like argument"
+                assert not DSN_PATTERN.search(
+                    value
+                ), f"I7.3: {leaf.task} carries a DSN-like argument"
 
 
 @configurator_only
-@pytest.mark.parametrize("has_failed_plugins", [False, True], ids=["completed", "failed"])
+@pytest.mark.parametrize(
+    "has_failed_plugins", [False, True], ids=["completed", "failed"]
+)
 def test_i7_3_configurator_finalize_and_post_measurements_send_the_project_and_the_ticket(
     backend, dispatched, acting, has_failed_plugins
 ):
@@ -326,15 +413,20 @@ def test_i7_3_configurator_run_plugin_downloads_and_reports_with_the_project_and
     leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
     runs = [leaf for leaf in leaves if leaf.task.endswith("run_plugin")]
     assert runs, "I7.3: no run_plugin dispatched"
-    monkeypatch.setattr(celery_tasks.plugin_loader, "discovered_packages",
-                        {"aisc-probe": {"1.0.0": {"source": "local", "pkg_root": tmp_path}}})
+    monkeypatch.setattr(
+        celery_tasks.plugin_loader,
+        "discovered_packages",
+        {"aisc-probe": {"1.0.0": {"source": "local", "pkg_root": tmp_path}}},
+    )
     monkeypatch.setattr(celery_tasks.subprocess, "run", lambda *a, **kw: _Failed())
     backend.calls.clear()
     for leaf in runs:
         with pytest.raises(Exception):
             celery_tasks.run_plugin.run(*leaf.args, **leaf.kwargs)
     urls = [url for _, url, _ in backend.internal_calls()]
-    assert any("/files/dataset/" in u for u in urls), "the dataset download was not reached"
+    assert any(
+        "/files/dataset/" in u for u in urls
+    ), "the dataset download was not reached"
     assert any("/files/model/" in u for u in urls), "the model download was not reached"
     assert any(u.endswith("/fail") for u in urls), "the failure report was not reached"
     _assert_configurator_headers(backend.internal_calls(), "run_plugin")
@@ -348,8 +440,11 @@ def test_i7_3_configurator_install_package_reports_a_failure_with_the_project_an
     leaves = [leaf for sent in dispatched for leaf in _leaves(sent)]
     installs = [leaf for leaf in leaves if leaf.task.endswith("install_package")]
     assert installs, "I7.3: no install_package dispatched"
-    monkeypatch.setattr(celery_tasks.plugin_loader, "discovered_packages",
-                        {"aisc-probe": {"1.0.0": {"source": "local", "pkg_root": tmp_path}}})
+    monkeypatch.setattr(
+        celery_tasks.plugin_loader,
+        "discovered_packages",
+        {"aisc-probe": {"1.0.0": {"source": "local", "pkg_root": tmp_path}}},
+    )
 
     def boom(*_a, **_kw):
         raise RuntimeError("simulated: uv is not here")
@@ -366,6 +461,7 @@ def test_i7_3_configurator_install_package_reports_a_failure_with_the_project_an
 # Standalone only
 # ---------------------------------------------------------------------------
 
+
 @standalone_only
 def test_i7_3_standalone_run_evaluation_takes_only_evaluation_pid(backend, dispatched):
     """As Sean's worker always took it: master's call, master's headers."""
@@ -374,21 +470,29 @@ def test_i7_3_standalone_run_evaluation_takes_only_evaluation_pid(backend, dispa
 
 
 @standalone_only
-def test_i7_3_standalone_ignores_a_run_header_if_one_ever_arrives(backend, dispatched, acting):
+def test_i7_3_standalone_ignores_a_run_header_if_one_ever_arrives(
+    backend, dispatched, acting
+):
     """Standalone never sets the header; even if a message carried one, no door header goes out."""
     _run()
     _assert_standalone_headers(backend.internal_calls(), "run_evaluation")
 
 
 @standalone_only
-def test_i7_3_standalone_dispatched_tasks_carry_no_project_or_ticket(backend, dispatched):
+def test_i7_3_standalone_dispatched_tasks_carry_no_project_or_ticket(
+    backend, dispatched
+):
     _run()
     _assert_arguments_carry_no_run(dispatched, "standalone")
-    assert all(run is None for run in dispatched.published_in), "standalone: work published inside a run"
+    assert all(
+        run is None for run in dispatched.published_in
+    ), "standalone: work published inside a run"
 
 
 @standalone_only
-@pytest.mark.parametrize("has_failed_plugins", [False, True], ids=["completed", "failed"])
+@pytest.mark.parametrize(
+    "has_failed_plugins", [False, True], ids=["completed", "failed"]
+)
 def test_i7_3_standalone_finalize_and_post_measurements_send_no_project_headers(
     backend, dispatched, has_failed_plugins
 ):

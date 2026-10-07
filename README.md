@@ -42,11 +42,19 @@ Read from the environment (`aisc_eval/utils/env.py`, `aisc_eval/deployment.py`):
 | `AISC_DEPLOYMENT` | `standalone` or `configurator` | `standalone` |
 | `API_URL` | address of the backend | `http://backend` |
 | `API_PREFIX` | path of the backend's internal API | `/api/v1/internal` |
-| `INTERNAL_API_KEY` | shared secret sent as `X-Internal-Secret` | none |
+| `INTERNAL_API_KEY` | shared secret sent as `X-Internal-Secret`; the worker refuses to start without it | none (required) |
 | `CELERY_BROKER_URL`, `REDIS_BACKEND_URL` | broker and result backend | see `utils/env.py` |
 | `PLUGIN_PATH` | folder with local plugins | empty |
 | `PACKAGE_REGISTRY_URL`, `PACKAGE_REGISTRY_INDEX`, `PACKAGE_REGISTRY_USER`, `PACKAGE_REGISTRY_PASSWORD` | package index plugins are installed from | empty |
 | `CACHE_DIR` | cache of plugin environments | `/tmp/cache` |
+
+A plugin does not get the worker's environment. It runs with an allowlist
+(`PLUGIN_ENV_NAMES` in `aisc_eval/celery_tasks.py`): `PATH`, `HOME`, locale, proxy and CA
+variables, `PLATFORM_URL` and `PLATFORM_CONNECTIONS_TOKEN` (the connection resolver),
+`CONNECTIONS_ALLOWED_HOSTS`, `AISC_TARGET_*`, the OpenAI variables, and its project's secrets
+as `AISC_SECRET_*`. The broker and Redis URLs, `INTERNAL_API_KEY`, `DJANGO_SECRET_KEY` and the
+package registry login stay with the worker. A plugin that needs another variable needs it
+added to that list.
 
 ## How to run within local development environment
 
@@ -96,7 +104,22 @@ uv run pytest tests/
 
 The tests need no database and no running stack. `tests/test_run_context_broker.py` skips
 unless `AISC_TEST_BROKER_URL` and `AISC_TEST_RESULT_BACKEND` point at a throwaway broker and
-Redis; never point them at a running stack.
+Redis; never point them at a running stack. For example:
+
+```bash
+docker run -d --rm --name eval-test-rabbit -p 127.0.0.1:35672:5672 rabbitmq:3-management
+docker run -d --rm --name eval-test-redis -p 127.0.0.1:36379:6379 redis:7-alpine
+AISC_TEST_BROKER_URL=amqp://guest:guest@127.0.0.1:35672// \
+AISC_TEST_RESULT_BACKEND=redis://127.0.0.1:36379/0 uv run pytest tests/
+```
+
+Run the suite once more with `AISC_DEPLOYMENT=configurator`: some tests only run in one mode.
+
+Known as of 2026-10-07: `tests/conftest.py` imports `onnxruntime` (not in any dependency
+group) and `Dataset` (no longer in `aisc_eval.data_model.evaluation`), and
+`tests/test_basic_integration.py` imports classes that are gone too, so the command above stops
+at collection. Until they are updated, run
+`uv run pytest tests/ --noconftest --ignore=tests/test_basic_integration.py`.
 
 ### How to log and customise logs
 
@@ -128,12 +151,17 @@ list of files and reasons is `scripts/guard-frozen-intended.txt` in the aisc rep
 - **Plugin installs** (from the `feat/dev-catalogue-staging` branch): plugins are installed online
   from the package index in `run_plugin` (no `--offline`), and the index is always passed to
   `uv pip install` instead of being probed first.
-- **Placeholder `API_KEY_OPENAI`** in a plugin's environment when none is set, for plugins that
-  build an OpenAI client even when a local model is used.
+- **Plugin environment**: an allowlist instead of a copy of the worker's environment (see
+  Configuration), with a placeholder `API_KEY_OPENAI` when none is set, for plugins that build an
+  OpenAI client even when a local model is used.
+- **Measures the engine can store**: texts lose NUL characters and are cut to 255 characters; a
+  cut metric name ends with a hash of the whole name, so two long names stay two metrics.
+- **Start-up check**: the worker (not flower) stops when `INTERNAL_API_KEY` is unset.
 - **Task time limits** raised to 400 minutes soft, 405 hard (`aisc_eval/celery_app.py`), for long
   first runs that download a model.
 - **Tests**: `tests/test_deployment_mode.py`, `tests/test_run_context.py`,
-  `tests/test_run_context_broker.py`, `tests/test_run_ticket.py`.
+  `tests/test_run_context_broker.py`, `tests/test_run_ticket.py`,
+  `tests/test_plugin_environment.py`, `tests/services/test_post_measures_fit.py`.
 
 ## Contributing
 

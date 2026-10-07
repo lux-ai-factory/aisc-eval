@@ -10,6 +10,7 @@ from urllib.error import URLError, HTTPError
 
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 from celery import group, chain
@@ -79,6 +80,37 @@ def build_secret_environment(settings: list[dict]) -> dict[str, str]:
             values[env_key] = decrypt_value(setting["encrypted_value"])
     return values
 
+
+
+#: What a plugin may see of the worker's environment. A plugin is catalogue code: the worker's
+#: own credentials (broker and Redis URLs, INTERNAL_API_KEY, DJANGO_SECRET_KEY, the package
+#: registry login) stay out, or a plugin could read other runs' queued tasks, lift their run
+#: tickets and call the backend as another project (eval pass 2026-10-07).
+PLUGIN_ENV_NAMES = frozenset({
+    "PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    # the platform's connection resolver and target settings (aisc_plugin_interface.connections)
+    "PLATFORM_URL", "PLATFORM_CONNECTIONS_TOKEN", "CONNECTIONS_ALLOWED_HOSTS",
+    "AISC_TARGET_BASE_URL", "AISC_TARGET_API_KEY",
+    "OPENAI_BASE_URL", "API_KEY_OPENAI", "OPENAI_API_KEY",
+})
+PLUGIN_ENV_PROXIES = frozenset({"http_proxy", "https_proxy", "no_proxy", "all_proxy"})
+#: LangBiTe builds an OpenAI client at init even with a local model and no judge; the client
+#: checks the key only on a real request, so a non-empty placeholder lets it start
+OPENAI_PLACEHOLDER = "sk-local-model-no-openai-call"
+
+
+def plugin_environment(worker_env: Mapping[str, str], secrets: Mapping[str, str]) -> dict[str, str]:
+    """The environment a plugin runs with: the allowed part of the worker's, then its project's secrets."""
+    env = {
+        name: value for name, value in worker_env.items()
+        if name in PLUGIN_ENV_NAMES or name.lower() in PLUGIN_ENV_PROXIES
+        or name.startswith(SECRET_ENV_PREFIX)
+    }
+    env.update(secrets)
+    if not env.get("API_KEY_OPENAI"):
+        env["API_KEY_OPENAI"] = OPENAI_PLACEHOLDER
+    return env
 
 def validate_input_file(content: bytes, file_name: str, datashape: dict) -> dict:
     suffix = Path(file_name).suffix.lower()
@@ -399,16 +431,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         stderr_content = ""
         try:
             with open(stderr_path, "w+") as stderr_file:
-                child_env = os.environ.copy()
-                child_env.update(
-                build_secret_environment(project_settings + llm_secret_settings)
-            )
-                # Some plugins (e.g. LangBiTe) construct an OpenAI client at init even when a local
-                # model (GPT4ALL) is selected and no LLM judge is used. The OpenAI client only
-                # validates the key on an actual request, so a non-empty placeholder lets it
-                # instantiate without a real key; any real key already in the environment is kept.
-                if not child_env.get("API_KEY_OPENAI"):
-                    child_env["API_KEY_OPENAI"] = "sk-local-model-no-openai-call"
+                child_env = plugin_environment(
+                    os.environ, build_secret_environment(project_settings + llm_secret_settings)
+                )
                 process = subprocess.Popen(
                     [str(venv_python), str(runtime_script)],
                     cwd=str(workspace_path),
