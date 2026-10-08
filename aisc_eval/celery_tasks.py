@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from celery import group, chain
+from packaging.version import parse as parse_version
 
 from aisc_eval import plugin_runtime
 from aisc_eval.celery_app import celery_app
@@ -89,6 +90,56 @@ def validate_input_file(content: bytes, file_name: str, datashape: dict) -> dict
         return {"errors": [], "warnings": []}
     return validate_dataframe_against_datashape(frame, datashape)
 
+
+def plugin_install_target(package_name: str, version: str) -> str:
+    available_versions = plugin_loader.discovered_packages[package_name]
+    plugin_info = available_versions[version]
+    if plugin_info["source"] == "local":
+        return str(plugin_info["pkg_root"].resolve())
+    return f"{package_name}=={version}"
+
+
+def resolve_adapter_install_target(
+    adapter_def: dict | None, plugin_package: str, plugin_version: str
+) -> dict | None:
+    """Resolve an adapter ref into {package, class, version, target}.
+
+    ``target`` is returned only when the adapter lives in a different package than the
+    plugin; same-repo adapters ship with the plugin package and need no separate install.
+    """
+    if not adapter_def:
+        return None
+
+    adapter_class = adapter_def.get("adapter_class")
+    if not adapter_class:
+        raise ValueError("Adapter is missing 'adapter_class'")
+
+    adapter_pkg = adapter_def.get("package_name") or plugin_package
+    resolved = {"package": adapter_pkg, "class": adapter_class, "version": None, "target": None}
+
+    if adapter_pkg == plugin_package:
+        return resolved
+
+    available = plugin_loader.list_adapters()
+    if adapter_pkg not in available:
+        raise KeyError(f"Adapter package '{adapter_pkg}' not found.")
+    adapter_versions = available[adapter_pkg]
+
+    adapter_ver = adapter_def.get("version")
+    if adapter_ver is None:
+        adapter_ver = max(adapter_versions.keys(), key=parse_version)
+    if adapter_ver not in adapter_versions:
+        raise KeyError(f"Version '{adapter_ver}' of adapter package '{adapter_pkg}' not found.")
+
+    adapter_meta = adapter_versions[adapter_ver]
+    if adapter_meta["source"] == "local":
+        target = str(adapter_meta["pkg_root"].resolve())
+    else:
+        target = f"{adapter_pkg}=={adapter_ver}"
+
+    resolved.update({"version": adapter_ver, "target": target})
+    return resolved
+
 plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX,
                                env.PACKAGE_REGISTRY_USER,
                                env.PACKAGE_REGISTRY_PASSWORD)
@@ -133,28 +184,15 @@ def _fail_plugin_and_revoke(
 
 
 @celery_app.task(bind=True)
-def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID]):
-    """Install a package once using uv run to cache dependencies."""
-    logger.info(f"Caching package {package_name}=={version}")
+def install_package(self, install_targets: list[str], evaluation_pid: uuid.UUID,
+                    evaluation_plugin_pids: list[uuid.UUID]):
+    """Warm the uv cache by installing the given targets (plugin package + unique adapter packages)."""
+    logger.info(f"Caching {len(install_targets)} package(s): {install_targets}")
 
-    if not plugin_loader.discovered_packages:
-        plugin_loader.list_packages()
-
-    if package_name not in plugin_loader.discovered_packages:
-        raise KeyError(f"Package '{package_name}' not found.")
-
-    available_versions = plugin_loader.discovered_packages[package_name]
-    if version not in available_versions:
-        raise KeyError(f"Version '{version}' of package '{package_name}' not found.")
-
-    plugin_info = available_versions[version]
+    if not install_targets:
+        return
 
     try:
-        if plugin_info["source"] == "local":
-            install_target = str(plugin_info["pkg_root"].resolve())
-        else:
-            install_target = f"{package_name}=={version}"
-
         with tempfile.TemporaryDirectory(delete=True) as cache_tmp:
             cache_venv = Path(cache_tmp)
             subprocess.run(
@@ -173,7 +211,7 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
                     extra_url = None
                 if extra_url:
                     install_cmd.extend(["--extra-index-url", extra_url])
-            install_cmd.append(install_target)
+            install_cmd.extend(install_targets)
 
             result = subprocess.run(
                 install_cmd,
@@ -182,9 +220,9 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
             if result.returncode != 0:
                 raise RuntimeError(result.stderr)
 
-        logger.info(f"Successfully cached {package_name}=={version} and all dependencies")
+        logger.info(f"Successfully cached {len(install_targets)} package(s) and all dependencies")
     except Exception as e:
-        logger.error(f"Failed to cache {package_name}=={version}: {e}", exc_info=True)
+        logger.error(f"Failed to cache packages: {e}", exc_info=True)
         if evaluation_pid and evaluation_plugin_pids:
             for pid in evaluation_plugin_pids:
                 mark_plugin_failed(evaluation_pid, pid, str(e))
@@ -218,9 +256,18 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     package_chains = []
     plugin_task_ids = []
     for pkg_key, pkg_info in plugins_by_pkg.items():
+        install_targets = {plugin_install_target(pkg_info["package_name"], pkg_info["version"])}
+        for evaluation_plugin in pkg_info["plugins"]:
+            for input_file in evaluation_plugin.evaluation_inputs:
+                adapter_ref = input_file.adapter.model_dump(mode="json") if input_file.adapter else None
+                spec = resolve_adapter_install_target(
+                    adapter_ref, evaluation_plugin.package_name, evaluation_plugin.version
+                )
+                if spec and spec["target"]:
+                    install_targets.add(spec["target"])
+
         install_sig = install_package.si(
-            pkg_info["package_name"],
-            pkg_info["version"],
+            list(install_targets),
             evaluation_pid,
             [ep.pid for ep in pkg_info["plugins"]],
         )
@@ -312,11 +359,21 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         input_mapping = {}
         llm_secret_settings = []
-
+        input_adapters = {}
+        adapter_install_targets = set()
         try:
             for component in input_components:
                 component_type = component["component_type"]
                 name = component["name"]
+
+                adapter_ref = component.get("adapter")
+                if adapter_ref:
+                    spec = resolve_adapter_install_target(adapter_ref, package_name, version)
+                    if spec is not None:
+                        if spec["target"]:
+                            adapter_install_targets.add(spec["target"])
+                        input_adapters[name] = {"package": spec["package"], "class": spec["class"]}
+
                 if component_type == "dataset":
                     relative_path = component["data"]
                     download_dataset_file(relative_path, input_dir / relative_path)
@@ -324,6 +381,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                     relative_path = component["data"]
                     download_model_file(relative_path, input_dir / relative_path)
                 elif component_type in {"datashape", "llm", "resource"}:
+                    relative_path = f"{name}.json"
                     payload = dict(component.get("json_value") or {})
                     if component_type == "llm":
                         run_model = (component.get("value") or {}).get("model")
@@ -336,7 +394,6 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                                 "encrypted_value": component["secret_encrypted_value"],
                             })
                     file_content = json.dumps(payload).encode("utf-8")
-                    relative_path = f"{name}.json"
                     (input_dir / relative_path).write_bytes(file_content)
                 else:
                     raise ValueError(
@@ -354,6 +411,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
+            "input_adapters": input_adapters,
             "project_settings": build_project_settings(project_settings),
             "plugin_config": plugin_config or {},
         }
@@ -381,10 +439,11 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, venv_result.stderr)
             raise RuntimeError(f"Failed to create venv: {venv_result.stderr}")
 
-        # Step 2: Install plugin and dependencies into the venv
-        logger.debug(f"Installing {install_target} into isolated venv")
+        # Step 2: Install the plugin package and any separate adapter packages into the venv
+        offline_targets = [install_target] + list(adapter_install_targets)
+        logger.debug(f"Installing {offline_targets} into isolated venv")
         install_result = subprocess.run(
-            ["uv", "pip", "install", "--python", str(venv_dir), "--offline", install_target],
+            ["uv", "pip", "install", "--python", str(venv_dir), "--offline", *offline_targets],
             capture_output=True, text=True, timeout=1000,
         )
         if install_result.returncode != 0:

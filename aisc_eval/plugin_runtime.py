@@ -18,7 +18,7 @@ import sys
 from functools import partial
 from pathlib import Path
 
-from aisc_plugin_interface import TaskProgress
+from aisc_plugin_interface import TaskProgress, BaseInputAdapter
 from aisc_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
 
 
@@ -98,6 +98,7 @@ def main():
             plugin._set_project_settings(config.get("project_settings", {}))
 
         input_mapping = config.get("input_mapping", {})
+        input_adapters = config.get("input_adapters", {})
         for name, path in input_mapping.items():
             # Resolve input paths relative to working directory
             file_path = Path(path)
@@ -108,6 +109,22 @@ def main():
                 print(f"⚠️  Input file not found: {file_path}", file=sys.stderr)
                 continue
 
+            adapter_spec = input_adapters.get(name)
+            if adapter_spec:
+                module_name = adapter_spec["package"].replace("-", "_")
+                adapter_module = importlib.import_module(module_name)
+                adapter_class = getattr(adapter_module, adapter_spec["class"])
+                if not issubclass(adapter_class, BaseInputAdapter):
+                    raise ValueError(
+                        f"'{adapter_spec['class']}' is not a subclass of "
+                        f"BaseInputAdapter in '{module_name}'"
+                    )
+                print(f"⚙️ Applying adapter {adapter_spec['class']} to input '{name}'")
+                adapted = adapter_class().adapt(file_path)
+                plugin.set_input_content(name, adapted)
+            else:
+                print(f"📥 Loading input '{name}' from {path}")
+                plugin.set_input_content(name, file_path)
             print(f"📥 Loading input '{name}' from {path}")
             plugin.set_input_content(name, file_path.read_bytes())
 

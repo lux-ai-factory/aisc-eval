@@ -15,10 +15,24 @@ class InputFile(BaseModel):
     data: str
 
 
+class InputAdapterRef(BaseModel):
+    """Reference to an optional BaseInputAdapter applied to this input.
+
+    ``adapter_class`` is the adapter class name exported by the package. When
+    ``package_name`` is omitted the adapter is expected to live in the same
+    package/repository as the evaluated plugin (no extra install required).
+    ``version`` is only meaningful for registry-hosted packages.
+    """
+    adapter_class: str
+    package_name: str | None = None
+    version: str | None = None
+
+
 class InputFileDefinition(BaseModel):
     name: str
     input_type: InputType
     input_file: InputFile
+    adapter: InputAdapterRef | None = None
 
 
 class PluginConfig(BaseModel):
