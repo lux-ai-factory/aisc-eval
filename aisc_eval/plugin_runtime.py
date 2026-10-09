@@ -18,7 +18,14 @@ import sys
 from functools import partial
 from pathlib import Path
 
-from aisc_plugin_interface import TaskProgress, BaseInputAdapter
+from aisc_plugin_interface import TaskProgress
+
+try:
+    from aisc_plugin_interface import BaseInputAdapter
+except ImportError:
+    # TODO: keep loadable when installed interface predates adapters; error raised on use
+    BaseInputAdapter = None  # type: ignore[assignment]
+
 from aisc_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
 
 
@@ -111,6 +118,11 @@ def main():
 
             adapter_spec = input_adapters.get(name)
             if adapter_spec:
+                if BaseInputAdapter is None:
+                    raise RuntimeError(
+                        "Input adapter configured, but installed 'aisc_plugin_interface' "
+                        "does not export BaseInputAdapter. Upgrade the interface to use adapters."
+                    )
                 module_name = adapter_spec["package"].replace("-", "_")
                 adapter_module = importlib.import_module(module_name)
                 adapter_class = getattr(adapter_module, adapter_spec["class"])
@@ -124,9 +136,8 @@ def main():
                 plugin.set_input_content(name, adapted)
             else:
                 print(f"📥 Loading input '{name}' from {path}")
-                plugin.set_input_content(name, file_path)
-            print(f"📥 Loading input '{name}' from {path}")
-            plugin.set_input_content(name, file_path.read_bytes())
+                # TODO: input providers should handle the case where path is provided
+                plugin.set_input_content(name, file_path.read_bytes())
 
         print("🚀 Running evaluation...")
         plugin_config = config.get("plugin_config", {})
