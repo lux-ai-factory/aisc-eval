@@ -32,7 +32,10 @@ class InputFileDefinition(BaseModel):
     name: str
     input_type: InputType
     input_file: InputFile
-    adapter: InputAdapterRef | None = None
+    adapters: list[InputAdapterRef] = []
+
+    def adapter_chain(self) -> list[InputAdapterRef]:
+        return list(self.adapters)
 
 
 class PluginConfig(BaseModel):

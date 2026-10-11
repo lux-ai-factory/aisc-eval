@@ -140,6 +140,24 @@ def resolve_adapter_install_target(
     resolved.update({"version": adapter_ver, "target": target})
     return resolved
 
+
+def resolve_adapter_chain(
+    adapter_defs: list[dict], plugin_package: str, plugin_version: str
+) -> list[dict]:
+    """Resolve an ordered adapter chain into a list of specs.
+
+    Each spec is ``{package, class, version, target}`` as returned by
+    :func:`resolve_adapter_install_target`. Order is preserved.
+    Items may be plain dicts or pydantic models exposing ``model_dump``.
+    """
+    specs = []
+    for item in adapter_defs or []:
+        adapter_def = item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+        spec = resolve_adapter_install_target(adapter_def, plugin_package, plugin_version)
+        if spec is not None:
+            specs.append(spec)
+    return specs
+
 plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX,
                                env.PACKAGE_REGISTRY_USER,
                                env.PACKAGE_REGISTRY_PASSWORD)
@@ -259,12 +277,11 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
         install_targets = {plugin_install_target(pkg_info["package_name"], pkg_info["version"])}
         for evaluation_plugin in pkg_info["plugins"]:
             for input_file in evaluation_plugin.evaluation_inputs:
-                adapter_ref = input_file.adapter.model_dump(mode="json") if input_file.adapter else None
-                spec = resolve_adapter_install_target(
-                    adapter_ref, evaluation_plugin.package_name, evaluation_plugin.version
-                )
-                if spec and spec["target"]:
-                    install_targets.add(spec["target"])
+                for spec in resolve_adapter_chain(
+                    input_file.adapters, evaluation_plugin.package_name, evaluation_plugin.version
+                ):
+                    if spec and spec["target"]:
+                        install_targets.add(spec["target"])
 
         install_sig = install_package.si(
             list(install_targets),
@@ -366,13 +383,14 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 component_type = component["component_type"]
                 name = component["name"]
 
-                adapter_ref = component.get("adapter")
-                if adapter_ref:
-                    spec = resolve_adapter_install_target(adapter_ref, package_name, version)
-                    if spec is not None:
+                specs = resolve_adapter_chain(component.get("adapters", []), package_name, version)
+                if specs:
+                    for spec in specs:
                         if spec["target"]:
                             adapter_install_targets.add(spec["target"])
-                        input_adapters[name] = {"package": spec["package"], "class": spec["class"]}
+                    input_adapters[name] = [
+                        {"package": spec["package"], "class": spec["class"]} for spec in specs
+                    ]
 
                 if component_type == "dataset":
                     relative_path = component["data"]

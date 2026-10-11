@@ -116,24 +116,27 @@ def main():
                 print(f"⚠️  Input file not found: {file_path}", file=sys.stderr)
                 continue
 
-            adapter_spec = input_adapters.get(name)
-            if adapter_spec:
+            # Ordered adapter chain for this input (empty = no adapter).
+            adapter_chain = input_adapters.get(name) or []
+            if adapter_chain:
                 if BaseInputAdapter is None:
                     raise RuntimeError(
                         "Input adapter configured, but installed 'aisc_plugin_interface' "
                         "does not export BaseInputAdapter. Upgrade the interface to use adapters."
                     )
-                module_name = adapter_spec["package"].replace("-", "_")
-                adapter_module = importlib.import_module(module_name)
-                adapter_class = getattr(adapter_module, adapter_spec["class"])
-                if not issubclass(adapter_class, BaseInputAdapter):
-                    raise ValueError(
-                        f"'{adapter_spec['class']}' is not a subclass of "
-                        f"BaseInputAdapter in '{module_name}'"
-                    )
-                print(f"⚙️ Applying adapter {adapter_spec['class']} to input '{name}'")
-                adapted = adapter_class().adapt(file_path)
-                plugin.set_input_content(name, adapted)
+                data = file_path
+                for i, spec in enumerate(adapter_chain, start=1):
+                    module_name = spec["package"].replace("-", "_")
+                    adapter_module = importlib.import_module(module_name)
+                    adapter_class = getattr(adapter_module, spec["class"])
+                    if not issubclass(adapter_class, BaseInputAdapter):
+                        raise ValueError(
+                            f"'{spec['class']}' is not a subclass of "
+                            f"BaseInputAdapter in '{module_name}'"
+                        )
+                    print(f"⚙️ Applying adapter {spec['class']} ({i}/{len(adapter_chain)}) to input '{name}'")
+                    data = adapter_class().adapt(data)
+                plugin.set_input_content(name, data)
             else:
                 print(f"📥 Loading input '{name}' from {path}")
                 # TODO: input providers should handle the case where path is provided
