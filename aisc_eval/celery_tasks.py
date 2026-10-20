@@ -1,20 +1,17 @@
 import json
 import os
-import io
-import ssl
 import subprocess
 import tempfile
-import urllib
-import urllib.request
-from urllib.error import URLError, HTTPError
 
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 from celery import group, chain
 
-from aisc_eval import plugin_runtime
+from aisc_eval import plugin_process
+from aisc_eval import run_context  # noqa: F401  (registers the run header handlers)
 from aisc_eval.celery_app import celery_app
 from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.service.api_client import (
@@ -33,13 +30,13 @@ from aisc_eval.service.api_client import (
     get_project_settings_by_pid,
     get_evaluation_inputs,
 )
+from aisc_eval.service import run_pass
 from aisc_eval.utils.logging import get_logger
 
 from aisc_plugin_manager.loader import Loader
 from aisc_plugin_interface import TaskProgress, Measure
 from aisc_eval.utils import env
 from aisc_eval.utils.encryption import decrypt_value
-from aisc_eval.services.datashape_validation import validate_dataframe_against_datashape
 
 logger = get_logger()
 
@@ -79,15 +76,41 @@ def build_secret_environment(settings: list[dict]) -> dict[str, str]:
     return values
 
 
-def validate_input_file(content: bytes, file_name: str, datashape: dict) -> dict:
-    suffix = Path(file_name).suffix.lower()
-    if suffix == ".csv":
-        frame = __import__("pandas").read_csv(io.BytesIO(content))
-    elif suffix == ".parquet":
-        frame = __import__("pandas").read_parquet(io.BytesIO(content))
-    else:
-        return {"errors": [], "warnings": []}
-    return validate_dataframe_against_datashape(frame, datashape)
+
+#: What a plugin may see of the worker's environment. A plugin is catalogue code: the worker's
+#: own credentials (broker and Redis URLs, INTERNAL_API_KEY, DJANGO_SECRET_KEY, the package
+#: registry login) stay out, or a plugin could read other runs' queued tasks, lift their run
+#: tickets and call the backend as another project. PLATFORM_CONNECTIONS_TOKEN stays out too: it
+#: opens every project's connections; a plugin gets its run's pass instead (service/run_pass.py).
+PLUGIN_ENV_NAMES = frozenset({
+    "PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    # the platform's connection resolver and target settings (aisc_plugin_interface.connections)
+    "PLATFORM_URL", "CONNECTIONS_ALLOWED_HOSTS",
+    "AISC_TARGET_BASE_URL", "AISC_TARGET_API_KEY",
+    "OPENAI_BASE_URL", "API_KEY_OPENAI", "OPENAI_API_KEY",
+})
+PLUGIN_ENV_PROXIES = frozenset({"http_proxy", "https_proxy", "no_proxy", "all_proxy"})
+#: LangBiTe builds an OpenAI client at init even with a local model and no judge; the client
+#: checks the key only on a real request, so a non-empty placeholder lets it start
+OPENAI_PLACEHOLDER = "sk-local-model-no-openai-call"
+
+
+def plugin_environment(worker_env: Mapping[str, str], secrets: Mapping[str, str],
+                       run_pass: str | None = None) -> dict[str, str]:
+    """The environment a plugin runs with: the allowed part of the worker's, its project's secrets
+    and, when one was minted, its run's pass to the platform."""
+    env = {
+        name: value for name, value in worker_env.items()
+        if name in PLUGIN_ENV_NAMES or name.lower() in PLUGIN_ENV_PROXIES
+        or name.startswith(SECRET_ENV_PREFIX)
+    }
+    env.update(secrets)
+    if run_pass:
+        env["PLATFORM_RUN_PASS"] = run_pass
+    if not env.get("API_KEY_OPENAI"):
+        env["API_KEY_OPENAI"] = OPENAI_PLACEHOLDER
+    return env
 
 plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX,
                                env.PACKAGE_REGISTRY_USER,
@@ -150,17 +173,21 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
     plugin_info = available_versions[version]
 
     try:
-        if plugin_info["source"] == "local":
-            install_target = str(plugin_info["pkg_root"].resolve())
-        else:
-            install_target = f"{package_name}=={version}"
-
+        installer = plugin_process.install_user()
         with tempfile.TemporaryDirectory(delete=True) as cache_tmp:
-            cache_venv = Path(cache_tmp)
-            subprocess.run(
-                ["uv", "venv", str(cache_venv), "--python", "/usr/local/bin/python"],
-                capture_output=True, text=True, timeout=60, check=True,
+            if plugin_info["source"] == "local":
+                install_target = str(plugin_process.stage_local_source(
+                    plugin_info["pkg_root"].resolve(), Path(cache_tmp) / "source", installer))
+            else:
+                install_target = f"{package_name}=={version}"
+            cache_venv = Path(cache_tmp) / "venv"
+            plugin_process.prepare_install_folder(cache_venv, installer)
+            made = plugin_process.run_install(
+                ["uv", "venv", str(cache_venv), "--allow-existing", "--python", "/usr/local/bin/python"],
+                installer, timeout=60,
             )
+            if made.returncode != 0:
+                raise RuntimeError(made.stderr)
             # Always pass the devpi index. (We used to probe it with a 2s urlopen and drop
             # --extra-index-url on timeout, but that probe hits the FULL /+simple/ root — which
             # lists the whole PyPI mirror and is slow — so it intermittently timed out and silently
@@ -172,10 +199,7 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
                 install_cmd.extend(["--extra-index-url", extra_url])
             install_cmd.append(install_target)
 
-            result = subprocess.run(
-                install_cmd,
-                capture_output=True, text=True, timeout=1000,
-            )
+            result = plugin_process.run_install(install_cmd, installer, timeout=1000)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr)
 
@@ -345,21 +369,24 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         config_path = workspace_path / "config.json"
         config_path.write_text(json.dumps(config_data, indent=2))
 
-        runtime_script = os.path.abspath(plugin_runtime.__file__)
+        runtime_script = plugin_process.copy_runtime(workspace_path)
 
+        installer = plugin_process.install_user()
         if plugin_info["source"] == "local":
-            install_target = str(plugin_info["pkg_root"].resolve())
+            install_target = str(plugin_process.stage_local_source(
+                plugin_info["pkg_root"].resolve(), workspace_path / "source", installer))
         else:
             install_target = f"{package_name}=={version}"
 
         venv_dir = workspace_path / "venv"
         venv_python = venv_dir / "bin" / "python"
 
-        # Step 1: Create isolated venv
+        # Step 1: Create isolated venv, as the install user: the plugin may run it but not change it
         logger.debug(f"Creating isolated venv at {venv_dir}")
-        venv_result = subprocess.run(
-            ["uv", "venv", str(venv_dir), "--python", "/usr/local/bin/python"],
-            capture_output=True, text=True, timeout=1000,
+        plugin_process.prepare_install_folder(venv_dir, installer)
+        venv_result = plugin_process.run_install(
+            ["uv", "venv", str(venv_dir), "--allow-existing", "--python", "/usr/local/bin/python"],
+            installer, timeout=1000,
         )
         if venv_result.returncode != 0:
             mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, venv_result.stderr)
@@ -378,13 +405,20 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         if extra_url:
             install_cmd.extend(["--extra-index-url", extra_url])
         install_cmd.append(install_target)
-        install_result = subprocess.run(
-            install_cmd,
-            capture_output=True, text=True, timeout=1000,
-        )
+        install_result = plugin_process.run_install(install_cmd, installer, timeout=1000)
         if install_result.returncode != 0:
             mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, install_result.stderr)
             raise RuntimeError(f"Failed to install plugin: {install_result.stderr}")
+
+        # A pass to the platform for exactly the targets and connections this run names
+        minted: str | None = None
+        refs = run_pass.refs_of(input_components)
+        if refs:
+            try:
+                minted = run_pass.mint(refs)
+            except run_pass.RunPassRefused as exc:
+                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, str(exc))
+                raise
 
         # Step 3: Run plugin script with the isolated venv's Python
         logger.debug(f"Running plugin with: {venv_python} {runtime_script}")
@@ -397,25 +431,15 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         returncode: int | None = None
         stderr_content = ""
         try:
+            user = plugin_process.plugin_user()
+            plugin_process.prepare_workspace(workspace_path, output_dir, user)
             with open(stderr_path, "w+") as stderr_file:
-                child_env = os.environ.copy()
-                child_env.update(
-                build_secret_environment(project_settings + llm_secret_settings)
-            )
-                # Some plugins (e.g. LangBiTe) construct an OpenAI client at init even when a local
-                # model (GPT4ALL) is selected and no LLM judge is used. The OpenAI client only
-                # validates the key on an actual request, so a non-empty placeholder lets it
-                # instantiate without a real key; any real key already in the environment is kept.
-                if not child_env.get("API_KEY_OPENAI"):
-                    child_env["API_KEY_OPENAI"] = "sk-local-model-no-openai-call"
-                process = subprocess.Popen(
-                    [str(venv_python), str(runtime_script)],
-                    cwd=str(workspace_path),
-                    stdout=subprocess.PIPE,
-                    stderr=stderr_file,
-                    env=child_env,
-                    text=True,
-                    bufsize=1
+                child_env = plugin_environment(
+                    os.environ, build_secret_environment(project_settings + llm_secret_settings), minted
+                )
+                process = plugin_process.start(
+                    [str(venv_python), str(runtime_script)], workspace_path, stderr_file,
+                    child_env, user,
                 )
 
                 if (stdout := process.stdout) is not None:
@@ -452,13 +476,11 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
             )
 
-            log_file = output_dir / "plugin_execution.log"
             log_content = "=== Plugin Execution Log ===\n\n"
             log_content += f"Execution Time: {duration:.2f} seconds\n\n"
             log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
             log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
             log_content += f"=== Return Code ===\n{returncode}\n"
-            log_file.write_text(log_content)
 
             if returncode != 0:
                 _fail_plugin_and_revoke(
@@ -466,12 +488,13 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 )
                 raise RuntimeError(f"Plugin failed: {log_stderr_content}")
 
-            measures_file = output_dir / "measures.json"
-            measures = json.loads(measures_file.read_text()) if measures_file.exists() else []
+            outputs = plugin_process.read_outputs(output_dir, user)
+            measures = json.loads(outputs.pop("measures.json", b"[]"))
 
-            for file in output_dir.iterdir():
-                if file.name != "measures.json" and file.name != "stderr.tmp":
-                    upload_artifact(evaluation_pid, evaluation_plugin_pid, file.name, file.read_bytes())
+            # the log is the worker's, kept out of output/ where the plugin could plant a link
+            outputs["plugin_execution.log"] = log_content.encode()
+            for name, content in outputs.items():
+                upload_artifact(evaluation_pid, evaluation_plugin_pid, name, content)
 
             mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
             return measures
@@ -481,6 +504,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 evaluation_pid, evaluation_plugin_pid, str(exc) or exc.__class__.__name__, str(self.request.id)
             )
             raise
+        finally:
+            if minted:
+                run_pass.revoke(minted)
 
 
 @celery_app.task

@@ -28,6 +28,10 @@ MQ_USE_SSL = handle_bool_var(os.getenv("MQ_USE_SSL", "false"))
 CELERY_APP_NAME = os.getenv("CELERY_APP_NAME", "celery_app")
 
 PLUGIN_PATH = os.getenv("PLUGIN_PATH", "")
+# the unprivileged user a root worker runs plugins as (aisc_eval/plugin_process.py, Dockerfile)
+PLUGIN_USER = os.getenv("PLUGIN_USER", "aisc-plugin")
+# The user a root worker installs plugins as: neither root nor PLUGIN_USER (aisc_eval/plugin_process.py).
+PLUGIN_INSTALL_USER = os.getenv("PLUGIN_INSTALL_USER", "aisc-install")
 
 PACKAGE_REGISTRY_URL = os.getenv('PACKAGE_REGISTRY_URL', '')
 PACKAGE_REGISTRY_INDEX = os.getenv('PACKAGE_REGISTRY_INDEX', '')
