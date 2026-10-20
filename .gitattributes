@@ -1,3 +1,7 @@
+# Text files keep Linux line endings on every system: the scripts and Dockerfiles here run in Linux containers,
+# where a Windows CRLF breaks them. Git detects binary files by itself.
+* text=auto eol=lf
+
 *.onnx filter=lfs diff=lfs merge=lfs -text
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
 *.csv filter=lfs diff=lfs merge=lfs -text
