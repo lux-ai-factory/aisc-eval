@@ -27,8 +27,8 @@ from aisc_eval.service.api_client import (
     get_evaluation,
     get_evaluation_request,
     get_evaluation_plugins_status,
-    get_dataset_file_content,
-    get_model_file_content,
+    download_dataset_file,
+    download_model_file,
     upload_artifact,
     get_project_settings_by_pid,
     get_evaluation_inputs,
@@ -311,12 +311,13 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             component_type = component["component_type"]
             name = component["name"]
             if component_type == "dataset":
-                file_content = get_dataset_file_content(component["data"])
                 relative_path = component["data"]
+                download_dataset_file(relative_path, input_dir / relative_path)
             elif component_type == "model":
-                file_content = get_model_file_content(component["data"])
                 relative_path = component["data"]
+                download_model_file(relative_path, input_dir / relative_path)
             elif component_type in {"datashape", "llm", "resource"}:
+                relative_path = f"{name}.json"
                 payload = dict(component.get("json_value") or {})
                 if component_type == "llm":
                     run_model = (component.get("value") or {}).get("model")
@@ -329,13 +330,12 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                             "encrypted_value": component["secret_encrypted_value"],
                         })
                 file_content = json.dumps(payload).encode("utf-8")
-                relative_path = f"{name}.json"
+                (input_dir / relative_path).write_bytes(file_content)
             else:
                 raise ValueError(
                     f"Unsupported component type: {component_type}"
                 )
 
-            (input_dir / relative_path).write_bytes(file_content)
             input_mapping[name] = relative_path
 
         config_data = {
