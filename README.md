@@ -9,9 +9,8 @@ database of its own.
 ## In the AISC stack
 
 From the root of the [aisc](https://github.com/lux-ai-factory/aisc) repository, follow its
-README (`./scripts/secrets.sh` once, then Docker Compose with
-`docker-compose.plugin_downloader.yml`, `docker-compose-infra.development.yml` and
-`docker-compose.development.yml`). This repo is built into the image `aisc-eval`, used by two
+README (`uv run scripts/aisc.py start` makes the secrets if they are missing
+and starts the stack). This repo is built into the image `aisc-eval`, used by two
 services of `docker-compose.development.yml`:
 
 - **`aisc-eval-worker`**: `celery -A aisc_eval.celery_worker worker`, after installing the
@@ -62,8 +61,9 @@ added to that list.
 ## How to run within local development environment
 
 ### Prerequisites
-Start the infrastructure (RabbitMQ, Redis, ...) first, from the aisc repo root:
-`docker compose --env-file env.development -f docker-compose-infra.development.yml up`.
+Start the infrastructure (RabbitMQ, Redis, ...) first, from the aisc folder, with `uv run scripts/aisc.py start`. To start only the infrastructure,
+run `uv run scripts/aisc.py secrets` there. It prints this install's exact compose command. Add `up` and the
+infrastructure service names to it.
 The backend must also be running for the worker to report to.
 
 ### Configuration of development environment
