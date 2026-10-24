@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -29,6 +30,7 @@ from aisc_eval.service.api_client import (
     upload_artifact,
     get_project_settings_by_pid,
     get_evaluation_inputs,
+    store_input_value,
 )
 from aisc_eval.service import run_pass
 from aisc_eval.utils.logging import get_logger
@@ -111,6 +113,12 @@ def plugin_environment(worker_env: Mapping[str, str], secrets: Mapping[str, str]
     if not env.get("API_KEY_OPENAI"):
         env["API_KEY_OPENAI"] = OPENAI_PLACEHOLDER
     return env
+
+def local_model_marker(component: dict, file_content: bytes) -> dict:
+    """What a run on a local model file was on: the file's name and the hash of the bytes the plugin gets."""
+    return {"local_model": {"file": component.get("component_name") or component["data"],
+                            "sha256": hashlib.sha256(file_content).hexdigest()}}
+
 
 plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX,
                                env.PACKAGE_REGISTRY_USER,
@@ -328,6 +336,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         input_mapping = {}
         llm_secret_settings = []
+        local_model: dict | None = None
         for component in input_components:
             component_type = component["component_type"]
             name = component["name"]
@@ -337,6 +346,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             elif component_type == "model":
                 file_content = get_model_file_content(component["data"])
                 relative_path = component["data"]
+                if component.get("local_model"):
+                    local_model = {"input": component.get("pid"), "marker": local_model_marker(component, file_content)}
             elif component_type in {"datashape", "llm", "resource"}:
                 payload = dict(component.get("json_value") or {})
                 if component_type == "llm":
@@ -358,6 +369,19 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
             (input_dir / relative_path).write_bytes(file_content)
             input_mapping[name] = relative_path
+
+        # A run on a local model file says so, here for the plugin and on its input for the results:
+        # it is never an AI card run, and it opens nothing on the platform (no run pass)
+        if local_model is not None:
+            try:
+                if run_pass.refs_of(input_components):
+                    raise ValueError("the run binds both a local model file and an AI card target:"
+                                     " a run assesses one of them")
+                (input_dir / "target.json").write_text(json.dumps(local_model["marker"]))
+                store_input_value(evaluation_pid, local_model["input"], local_model["marker"])
+            except Exception as exc:
+                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, str(exc))
+                raise
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
@@ -415,7 +439,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         refs = run_pass.refs_of(input_components)
         if refs:
             try:
-                minted = run_pass.mint(refs)
+                minted = run_pass.mint(refs, str(evaluation_plugin_pid))
             except run_pass.RunPassRefused as exc:
                 mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, str(exc))
                 raise

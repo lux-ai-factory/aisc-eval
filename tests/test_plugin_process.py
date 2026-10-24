@@ -312,14 +312,14 @@ def test_a_run_with_a_target_mints_a_pass_for_exactly_that_ref(worker, platform)
     method, url, headers, body = platform["calls"][0]
     assert (method, url) == ("POST", "http://platform:8000/internal/run-passes")
     assert headers["X-AISC-Service-Token"] == "stack-token"
-    assert body == {"refs": [TARGET]}
+    assert body == {"refs": [TARGET], "evaluation_plugin": "ep"}
     [(_argv, kwargs)] = worker["popen"]
     assert kwargs["env"]["PLATFORM_RUN_PASS"] == "the-pass"
 
 
 def test_a_connection_input_is_a_ref_too(worker, platform):
     _run_with([_resource("system", "connection:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/chatbot")])
-    assert platform["calls"][0][3] == {"refs": ["connection:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/chatbot"]}
+    assert platform["calls"][0][3]["refs"] == ["connection:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/chatbot"]
 
 
 def test_a_run_without_target_or_connection_inputs_mints_nothing(worker, platform):

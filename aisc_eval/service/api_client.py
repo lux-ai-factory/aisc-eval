@@ -135,6 +135,15 @@ def get_evaluation_inputs(evaluation_pid: uuid.UUID) -> dict[str, Any]:
     return resp.json()
 
 
+def store_input_value(evaluation_pid: uuid.UUID, input_pid: uuid.UUID, value: dict[str, Any]) -> None:
+    """Store what the run was on (a local model file's name and hash) on one of its inputs."""
+    resp = requests.patch(
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs/{input_pid}/value",
+        json={"value": value}, headers=headers(),
+    )
+    resp.raise_for_status()
+
+
 def get_evaluation(
     evaluation_pid: uuid.UUID,
 ) -> Evaluation:
