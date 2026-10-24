@@ -11,6 +11,7 @@ import hashlib
 import json
 
 import pytest
+import requests
 
 from aisc_eval import celery_tasks
 from test_plugin_process import TARGET, _resource, platform, worker  # noqa: F401  (fixtures)
@@ -84,15 +85,32 @@ def test_a_model_input_that_is_not_the_plugins_local_model_marks_nothing(run):
     assert seen["stored"] == []
 
 
+STORE_REFUSED = "could not store the local model file's name and hash on the run's input"
+
+
 def test_a_run_whose_marker_cannot_be_stored_fails_before_the_plugin_starts(run, monkeypatch):
     def refused(*_args):
-        raise RuntimeError("the backend refused the input value")
+        answer = requests.Response()
+        answer.status_code = 500
+        raise requests.HTTPError("500 Server Error for url: http://backend:8000/api/v1/internal/x", response=answer)
 
     monkeypatch.setattr(celery_tasks, "store_input_value", refused)
-    with pytest.raises(RuntimeError, match="input value"):
+    with pytest.raises(RuntimeError, match=STORE_REFUSED):
         run["go"]([_model_input()])
     assert run["worker"]["popen"] == []
-    assert run["worker"]["failed"]
+    [(_evaluation, _plugin, message)] = run["worker"]["failed"]
+    assert message == f"{STORE_REFUSED} (HTTP 500)"
+
+
+def test_a_store_that_gets_no_answer_says_so_without_the_address(run, monkeypatch):
+    def unreachable(*_args):
+        raise requests.ConnectionError("http://backend:8000/api/v1/internal/x: connection refused")
+
+    monkeypatch.setattr(celery_tasks, "store_input_value", unreachable)
+    with pytest.raises(RuntimeError, match=STORE_REFUSED):
+        run["go"]([_model_input()])
+    [(_evaluation, _plugin, message)] = run["worker"]["failed"]
+    assert message == f"{STORE_REFUSED} (no answer)"
 
 
 UNKNOWN = "could not tell whether the model file is a local target (the plugin could not be loaded)"

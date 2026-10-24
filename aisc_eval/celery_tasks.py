@@ -116,6 +116,7 @@ def plugin_environment(worker_env: Mapping[str, str], secrets: Mapping[str, str]
 
 LOCAL_MODEL_UNKNOWN = "could not tell whether the model file is a local target (the plugin could not be loaded)"
 BOTH_KINDS = "the run binds both a local model file and an AI card target: a run assesses one of them"
+MARKER_NOT_STORED = "could not store the local model file's name and hash on the run's input"
 
 
 def local_model_marker(component: dict, file_content: bytes) -> dict:
@@ -390,8 +391,11 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             try:
                 store_input_value(evaluation_pid, local_model["input"], local_model["marker"])
             except Exception as exc:
-                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, str(exc))
-                raise
+                # the person reads this: the answer's status, never the backend's address
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                message = f"{MARKER_NOT_STORED} ({f'HTTP {status}' if status else 'no answer'})"
+                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, message)
+                raise RuntimeError(message) from None
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
