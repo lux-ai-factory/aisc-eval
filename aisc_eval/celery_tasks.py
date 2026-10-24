@@ -114,6 +114,10 @@ def plugin_environment(worker_env: Mapping[str, str], secrets: Mapping[str, str]
         env["API_KEY_OPENAI"] = OPENAI_PLACEHOLDER
     return env
 
+LOCAL_MODEL_UNKNOWN = "could not tell whether the model file is a local target (the plugin could not be loaded)"
+BOTH_KINDS = "the run binds both a local model file and an AI card target: a run assesses one of them"
+
+
 def local_model_marker(component: dict, file_content: bytes) -> dict:
     """What a run on a local model file was on: the file's name and the hash of the bytes the plugin gets."""
     return {"local_model": {"file": component.get("component_name") or component["data"],
@@ -334,6 +338,12 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         input_dir.mkdir()
         output_dir.mkdir()
 
+        # the backend could not load the plugin to say whether its model file is the local target:
+        # running anyway could store a local run as if it were an AI card run
+        if any(component.get("local_model_unknown") for component in input_components):
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, LOCAL_MODEL_UNKNOWN)
+            raise RuntimeError(LOCAL_MODEL_UNKNOWN)
+
         input_mapping = {}
         llm_secret_settings = []
         local_model: dict | None = None
@@ -373,11 +383,11 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         # A run on a local model file says so, here for the plugin and on its input for the results:
         # it is never an AI card run, and it opens nothing on the platform (no run pass)
         if local_model is not None:
+            if run_pass.refs_of(input_components):
+                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, BOTH_KINDS)
+                raise ValueError(BOTH_KINDS)
+            (input_dir / "target.json").write_text(json.dumps(local_model["marker"]))
             try:
-                if run_pass.refs_of(input_components):
-                    raise ValueError("the run binds both a local model file and an AI card target:"
-                                     " a run assesses one of them")
-                (input_dir / "target.json").write_text(json.dumps(local_model["marker"]))
                 store_input_value(evaluation_pid, local_model["input"], local_model["marker"])
             except Exception as exc:
                 mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, str(exc))

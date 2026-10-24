@@ -19,9 +19,15 @@ MODEL_BYTES = b"an onnx graph"
 MARKER = {"local_model": {"file": "scoring.onnx", "sha256": hashlib.sha256(MODEL_BYTES).hexdigest()}}
 
 
-def _model_input(local_model=True):
+def _model_input(local_model=True, unknown=False):
     return {"pid": "input-1", "component_type": "model", "name": "model", "component_name": "scoring.onnx",
-            "data": "0c5e7a1b-stored.onnx", "local_model": local_model}
+            "data": "0c5e7a1b-stored.onnx", "local_model": None if unknown else local_model,
+            "local_model_unknown": unknown}
+
+
+def _dataset():
+    return {"pid": "input-2", "component_type": "dataset", "name": "prompts", "data": "p.csv",
+            "local_model": False, "local_model_unknown": False}
 
 
 def _judge():
@@ -34,6 +40,7 @@ def run(worker, platform, monkeypatch):  # noqa: F811
     """run_plugin with the model download and the backend's input store faked; what the plugin saw."""
     seen = {"stored": [], "inputs": {}}
     monkeypatch.setattr(celery_tasks, "get_model_file_content", lambda name: MODEL_BYTES)
+    monkeypatch.setattr(celery_tasks, "get_dataset_file_content", lambda name: b"prompt\nhello\n")
     monkeypatch.setattr(celery_tasks, "store_input_value",
                         lambda evaluation, input_pid, value: seen["stored"].append((evaluation, input_pid, value)))
     monkeypatch.setattr(celery_tasks, "decrypt_value", lambda value: "judge-secret")
@@ -88,11 +95,33 @@ def test_a_run_whose_marker_cannot_be_stored_fails_before_the_plugin_starts(run,
     assert run["worker"]["failed"]
 
 
+UNKNOWN = "could not tell whether the model file is a local target (the plugin could not be loaded)"
+
+
+def test_a_model_file_the_backend_could_not_place_refuses_the_run(run):
+    with pytest.raises(RuntimeError, match=UNKNOWN.replace("(", r"\(").replace(")", r"\)")):
+        run["go"]([_model_input(unknown=True), _dataset()])
+    assert run["worker"]["popen"] == []
+    assert run["platform"]["calls"] == []
+    assert run["stored"] == []
+    [(_evaluation, _plugin, message)] = run["worker"]["failed"]
+    assert message == UNKNOWN
+
+
+def test_a_run_without_a_model_file_still_runs_when_the_plugin_could_not_be_loaded(run):
+    seen = run["go"]([_dataset()])
+    assert seen["worker"]["popen"]
+    assert seen["worker"]["failed"] == []
+
+
 def test_a_run_binding_a_local_model_and_a_card_target_is_refused(run):
     with pytest.raises(ValueError, match="one of them"):
         run["go"]([_model_input(), _resource("target", TARGET)])
     assert run["worker"]["popen"] == []
     assert run["platform"]["calls"] == []
+    [(_evaluation, _plugin, message)] = run["worker"]["failed"]
+    assert message == ("the run binds both a local model file and an AI card target:"
+                       " a run assesses one of them")
 
 
 def test_helper_models_of_a_local_run_are_written_as_llm_inputs(run):
