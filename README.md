@@ -125,12 +125,8 @@ AISC_TEST_RESULT_BACKEND=redis://127.0.0.1:36379/0 uv run pytest tests/
 ```
 
 Run the suite once more with `AISC_DEPLOYMENT=configurator`: some tests only run in one mode.
-
-Known issue: `tests/conftest.py` imports `onnxruntime` (not in any dependency
-group) and `Dataset` (no longer in `aisc_eval.data_model.evaluation`), and
-`tests/test_basic_integration.py` imports classes that are gone too, so the command above stops
-at collection. Until they are updated, run
-`uv run pytest tests/ --noconftest --ignore=tests/test_basic_integration.py`.
+`uv run pytest tests/` runs the whole suite as it is; no test reads the Git LFS files under
+`tests/data`, so it passes without `git lfs pull`.
 
 ### How to log and customise logs
 
