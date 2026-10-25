@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from aisc_plugin_interface import Measure
 
 from aisc_eval import deployment, run_context
+from aisc_eval.scrub import scrub_text
 from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.utils.env import API_URL_PREFIX, INTERNAL_API_KEY
 from aisc_eval.utils.logging import get_logger
@@ -84,7 +85,8 @@ def mark_plugin_failed(
     evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_message: str = ""
 ) -> None:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/fail"
-    resp = requests.patch(url, json={"error_message": error_message}, headers=headers())
+    # a last guard for any caller: key shapes and secret assignments never leave the worker
+    resp = requests.patch(url, json={"error_message": scrub_text(error_message)}, headers=headers())
     if not resp.ok:
         logger.warning(f"Failed to mark plugin {evaluation_plugin_pid} as failed: {resp.text}")
 

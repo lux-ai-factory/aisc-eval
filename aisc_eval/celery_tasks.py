@@ -13,6 +13,7 @@ from celery import group, chain
 
 from aisc_eval import plugin_process
 from aisc_eval import run_context  # noqa: F401  (registers the run header handlers)
+from aisc_eval.scrub import known_secrets, scrub_text
 from aisc_eval.celery_app import celery_app
 from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.service.api_client import (
@@ -200,7 +201,7 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
                 installer, timeout=60,
             )
             if made.returncode != 0:
-                raise RuntimeError(made.stderr)
+                raise RuntimeError(scrub_text(made.stderr))
             # Always pass the devpi index. (We used to probe it with a 2s urlopen and drop
             # --extra-index-url on timeout, but that probe hits the FULL /+simple/ root — which
             # lists the whole PyPI mirror and is slow — so it intermittently timed out and silently
@@ -214,14 +215,16 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
 
             result = plugin_process.run_install(install_cmd, installer, timeout=1000)
             if result.returncode != 0:
-                raise RuntimeError(result.stderr)
+                raise RuntimeError(scrub_text(result.stderr))
 
         logger.info(f"Successfully cached {package_name}=={version} and all dependencies")
     except Exception as e:
-        logger.error(f"Failed to cache {package_name}=={version}: {e}", exc_info=True)
+        # no traceback: an installer's message can hold a key, and only its scrubbed text is kept
+        text = scrub_text(str(e))
+        logger.error(f"Failed to cache {package_name}=={version}: {type(e).__name__}: {text}")
         if evaluation_pid and evaluation_plugin_pids:
             for pid in evaluation_plugin_pids:
-                mark_plugin_failed(evaluation_pid, pid, str(e))
+                mark_plugin_failed(evaluation_pid, pid, text)
         raise
 
 
@@ -427,8 +430,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             installer, timeout=1000,
         )
         if venv_result.returncode != 0:
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, venv_result.stderr)
-            raise RuntimeError(f"Failed to create venv: {venv_result.stderr}")
+            failure = scrub_text(venv_result.stderr or "")
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, failure)
+            raise RuntimeError(f"Failed to create venv: {failure}")
 
         # Step 2: Install plugin and dependencies into the venv (online, from devpi).
         # NOTE: we do NOT use --offline here. The evaluation run needs the network anyway (e.g.
@@ -445,8 +449,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         install_cmd.append(install_target)
         install_result = plugin_process.run_install(install_cmd, installer, timeout=1000)
         if install_result.returncode != 0:
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, install_result.stderr)
-            raise RuntimeError(f"Failed to install plugin: {install_result.stderr}")
+            failure = scrub_text(install_result.stderr or "")
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, failure)
+            raise RuntimeError(f"Failed to install plugin: {failure}")
 
         # A pass to the platform for exactly the targets and connections this run names
         minted: str | None = None
@@ -455,7 +460,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             try:
                 minted = run_pass.mint(refs, str(evaluation_plugin_pid))
             except run_pass.RunPassRefused as exc:
-                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, str(exc))
+                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc)))
                 raise
 
         # Step 3: Run plugin script with the isolated venv's Python
@@ -468,13 +473,15 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         process: subprocess.Popen | None = None
         returncode: int | None = None
         stderr_content = ""
+        # the values this run hands its plugin, removed from every text the worker reports of it
+        known: list[str] = []
         try:
+            secret_env = build_secret_environment(project_settings + llm_secret_settings)
+            known = known_secrets(secret_env, os.environ, plugin_config, minted)
             user = plugin_process.plugin_user()
             plugin_process.prepare_workspace(workspace_path, output_dir, user)
             with open(stderr_path, "w+") as stderr_file:
-                child_env = plugin_environment(
-                    os.environ, build_secret_environment(project_settings + llm_secret_settings), minted
-                )
+                child_env = plugin_environment(os.environ, secret_env, minted)
                 process = plugin_process.start(
                     [str(venv_python), str(runtime_script)], workspace_path, stderr_file,
                     child_env, user,
@@ -519,12 +526,13 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
             log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
             log_content += f"=== Return Code ===\n{returncode}\n"
+            log_content = scrub_text(log_content, known)
 
             if returncode != 0:
                 _fail_plugin_and_revoke(
-                    evaluation_pid, evaluation_plugin_pid, stderr_content, str(self.request.id)
+                    evaluation_pid, evaluation_plugin_pid, scrub_text(stderr_content, known), str(self.request.id)
                 )
-                raise RuntimeError(f"Plugin failed: {log_stderr_content}")
+                raise RuntimeError(f"Plugin failed: {scrub_text(log_stderr_content, known)}")
 
             outputs = plugin_process.read_outputs(output_dir, user)
             measures = json.loads(outputs.pop("measures.json", b"[]"))
@@ -539,7 +547,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         except Exception as exc:
             _terminate_process(process)
             _fail_plugin_and_revoke(
-                evaluation_pid, evaluation_plugin_pid, str(exc) or exc.__class__.__name__, str(self.request.id)
+                evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc), known) or exc.__class__.__name__,
+                str(self.request.id)
             )
             raise
         finally:
