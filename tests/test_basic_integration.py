@@ -1,16 +1,13 @@
-"""Basic integration tests for VERA Evaluation service.
+"""Basic integration tests for AISC Evaluation service.
 
 These tests verify core functionality without requiring external services.
 They are designed to run in CI environments reliably.
 """
 
-import uuid
 from datetime import datetime
 
 import pytest
-
-from aisc_eval.data_model.evaluation import Feature, FeatureType
-from aisc_eval.data_model.measure import Measure
+from aisc_plugin_interface import Measure
 
 
 def test_celery_tasks_import():
@@ -24,21 +21,8 @@ def test_celery_tasks_import():
         pytest.fail(f"Failed to import Celery tasks: {e}")
 
 
-def test_evaluation_data_model():
-    """Test that evaluation data models work correctly."""
-
-    # Test metric creation
+def test_measure_from_plugin_interface():
+    """Test that the plugin interface's measure model works for the service."""
     metric = Measure(name="test_metric", score=0.95, time=datetime.now())
     assert metric.name == "test_metric"
     assert metric.score == 0.95
-
-    # Test feature creation
-    feature = Feature(
-        pid=uuid.uuid4(),
-        name="test_feature",
-        feature_type=FeatureType.FLOAT,
-        min_value=0.0,
-        max_value=1.0,
-    )
-    assert feature.name == "test_feature"
-    assert feature.feature_type == FeatureType.FLOAT
