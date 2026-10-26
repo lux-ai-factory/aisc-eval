@@ -11,11 +11,15 @@ Expected directory structure:
     └── output/          # Output files (created if doesn't exist)
 """
 
+import copy
 import importlib
 import importlib.util
 import json
+import os
+import re
 import sys
 from functools import partial
+from typing import Mapping
 from pathlib import Path
 
 from aisc_plugin_interface import TaskProgress
@@ -61,6 +65,56 @@ def load_plugin(plugin_spec: str):
         raise ValueError(f"{class_name} is not a subclass of BaseEvaluationPlugin")
 
     return plugin_class
+
+
+_PATH_STEP = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
+
+
+def _path_steps(path: str) -> list:
+    """`items[0].token` -> ["items", 0, "token"]."""
+    return [name if name else int(index) for name, index in _PATH_STEP.findall(path)]
+
+
+def _set_at(config: dict, path: str, value: str) -> None:
+    steps = _path_steps(path)
+    if not steps:
+        return
+    node = config
+    for position, step in enumerate(steps):
+        if isinstance(step, int):
+            if not isinstance(node, list) or step >= len(node):
+                return
+        elif not isinstance(node, dict):
+            return
+        if position == len(steps) - 1:
+            node[step] = value
+            return
+        if isinstance(steps[position + 1], int):
+            child = node[step] if isinstance(step, int) else node.get(step)
+            if not isinstance(child, list):
+                return
+        else:
+            if isinstance(step, int):
+                child = node[step]
+            else:
+                child = node.setdefault(step, {})
+            if not isinstance(child, dict):
+                return
+        node = child
+
+
+def fill_config_secrets(
+    plugin_config: dict, fields: dict[str, str], environ: Mapping[str, str]
+) -> dict:
+    """A copy of the plugin configuration with each field the backend kept as a project secret put
+    back at its path, from the environment variable that holds it (path -> variable name). A field
+    whose variable is not set, or whose path runs through a missing list or past its end, is left
+    out. The value lives only in this process's memory: it is never written or printed."""
+    filled = copy.deepcopy(plugin_config)
+    for path, name in fields.items():
+        if name in environ:
+            _set_at(filled, path, environ[name])
+    return filled
 
 
 def main():
@@ -110,7 +164,11 @@ def main():
                 print(f"⚠️  Input file not found: {file_path}", file=sys.stderr)
 
         print("🚀 Running evaluation...")
-        plugin_config = config.get("plugin_config", {})
+        plugin_config = fill_config_secrets(
+            config.get("plugin_config", {}),
+            config.get("config_secret_fields", {}),
+            os.environ,
+        )
         output = plugin.evaluate(plugin_config)
 
         print("📊 Exporting metrics...")
