@@ -72,12 +72,36 @@ def build_secret_environment(settings: list[dict]) -> dict[str, str]:
             name_source = setting.get("plugin_config_key") or setting.get("key")
             if not name_source:
                 continue
-            env_key = SECRET_ENV_PREFIX + "".join(
-                character.upper() if character.isalnum() else "_"
-                for character in name_source
+            values[_secret_env_name(name_source)] = decrypt_value(
+                setting["encrypted_value"]
             )
-            values[env_key] = decrypt_value(setting["encrypted_value"])
     return values
+
+
+def _secret_env_name(name_source: str) -> str:
+    return SECRET_ENV_PREFIX + "".join(
+        character.upper() if character.isalnum() else "_" for character in name_source
+    )
+
+
+#: The plugin_config_key prefix of a configuration field the backend kept as a project secret.
+CONFIG_SECRET_PREFIX = "config."
+
+
+def config_secret_fields(settings: list[dict]) -> dict[str, str]:
+    """The configuration fields kept as project secrets, as path -> the environment variable that
+    holds the key in the plugin's process (the name build_secret_environment gives it), sorted by
+    path. Names only: config.json carries this, never a value."""
+    fields = {}
+    for setting in settings:
+        key = setting.get("plugin_config_key") or ""
+        if (
+            setting["category"] == "secrets"
+            and setting.get("encrypted_value")
+            and key.startswith(CONFIG_SECRET_PREFIX)
+        ):
+            fields[key[len(CONFIG_SECRET_PREFIX) :]] = _secret_env_name(key)
+    return dict(sorted(fields.items()))
 
 
 #: What a plugin may see of the worker's environment. A plugin is catalogue code: the worker's
@@ -543,6 +567,7 @@ def run_plugin(
             "input_mapping": input_mapping,
             "project_settings": build_project_settings(project_settings),
             "plugin_config": plugin_config or {},
+            "config_secret_fields": config_secret_fields(project_settings),
         }
 
         config_path = workspace_path / "config.json"
