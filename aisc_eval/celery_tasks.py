@@ -13,7 +13,7 @@ from pathlib import Path
 from celery import group, chain
 
 from aisc_eval import plugin_process
-from aisc_eval import run_context  # noqa: F401  (registers the run header handlers)
+from aisc_eval import run_context  # also registers the run header handlers
 from aisc_eval.scrub import REDACTED, known_secrets, scrub_text, without_known_bytes
 from aisc_eval.celery_app import celery_app
 from aisc_eval.data_model.evaluation import Evaluation
@@ -631,12 +631,17 @@ def run_plugin(
             mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, failure)
             raise RuntimeError(f"Failed to install plugin: {failure}")
 
-        # A pass to the platform for exactly the targets and connections this run names
+        # A pass to the platform for exactly the targets and connections this run names, all of the
+        # run's own project: the platform pid the backend put in the run's aisc_run header
         minted: str | None = None
         refs = run_pass.refs_of(input_components)
         if refs:
             try:
-                minted = run_pass.mint(refs, str(evaluation_plugin_pid))
+                minted = run_pass.mint(
+                    refs,
+                    str(evaluation_plugin_pid),
+                    project=(run_context.current() or {}).get("project"),
+                )
             except run_pass.RunPassRefused as exc:
                 mark_plugin_failed(
                     evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc))
