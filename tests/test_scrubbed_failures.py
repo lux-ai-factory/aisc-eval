@@ -36,12 +36,12 @@ def with_secret(monkeypatch):
     monkeypatch.setattr(celery_tasks, "decrypt_value", lambda value: JUDGE)
 
 
-def _plugin(monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None):
+def _plugin(monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None, measures="[]"):
     def popen(argv, **kwargs):
         kwargs["stderr"].write(stderr)
         kwargs["stderr"].flush()
         output = Path(kwargs["cwd"]) / "output"
-        (output / "measures.json").write_text("[]")
+        (output / "measures.json").write_text(measures)
         process = _Process(returncode=returncode)
         process.stdout = iter(list(stdout))
         return process
@@ -112,7 +112,7 @@ def test_the_api_client_sends_the_failure_text_scrubbed(monkeypatch):
         return _Answer()
 
     monkeypatch.setattr(api_client.requests, "patch", patch)
-    api_client.mark_plugin_failed("e", "p", "x Bearer abc")
+    api_client.mark_plugin_failed("e", "p", "x Bearer abcDEF0123456789ghi")
     assert sent == [{"error_message": "x [redacted]"}]
 
 
@@ -187,3 +187,97 @@ def test_the_error_handler_logs_neither_the_configuration_nor_the_failure_in_cle
     assert "cfg-key-12345678" not in caplog.text
     assert SHAPED not in caplog.text
     assert "eval" in caplog.text
+
+
+# What still left the worker unscrubbed: a failing post, an exception's args, progress keys, a known value in a
+# measure
+
+
+URL_CREDENTIALS = "https://bob:hunter22url@llm.example/v1"
+
+
+def _stored_by_celery(exc):
+    """What Celery keeps of a failed task (type, args, repr) and logs (the whole traceback, chain included)."""
+    import json
+
+    return json.dumps({"type": type(exc).__name__, "args": [repr(a) for a in exc.args], "repr": repr(exc)}) \
+        + _everything_raised(exc)
+
+
+class _PostRefused(Exception):
+    pass
+
+
+def test_a_failing_post_is_re_raised_scrubbed_with_nothing_chained(worker, monkeypatch, caplog):
+    import logging
+
+    def refuse(*a, **kw):
+        raise _PostRefused(f"500 posting measures; echoed password={JUDGE} and {URL_CREDENTIALS}")
+
+    monkeypatch.setattr(celery_tasks, "post_measures", refuse)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(Exception) as raised:
+        celery_tasks.post_measurements.run([], "eval", "ep")
+    seen = _stored_by_celery(raised.value)
+    assert "500 posting measures" in seen
+    for secret in (JUDGE, "hunter22url"):
+        assert secret not in seen
+        assert secret not in caplog.text
+        for *_ids, text in worker["failed"]:
+            assert secret not in text
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None or raised.value.__suppress_context__
+
+
+class _CleanText(Exception):
+    def __str__(self):
+        return "upload refused"
+
+
+def test_an_exception_whose_args_hold_a_secret_is_raised_scrubbed(worker, with_secret, monkeypatch, caplog):
+    def refuse(*a, **kw):
+        raise _CleanText("upload refused", JUDGE, {"token": SHAPED})
+
+    monkeypatch.setattr(celery_tasks, "upload_artifact", refuse)
+    _plugin(monkeypatch, returncode=0)
+    with pytest.raises(Exception) as raised:
+        _run(SECRET_SETTING)
+    seen = _stored_by_celery(raised.value)
+    assert "upload refused" in seen
+    assert JUDGE not in seen and SHAPED not in seen
+    assert JUDGE not in caplog.text and SHAPED not in caplog.text
+
+
+def test_a_secret_used_as_a_key_in_progress_is_stored_scrubbed(worker, with_secret, monkeypatch):
+    import json
+    import types
+
+    stored = []
+    fake_app = types.SimpleNamespace(backend=types.SimpleNamespace(
+        store_result=lambda task_id, meta, state=None, **kw: stored.append(json.dumps(meta, default=str))))
+    monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
+    line = json.dumps({"progress": 0.3, "extra": {JUDGE: "as a key", "nested": {SHAPED: 1}, "plain": "kept"}})
+    _plugin(monkeypatch, stdout=[line + "\n"], returncode=0)
+    _run(SECRET_SETTING)
+    assert stored, "the progress line was not stored"
+    for meta in stored:
+        assert JUDGE not in meta and SHAPED not in meta
+        assert "kept" in meta
+
+
+def test_a_value_the_plugin_was_given_is_scrubbed_from_a_measure_failure(worker, with_secret, monkeypatch, caplog):
+    """The judge key has no recognisable shape; the worker knows it handed it over, so a measure that echoes it
+    and fails to post leaves it in no stored failure text, raised error or log."""
+    import json
+    import logging
+
+    _plugin(monkeypatch, returncode=0, measures=json.dumps([{"name": "m", "score": JUDGE}]))
+    measures = _run(SECRET_SETTING)          # what the chain hands post_measurements
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(Exception) as raised:
+        celery_tasks.post_measurements.run(measures, "eval", "ep")
+    assert worker["failed"], "the failed post was not reported"
+    for *_ids, text in worker["failed"]:
+        assert JUDGE not in text
+    assert JUDGE not in _stored_by_celery(raised.value)
+    assert JUDGE not in caplog.text
