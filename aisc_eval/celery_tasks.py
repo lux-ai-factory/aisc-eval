@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import tempfile
+import traceback as tracebacks
 
 import time
 import uuid
@@ -131,9 +132,33 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PA
                                env.PACKAGE_REGISTRY_PASSWORD)
 
 
-def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: str):
-    meta = {**task_progress.model_dump(), "plugin_name": plugin_name}
+def _scrubbed(value, known=()):
+    """`value` with every string in it, at any depth, passed through scrub_text."""
+    if isinstance(value, str):
+        return scrub_text(value, known)
+    if isinstance(value, dict):
+        return {key: _scrubbed(inner, known) for key, inner in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrubbed(item, known) for item in value]
+    return value
+
+
+def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: str, known=()):
+    # the plugin writes its progress (its `extra` too) itself: stored scrubbed, like everything else it prints
+    meta = _scrubbed({**task_progress.model_dump(), "plugin_name": plugin_name}, known)
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
+
+
+def _scrubbed_error(exc: BaseException, known=()) -> BaseException:
+    """An exception to raise in place of `exc`, with no secret in its text or in its chain.
+
+    `exc` itself when its text is clean and it chains nothing; else a RuntimeError of its scrubbed text, raised
+    `from None` by the caller. The original traceback goes to the log, scrubbed."""
+    text = scrub_text(str(exc), known)
+    if text == str(exc) and exc.__cause__ is None and exc.__context__ is None:
+        return exc
+    logger.error(scrub_text("".join(tracebacks.format_exception(exc)), known))
+    return RuntimeError(f"{type(exc).__name__}: {text}")
 
 
 def _terminate_process(process: subprocess.Popen | None) -> None:
@@ -461,7 +486,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 minted = run_pass.mint(refs, str(evaluation_plugin_pid))
             except run_pass.RunPassRefused as exc:
                 mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc)))
-                raise
+                raise run_pass.RunPassRefused(scrub_text(str(exc))) from None
 
         # Step 3: Run plugin script with the isolated venv's Python
         logger.debug(f"Running plugin with: {venv_python} {runtime_script}")
@@ -497,7 +522,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                                 progress_data = json.loads(stripped_line)
                                 task_progress = TaskProgress(**progress_data)
 
-                                progress_callback(task_progress, plugin_name, str(self.request.id))
+                                progress_callback(task_progress, plugin_name, str(self.request.id), known)
                             except Exception:
                                 pass
 
@@ -550,7 +575,10 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc), known) or exc.__class__.__name__,
                 str(self.request.id)
             )
-            raise
+            clean = _scrubbed_error(exc, known)
+            if clean is exc:
+                raise
+            raise clean from None
         finally:
             if minted:
                 run_pass.revoke(minted)
@@ -562,7 +590,7 @@ def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, 
         measurements = [Measure(**m) for m in measurements_dict]
         post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
     except Exception as e:
-        mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, str(e))
+        mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, scrub_text(str(e)))
         raise
 
 
@@ -593,7 +621,16 @@ def handle_error(
         exc: BaseException,
         traceback: object,
 ) -> None:
-    logger.error(f"Error in evaluation {evaluation_id}:")
-    logger.error(f"--\n\n{request} {exc} {traceback}")
+    # never the request (it holds the plugin configuration) nor the raw failure: its type and scrubbed text
+    known = known_secrets({}, {}, _request_config(request), None)
+    logger.error(f"Error in evaluation {evaluation_id}: {type(exc).__name__}: {scrub_text(str(exc), known)}")
     mark_failed(evaluation_id)
     logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
+
+
+def _request_config(request: object):
+    """The plugin configuration among a task request's arguments (run_plugin's fourth), if one is there."""
+    args = request.get("args") if isinstance(request, dict) else getattr(request, "args", None)
+    if isinstance(args, (list, tuple)):
+        return [arg for arg in args if isinstance(arg, dict)]
+    return None
