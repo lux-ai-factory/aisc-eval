@@ -33,10 +33,10 @@ PLUGIN_USER = os.getenv("PLUGIN_USER", "aisc-plugin")
 # The user a root worker installs plugins as: neither root nor PLUGIN_USER (aisc_eval/plugin_process.py).
 PLUGIN_INSTALL_USER = os.getenv("PLUGIN_INSTALL_USER", "aisc-install")
 
-PACKAGE_REGISTRY_URL = os.getenv('PACKAGE_REGISTRY_URL', '')
-PACKAGE_REGISTRY_INDEX = os.getenv('PACKAGE_REGISTRY_INDEX', '')
-PACKAGE_REGISTRY_USER = os.getenv('PACKAGE_REGISTRY_USER', '')
-PACKAGE_REGISTRY_PASSWORD = os.getenv('PACKAGE_REGISTRY_PASSWORD', '')
+PACKAGE_REGISTRY_URL = os.getenv("PACKAGE_REGISTRY_URL", "")
+PACKAGE_REGISTRY_INDEX = os.getenv("PACKAGE_REGISTRY_INDEX", "")
+PACKAGE_REGISTRY_USER = os.getenv("PACKAGE_REGISTRY_USER", "")
+PACKAGE_REGISTRY_PASSWORD = os.getenv("PACKAGE_REGISTRY_PASSWORD", "")
 
 
 def redis_handle_ssl_option(redis_url: str) -> str:

@@ -56,14 +56,18 @@ def test_a_plugin_keeps_what_it_needs():
 
 def test_the_stack_connections_token_never_reaches_a_plugin():
     # it opens every project's connections; a plugin gets its run's pass instead
-    assert "PLATFORM_CONNECTIONS_TOKEN" not in celery_tasks.plugin_environment(WORKER_ENV, {})
+    assert "PLATFORM_CONNECTIONS_TOKEN" not in celery_tasks.plugin_environment(
+        WORKER_ENV, {}
+    )
     env = celery_tasks.plugin_environment(WORKER_ENV, {}, run_pass="the-pass")
     assert "PLATFORM_CONNECTIONS_TOKEN" not in env
     assert env["PLATFORM_RUN_PASS"] == "the-pass"
 
 
 def test_a_run_without_a_pass_gets_none_even_if_the_worker_has_one():
-    env = celery_tasks.plugin_environment({**WORKER_ENV, "PLATFORM_RUN_PASS": "stale"}, {})
+    env = celery_tasks.plugin_environment(
+        {**WORKER_ENV, "PLATFORM_RUN_PASS": "stale"}, {}
+    )
     assert "PLATFORM_RUN_PASS" not in env
 
 

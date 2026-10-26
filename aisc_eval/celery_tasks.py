@@ -80,33 +80,51 @@ def build_secret_environment(settings: list[dict]) -> dict[str, str]:
     return values
 
 
-
 #: What a plugin may see of the worker's environment. A plugin is catalogue code: the worker's
 #: own credentials (broker and Redis URLs, INTERNAL_API_KEY, DJANGO_SECRET_KEY, the package
 #: registry login) stay out, or a plugin could read other runs' queued tasks, lift their run
 #: tickets and call the backend as another project. PLATFORM_CONNECTIONS_TOKEN stays out too: it
 #: opens every project's connections; a plugin gets its run's pass instead (service/run_pass.py).
-PLUGIN_ENV_NAMES = frozenset({
-    "PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR",
-    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
-    # the platform's connection resolver and target settings (aisc_plugin_interface.connections)
-    "PLATFORM_URL", "CONNECTIONS_ALLOWED_HOSTS",
-    "AISC_TARGET_BASE_URL", "AISC_TARGET_API_KEY",
-    "OPENAI_BASE_URL", "API_KEY_OPENAI", "OPENAI_API_KEY",
-})
+PLUGIN_ENV_NAMES = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "TZ",
+        "TMPDIR",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        # the platform's connection resolver and target settings (aisc_plugin_interface.connections)
+        "PLATFORM_URL",
+        "CONNECTIONS_ALLOWED_HOSTS",
+        "AISC_TARGET_BASE_URL",
+        "AISC_TARGET_API_KEY",
+        "OPENAI_BASE_URL",
+        "API_KEY_OPENAI",
+        "OPENAI_API_KEY",
+    }
+)
 PLUGIN_ENV_PROXIES = frozenset({"http_proxy", "https_proxy", "no_proxy", "all_proxy"})
 #: LangBiTe builds an OpenAI client at init even with a local model and no judge; the client
 #: checks the key only on a real request, so a non-empty placeholder lets it start
 OPENAI_PLACEHOLDER = "sk-local-model-no-openai-call"
 
 
-def plugin_environment(worker_env: Mapping[str, str], secrets: Mapping[str, str],
-                       run_pass: str | None = None) -> dict[str, str]:
+def plugin_environment(
+    worker_env: Mapping[str, str],
+    secrets: Mapping[str, str],
+    run_pass: str | None = None,
+) -> dict[str, str]:
     """The environment a plugin runs with: the allowed part of the worker's, its project's secrets
     and, when one was minted, its run's pass to the platform."""
     env = {
-        name: value for name, value in worker_env.items()
-        if name in PLUGIN_ENV_NAMES or name.lower() in PLUGIN_ENV_PROXIES
+        name: value
+        for name, value in worker_env.items()
+        if name in PLUGIN_ENV_NAMES
+        or name.lower() in PLUGIN_ENV_PROXIES
         or name.startswith(SECRET_ENV_PREFIX)
     }
     env.update(secrets)
@@ -116,20 +134,31 @@ def plugin_environment(worker_env: Mapping[str, str], secrets: Mapping[str, str]
         env["API_KEY_OPENAI"] = OPENAI_PLACEHOLDER
     return env
 
+
 LOCAL_MODEL_UNKNOWN = "could not tell whether the model file is a local target (the plugin could not be loaded)"
 BOTH_KINDS = "the run binds both a local model file and an AI card target: a run assesses one of them"
-MARKER_NOT_STORED = "could not store the local model file's name and hash on the run's input"
+MARKER_NOT_STORED = (
+    "could not store the local model file's name and hash on the run's input"
+)
 
 
 def local_model_marker(component: dict, file_content: bytes) -> dict:
     """What a run on a local model file was on: the file's name and the hash of the bytes the plugin gets."""
-    return {"local_model": {"file": component.get("component_name") or component["data"],
-                            "sha256": hashlib.sha256(file_content).hexdigest()}}
+    return {
+        "local_model": {
+            "file": component.get("component_name") or component["data"],
+            "sha256": hashlib.sha256(file_content).hexdigest(),
+        }
+    }
 
 
-plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PACKAGE_REGISTRY_INDEX,
-                               env.PACKAGE_REGISTRY_USER,
-                               env.PACKAGE_REGISTRY_PASSWORD)
+plugin_loader: Loader = Loader(
+    env.PLUGIN_PATH,
+    env.PACKAGE_REGISTRY_URL,
+    env.PACKAGE_REGISTRY_INDEX,
+    env.PACKAGE_REGISTRY_USER,
+    env.PACKAGE_REGISTRY_PASSWORD,
+)
 
 
 def _scrubbed(value, known=()):
@@ -137,13 +166,18 @@ def _scrubbed(value, known=()):
     if isinstance(value, str):
         return scrub_text(value, known)
     if isinstance(value, dict):
-        return {_scrubbed(key, known): _scrubbed(inner, known) for key, inner in value.items()}
+        return {
+            _scrubbed(key, known): _scrubbed(inner, known)
+            for key, inner in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [_scrubbed(item, known) for item in value]
     return value
 
 
-def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: str, known=()):
+def progress_callback(
+    task_progress: TaskProgress, plugin_name: str, task_id: str, known=()
+):
     # the plugin writes its progress (its `extra` too) itself: stored scrubbed, like everything else it prints
     meta = _scrubbed({**task_progress.model_dump(), "plugin_name": plugin_name}, known)
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
@@ -157,7 +191,10 @@ def _without_known(value, known):
             value = value.replace(secret, REDACTED)
         return value
     if isinstance(value, dict):
-        return {_without_known(key, known): _without_known(inner, known) for key, inner in value.items()}
+        return {
+            _without_known(key, known): _without_known(inner, known)
+            for key, inner in value.items()
+        }
     if isinstance(value, list):
         return [_without_known(item, known) for item in value]
     return value
@@ -171,7 +208,12 @@ def _scrubbed_error(exc: BaseException, known=()) -> BaseException:
     traceback goes to the log, scrubbed."""
     text = scrub_text(str(exc), known)
     args_clean = all(scrub_text(repr(arg), known) == repr(arg) for arg in exc.args)
-    if text == str(exc) and args_clean and exc.__cause__ is None and exc.__context__ is None:
+    if (
+        text == str(exc)
+        and args_clean
+        and exc.__cause__ is None
+        and exc.__context__ is None
+    ):
         return exc
     logger.error(scrub_text("".join(tracebacks.format_exception(exc)), known))
     return RuntimeError(f"{type(exc).__name__}: {text}")
@@ -201,7 +243,10 @@ def _revoke_sibling_tasks(evaluation_pid: uuid.UUID, current_task_id: str) -> No
 
 
 def _fail_plugin_and_revoke(
-    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_msg: str, current_task_id: str
+    evaluation_pid: uuid.UUID,
+    evaluation_plugin_pid: uuid.UUID,
+    error_msg: str,
+    current_task_id: str,
 ) -> None:
     try:
         mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, error_msg)
@@ -211,7 +256,13 @@ def _fail_plugin_and_revoke(
 
 
 @celery_app.task(bind=True)
-def install_package(self, package_name: str, version: str, evaluation_pid: uuid.UUID, evaluation_plugin_pids: list[uuid.UUID]):
+def install_package(
+    self,
+    package_name: str,
+    version: str,
+    evaluation_pid: uuid.UUID,
+    evaluation_plugin_pids: list[uuid.UUID],
+):
     """Install a package once using uv run to cache dependencies."""
     logger.info(f"Caching package {package_name}=={version}")
 
@@ -231,15 +282,28 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
         installer = plugin_process.install_user()
         with tempfile.TemporaryDirectory(delete=True) as cache_tmp:
             if plugin_info["source"] == "local":
-                install_target = str(plugin_process.stage_local_source(
-                    plugin_info["pkg_root"].resolve(), Path(cache_tmp) / "source", installer))
+                install_target = str(
+                    plugin_process.stage_local_source(
+                        plugin_info["pkg_root"].resolve(),
+                        Path(cache_tmp) / "source",
+                        installer,
+                    )
+                )
             else:
                 install_target = f"{package_name}=={version}"
             cache_venv = Path(cache_tmp) / "venv"
             plugin_process.prepare_install_folder(cache_venv, installer)
             made = plugin_process.run_install(
-                ["uv", "venv", str(cache_venv), "--allow-existing", "--python", "/usr/local/bin/python"],
-                installer, timeout=60,
+                [
+                    "uv",
+                    "venv",
+                    str(cache_venv),
+                    "--allow-existing",
+                    "--python",
+                    "/usr/local/bin/python",
+                ],
+                installer,
+                timeout=60,
             )
             if made.returncode != 0:
                 raise RuntimeError(scrub_text(made.stderr))
@@ -258,11 +322,15 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
             if result.returncode != 0:
                 raise RuntimeError(scrub_text(result.stderr))
 
-        logger.info(f"Successfully cached {package_name}=={version} and all dependencies")
+        logger.info(
+            f"Successfully cached {package_name}=={version} and all dependencies"
+        )
     except Exception as e:
         # no traceback: an installer's message can hold a key, and only its scrubbed text is kept
         text = scrub_text(str(e))
-        logger.error(f"Failed to cache {package_name}=={version}: {type(e).__name__}: {text}")
+        logger.error(
+            f"Failed to cache {package_name}=={version}: {type(e).__name__}: {text}"
+        )
         if evaluation_pid and evaluation_plugin_pids:
             for pid in evaluation_plugin_pids:
                 mark_plugin_failed(evaluation_pid, pid, text)
@@ -290,7 +358,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
             }
         plugins_by_pkg[pkg_key]["plugins"].append(evaluation_plugin)
 
-    logger.info(f"Found {len(plugins_by_pkg)} unique packages for {len(evaluation.evaluation_plugins)} plugins")
+    logger.info(
+        f"Found {len(plugins_by_pkg)} unique packages for {len(evaluation.evaluation_plugins)} plugins"
+    )
 
     # build per-package chains: install_pkg -> group(run_plugin -> post_measurements)
     package_chains = []
@@ -309,7 +379,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
             project_config_selections = []
             if evaluation_plugin.plugin_config:
                 config = evaluation_plugin.plugin_config.config
-                project_config_selections = evaluation_plugin.plugin_config.project_config_selections
+                project_config_selections = (
+                    evaluation_plugin.plugin_config.project_config_selections
+                )
 
             input_components = inputs_by_plugin.get(str(evaluation_plugin.pid), [])
 
@@ -319,7 +391,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 evaluation_plugin.version,
                 config,
                 input_components,
-                get_project_settings_by_pid(evaluation.project.pid, project_config_selections),
+                get_project_settings_by_pid(
+                    evaluation.project.pid, project_config_selections
+                ),
                 evaluation_pid,
                 evaluation_plugin.pid,
             )
@@ -328,7 +402,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
             run_plugin_sig.freeze()
             plugin_task_ids.append(str(run_plugin_sig.id))
 
-            post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
+            post_measurements_sig = post_measurements.s(
+                evaluation_pid, evaluation_plugin.pid
+            )
             plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
 
         package_chains.append(chain(install_sig, group(plugin_chain_list)))
@@ -346,11 +422,17 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 
 
 @celery_app.task(bind=True)
-def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
-               input_components: list[dict], project_settings: list[dict],
-               evaluation_pid: uuid.UUID,
-               evaluation_plugin_pid: uuid.UUID) -> list[dict]:
-
+def run_plugin(
+    self,
+    package_name: str,
+    plugin_name: str,
+    version: str,
+    plugin_config: dict,
+    input_components: list[dict],
+    project_settings: list[dict],
+    evaluation_pid: uuid.UUID,
+    evaluation_plugin_pid: uuid.UUID,
+) -> list[dict]:
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
         plugin_loader.list_packages()
@@ -359,8 +441,14 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
     try:
         eval_data = get_evaluation_request(evaluation_pid)
         if eval_data.get("status") == "Failed":
-            logger.info(f"Evaluation {evaluation_pid} already failed — skipping plugin {plugin_name}")
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, "Aborted: evaluation already failed")
+            logger.info(
+                f"Evaluation {evaluation_pid} already failed — skipping plugin {plugin_name}"
+            )
+            mark_plugin_failed(
+                evaluation_pid,
+                evaluation_plugin_pid,
+                "Aborted: evaluation already failed",
+            )
             return []
     except Exception:
         pass
@@ -386,7 +474,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         # the backend could not load the plugin to say whether its model file is the local target:
         # running anyway could store a local run as if it were an AI card run
         if any(component.get("local_model_unknown") for component in input_components):
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, LOCAL_MODEL_UNKNOWN)
+            mark_plugin_failed(
+                evaluation_pid, evaluation_plugin_pid, LOCAL_MODEL_UNKNOWN
+            )
             raise RuntimeError(LOCAL_MODEL_UNKNOWN)
 
         input_mapping = {}
@@ -402,25 +492,30 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 file_content = get_model_file_content(component["data"])
                 relative_path = component["data"]
                 if component.get("local_model"):
-                    local_model = {"input": component.get("pid"), "marker": local_model_marker(component, file_content)}
+                    local_model = {
+                        "input": component.get("pid"),
+                        "marker": local_model_marker(component, file_content),
+                    }
             elif component_type in {"datashape", "llm", "resource"}:
                 payload = dict(component.get("json_value") or {})
                 if component_type == "llm":
                     run_model = (component.get("value") or {}).get("model")
                     if run_model:
                         payload["model"] = run_model
-                    if component.get("secret_key") and component.get("secret_encrypted_value"):
-                        llm_secret_settings.append({
-                            "category": "secrets",
-                            "key": component["secret_key"],
-                            "encrypted_value": component["secret_encrypted_value"],
-                        })
+                    if component.get("secret_key") and component.get(
+                        "secret_encrypted_value"
+                    ):
+                        llm_secret_settings.append(
+                            {
+                                "category": "secrets",
+                                "key": component["secret_key"],
+                                "encrypted_value": component["secret_encrypted_value"],
+                            }
+                        )
                 file_content = json.dumps(payload).encode("utf-8")
                 relative_path = f"{name}.json"
             else:
-                raise ValueError(
-                    f"Unsupported component type: {component_type}"
-                )
+                raise ValueError(f"Unsupported component type: {component_type}")
 
             (input_dir / relative_path).write_bytes(file_content)
             input_mapping[name] = relative_path
@@ -433,7 +528,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 raise ValueError(BOTH_KINDS)
             (input_dir / "target.json").write_text(json.dumps(local_model["marker"]))
             try:
-                store_input_value(evaluation_pid, local_model["input"], local_model["marker"])
+                store_input_value(
+                    evaluation_pid, local_model["input"], local_model["marker"]
+                )
             except Exception as exc:
                 # the person reads this: the answer's status, never the backend's address
                 status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -455,8 +552,13 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         installer = plugin_process.install_user()
         if plugin_info["source"] == "local":
-            install_target = str(plugin_process.stage_local_source(
-                plugin_info["pkg_root"].resolve(), workspace_path / "source", installer))
+            install_target = str(
+                plugin_process.stage_local_source(
+                    plugin_info["pkg_root"].resolve(),
+                    workspace_path / "source",
+                    installer,
+                )
+            )
         else:
             install_target = f"{package_name}=={version}"
 
@@ -467,8 +569,16 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         logger.debug(f"Creating isolated venv at {venv_dir}")
         plugin_process.prepare_install_folder(venv_dir, installer)
         venv_result = plugin_process.run_install(
-            ["uv", "venv", str(venv_dir), "--allow-existing", "--python", "/usr/local/bin/python"],
-            installer, timeout=1000,
+            [
+                "uv",
+                "venv",
+                str(venv_dir),
+                "--allow-existing",
+                "--python",
+                "/usr/local/bin/python",
+            ],
+            installer,
+            timeout=1000,
         )
         if venv_result.returncode != 0:
             failure = scrub_text(venv_result.stderr or "")
@@ -488,7 +598,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         if extra_url:
             install_cmd.extend(["--extra-index-url", extra_url])
         install_cmd.append(install_target)
-        install_result = plugin_process.run_install(install_cmd, installer, timeout=1000)
+        install_result = plugin_process.run_install(
+            install_cmd, installer, timeout=1000
+        )
         if install_result.returncode != 0:
             failure = scrub_text(install_result.stderr or "")
             mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, failure)
@@ -501,7 +613,9 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             try:
                 minted = run_pass.mint(refs, str(evaluation_plugin_pid))
             except run_pass.RunPassRefused as exc:
-                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc)))
+                mark_plugin_failed(
+                    evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc))
+                )
                 raise run_pass.RunPassRefused(scrub_text(str(exc))) from None
 
         # Step 3: Run plugin script with the isolated venv's Python
@@ -517,15 +631,20 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         # the values this run hands its plugin, removed from every text the worker reports of it
         known: list[str] = []
         try:
-            secret_env = build_secret_environment(project_settings + llm_secret_settings)
+            secret_env = build_secret_environment(
+                project_settings + llm_secret_settings
+            )
             known = known_secrets(secret_env, os.environ, plugin_config, minted)
             user = plugin_process.plugin_user()
             plugin_process.prepare_workspace(workspace_path, output_dir, user)
             with open(stderr_path, "w+") as stderr_file:
                 child_env = plugin_environment(os.environ, secret_env, minted)
                 process = plugin_process.start(
-                    [str(venv_python), str(runtime_script)], workspace_path, stderr_file,
-                    child_env, user,
+                    [str(venv_python), str(runtime_script)],
+                    workspace_path,
+                    stderr_file,
+                    child_env,
+                    user,
                 )
 
                 if (stdout := process.stdout) is not None:
@@ -533,12 +652,19 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                         stdout_lines.append(line)
                         stripped_line = line.strip()
 
-                        if stripped_line.startswith("{") and stripped_line.endswith("}"):
+                        if stripped_line.startswith("{") and stripped_line.endswith(
+                            "}"
+                        ):
                             try:
                                 progress_data = json.loads(stripped_line)
                                 task_progress = TaskProgress(**progress_data)
 
-                                progress_callback(task_progress, plugin_name, str(self.request.id), known)
+                                progress_callback(
+                                    task_progress,
+                                    plugin_name,
+                                    str(self.request.id),
+                                    known,
+                                )
                             except Exception:
                                 pass
 
@@ -552,13 +678,21 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             stdout_content = "".join(stdout_lines)
 
             log_stdout_content = (
-                "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
-                "====== Step 2: Plugin Install ======\n" + (install_result.stdout or "") + "\n\n"
+                "====== Step 1: Venv Creation ======\n"
+                + (venv_result.stdout or "")
+                + "\n\n"
+                "====== Step 2: Plugin Install ======\n"
+                + (install_result.stdout or "")
+                + "\n\n"
                 "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
             )
             log_stderr_content = (
-                "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
-                "====== Step 2: Plugin Install ======\n" + (install_result.stderr or "") + "\n\n"
+                "====== Step 1: Venv Creation ======\n"
+                + (venv_result.stderr or "")
+                + "\n\n"
+                "====== Step 2: Plugin Install ======\n"
+                + (install_result.stderr or "")
+                + "\n\n"
                 "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
             )
 
@@ -571,9 +705,14 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
             if returncode != 0:
                 _fail_plugin_and_revoke(
-                    evaluation_pid, evaluation_plugin_pid, scrub_text(stderr_content, known), str(self.request.id)
+                    evaluation_pid,
+                    evaluation_plugin_pid,
+                    scrub_text(stderr_content, known),
+                    str(self.request.id),
                 )
-                raise RuntimeError(f"Plugin failed: {scrub_text(log_stderr_content, known)}")
+                raise RuntimeError(
+                    f"Plugin failed: {scrub_text(log_stderr_content, known)}"
+                )
 
             outputs = plugin_process.read_outputs(output_dir, user)
             measures = json.loads(outputs.pop("measures.json", b"[]"))
@@ -589,8 +728,10 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         except Exception as exc:
             _terminate_process(process)
             _fail_plugin_and_revoke(
-                evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc), known) or exc.__class__.__name__,
-                str(self.request.id)
+                evaluation_pid,
+                evaluation_plugin_pid,
+                scrub_text(str(exc), known) or exc.__class__.__name__,
+                str(self.request.id),
             )
             clean = _scrubbed_error(exc, known)
             if clean is exc:
@@ -602,7 +743,11 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
 
 @celery_app.task
-def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
+def post_measurements(
+    measurements_dict: list[dict],
+    evaluation_pid: uuid.UUID,
+    evaluation_plugin_uuid: uuid.UUID,
+):
     # run_plugin returns the measures without the values it handed the plugin; key shapes are scrubbed here
     try:
         measurements = [Measure(**m) for m in measurements_dict]
@@ -623,7 +768,9 @@ def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
         plugin_status = get_evaluation_plugins_status(evaluation_id)
 
         if plugin_status.get("has_failed_plugins", False):
-            logger.info(f"Evaluation {evaluation_id} has failed plugins, marking as failed")
+            logger.info(
+                f"Evaluation {evaluation_id} has failed plugins, marking as failed"
+            )
             mark_failed(evaluation_id)
         else:
             response = mark_completed(evaluation_id)
@@ -637,21 +784,27 @@ def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
 
 @celery_app.task
 def handle_error(
-        evaluation_id: uuid.UUID,
-        request: object,
-        exc: BaseException,
-        traceback: object,
+    evaluation_id: uuid.UUID,
+    request: object,
+    exc: BaseException,
+    traceback: object,
 ) -> None:
     # never the request (it holds the plugin configuration) nor the raw failure: its type and scrubbed text
     known = known_secrets({}, {}, _request_config(request), None)
-    logger.error(f"Error in evaluation {evaluation_id}: {type(exc).__name__}: {scrub_text(str(exc), known)}")
+    logger.error(
+        f"Error in evaluation {evaluation_id}: {type(exc).__name__}: {scrub_text(str(exc), known)}"
+    )
     mark_failed(evaluation_id)
     logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
 
 
 def _request_config(request: object):
     """The plugin configuration among a task request's arguments (run_plugin's fourth), if one is there."""
-    args = request.get("args") if isinstance(request, dict) else getattr(request, "args", None)
+    args = (
+        request.get("args")
+        if isinstance(request, dict)
+        else getattr(request, "args", None)
+    )
     if isinstance(args, (list, tuple)):
         return [arg for arg in args if isinstance(arg, dict)]
     return None

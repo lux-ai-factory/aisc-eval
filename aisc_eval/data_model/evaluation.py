@@ -4,9 +4,11 @@ from pydantic import BaseModel
 
 from aisc_eval.data_model.project import Plugin
 
+
 class Project(BaseModel):
     pid: uuid.UUID
     name: str
+
 
 class Evaluation(BaseModel):
     pid: uuid.UUID

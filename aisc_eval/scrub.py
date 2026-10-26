@@ -7,6 +7,7 @@ shaped like a known kind of key, then the key-like value of a `password=...` sty
 Stdlib only. The engine's backend (aisc_backend/config_secrets.py) carries the same text rule, and a root test
 keeps the two equal.
 """
+
 from __future__ import annotations
 
 import re
@@ -18,7 +19,9 @@ REDACTED = "[redacted]"
 MIN_KNOWN_LENGTH = 8
 
 #: A key holding one of these words is a secret in a ledger copy (`Authorization` and `Cookie` as header fields).
-LEDGER_SECRET_NAME = re.compile(r"key|token|secret|password|credential|authorization|cookie", re.IGNORECASE)
+LEDGER_SECRET_NAME = re.compile(
+    r"key|token|secret|password|credential|authorization|cookie", re.IGNORECASE
+)
 #: A value that looks like a credential after `Bearer`, `Basic`, `Token` or a bare `token=`: 16 characters or more
 #: of the base64, hex and URL-safe alphabets, no space (`the bearer of bad news`, `token=EOF` are not secrets).
 CREDENTIAL = r"[A-Za-z0-9+/=_.~-]{16,}"
@@ -28,17 +31,18 @@ CREDENTIAL = r"[A-Za-z0-9+/=_.~-]{16,}"
 #: base64-encoded key (other than a Basic value), a key split across lines, a key with no known prefix outside an
 #: assignment.
 SECRET_SHAPE = re.compile(
-    r"(?i)\bbearer\s+" + CREDENTIAL +
-    r"|\bsk-[A-Za-z0-9_-]{16,}"
+    r"(?i)\bbearer\s+" + CREDENTIAL + r"|\bsk-[A-Za-z0-9_-]{16,}"
     r"|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*"
     r"|\bhf_[A-Za-z0-9]{20,}"
     r"|\bgh[pousr]_[A-Za-z0-9]{20,}"
     r"|\bAKIA[0-9A-Z]{16}\b"
     r"|\bxox[abpr]-[A-Za-z0-9-]{10,}"
     r"|\bAIza[0-9A-Za-z_-]{35}"
-    r"|(\bauthorization\s*:\s*)?\b(?:basic|token)\s+" + CREDENTIAL +
-    r"|(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"
-    r"|-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----")
+    r"|(\bauthorization\s*:\s*)?\b(?:basic|token)\s+"
+    + CREDENTIAL
+    + r"|(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"
+    r"|-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+)
 #: `password=...`, `api_key: "..."`, `api_key%3D...` and the like in text. Group 1 is the name, which may carry
 #: any prefix ending in `_` or at a lower-to-upper case step (`judge_api_key`, `DB_PASSWORD`, `judgeApiKey`), but
 #: nothing after it (`api_key_env=`, `password_min_length=` are not secrets); group 3 is the value, up to the next
@@ -53,7 +57,8 @@ SECRET_ASSIGNMENT = re.compile(
     r"|(?:aws[_-]?)?secret[_-]?access[_-]?key|client[_-]?secret|password|passwd"
     r"|(?:token|pwd)(?=[\"']?\s*(?:=|%3d))))"
     r"([\"']?\s*(?:[=:]|%3d)\s*[\"']?)"
-    r"((?!\[redacted\])(?:(?<=\")[^\"\s]+(?=\")|(?<=')[^'\s]+(?=')|[^\s\"',;]+))")
+    r"((?!\[redacted\])(?:(?<=\")[^\"\s]+(?=\")|(?<=')[^'\s]+(?=')|[^\s\"',;]+))"
+)
 
 #: The worker's own keys a plugin is handed.
 WORKER_KEY_NAMES = ("AISC_TARGET_API_KEY", "API_KEY_OPENAI", "OPENAI_API_KEY")
@@ -83,22 +88,35 @@ def _strings(value, out: list[str]) -> None:
             _strings(item, out)
 
 
-def known_secrets(secret_env: Mapping[str, str], worker_env: Mapping[str, str], plugin_config,
-                  run_pass: str | None) -> list[str]:
+def known_secrets(
+    secret_env: Mapping[str, str],
+    worker_env: Mapping[str, str],
+    plugin_config,
+    run_pass: str | None,
+) -> list[str]:
     """The secret values a run hands its plugin, 8 characters or more, longest first."""
-    from aisc_eval.celery_tasks import OPENAI_PLACEHOLDER  # the worker's module; imported late, it imports this
+    from aisc_eval.celery_tasks import (
+        OPENAI_PLACEHOLDER,
+    )  # the worker's module; imported late, it imports this
 
     values = list(secret_env.values())
     if run_pass:
         values.append(run_pass)
-    values.extend(worker_env[name] for name in WORKER_KEY_NAMES
-                  if worker_env.get(name) and worker_env[name] != OPENAI_PLACEHOLDER)
+    values.extend(
+        worker_env[name]
+        for name in WORKER_KEY_NAMES
+        if worker_env.get(name) and worker_env[name] != OPENAI_PLACEHOLDER
+    )
     _named_values(plugin_config, values)
     return _ordered_known(values)
 
 
 def _ordered_known(known: Iterable[str]) -> list[str]:
-    values = {value for value in known if isinstance(value, str) and len(value) >= MIN_KNOWN_LENGTH}
+    values = {
+        value
+        for value in known
+        if isinstance(value, str) and len(value) >= MIN_KNOWN_LENGTH
+    }
     return sorted(values, key=lambda value: (-len(value), value))
 
 

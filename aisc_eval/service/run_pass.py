@@ -44,7 +44,9 @@ def mint(refs: list[str], evaluation_plugin_uuid: str) -> str:
     base = _platform_url()
     token = os.environ.get("PLATFORM_CONNECTIONS_TOKEN") or ""
     if not base or not token:
-        raise RunPassRefused("no run pass: PLATFORM_URL and PLATFORM_CONNECTIONS_TOKEN must be set on the worker")
+        raise RunPassRefused(
+            "no run pass: PLATFORM_URL and PLATFORM_CONNECTIONS_TOKEN must be set on the worker"
+        )
     try:
         resp = requests.post(
             f"{base}/internal/run-passes",
@@ -54,9 +56,13 @@ def mint(refs: list[str], evaluation_plugin_uuid: str) -> str:
             allow_redirects=False,
         )
     except requests.RequestException as exc:
-        raise RunPassRefused(f"no run pass: the platform could not be reached ({exc.__class__.__name__})") from None
+        raise RunPassRefused(
+            f"no run pass: the platform could not be reached ({exc.__class__.__name__})"
+        ) from None
     if resp.status_code != 201:
-        raise RunPassRefused(f"no run pass: the platform refused it ({resp.status_code}): {resp.text[:500]}")
+        raise RunPassRefused(
+            f"no run pass: the platform refused it ({resp.status_code}): {resp.text[:500]}"
+        )
     try:
         run_pass = (resp.json() or {}).get("pass")
     except (ValueError, AttributeError):
@@ -76,6 +82,10 @@ def revoke(run_pass: str) -> None:
             allow_redirects=False,
         )
         if not 200 <= resp.status_code < 300:
-            logger.warning(f"The platform did not revoke a run pass ({resp.status_code}); it expires on its own")
+            logger.warning(
+                f"The platform did not revoke a run pass ({resp.status_code}); it expires on its own"
+            )
     except requests.RequestException as exc:
-        logger.warning(f"Could not revoke a run pass ({exc.__class__.__name__}); it expires on its own")
+        logger.warning(
+            f"Could not revoke a run pass ({exc.__class__.__name__}); it expires on its own"
+        )

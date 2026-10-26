@@ -29,11 +29,13 @@ def headers(run: dict[str, str] | None = None) -> dict[str, str | None]:
     if run is None:
         run = run_context.current()
     if run is not None:
-        found.update({
-            "X-AISC-Project": str(run["project"]),
-            "X-AISC-Run": str(run["ticket"]),
-            "X-AISC-Evaluation": str(run["evaluation"]),
-        })
+        found.update(
+            {
+                "X-AISC-Project": str(run["project"]),
+                "X-AISC-Run": str(run["ticket"]),
+                "X-AISC-Evaluation": str(run["evaluation"]),
+            }
+        )
     return found
 
 
@@ -55,13 +57,18 @@ class EvaluationStatusUpdateDTO(BaseModel):
 
 def get_evaluation_plugins_status(evaluation_pid: uuid.UUID) -> dict:
     """Get plugin status information for an evaluation."""
-    resp = requests.get(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/status", headers=headers())
+    resp = requests.get(
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/status",
+        headers=headers(),
+    )
     resp.raise_for_status()
     return resp.json()
 
 
 def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
-    return requests.put(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done", headers=headers())
+    return requests.put(
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done", headers=headers()
+    )
 
 
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
@@ -69,11 +76,11 @@ def mark_failed(evaluation_pid: uuid.UUID) -> None:
     requests.put(
         f"{API_URL_PREFIX}/evaluations/{evaluation_pid}",
         json=payload,
-        headers=headers()
+        headers=headers(),
     )
     resp = requests.put(
         f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed",
-        headers=headers()
+        headers=headers(),
     )
     if not resp.ok:
         logger.warning(
@@ -86,45 +93,60 @@ def mark_plugin_failed(
 ) -> None:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/fail"
     # a last guard for any caller: key shapes and secret assignments never leave the worker
-    resp = requests.patch(url, json={"error_message": scrub_text(error_message)}, headers=headers())
-    if not resp.ok:
-        logger.warning(f"Failed to mark plugin {evaluation_plugin_pid} as failed: {resp.text}")
-
-
-def mark_plugin_started(evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> None:
-    url = (
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
+    resp = requests.patch(
+        url, json={"error_message": scrub_text(error_message)}, headers=headers()
     )
+    if not resp.ok:
+        logger.warning(
+            f"Failed to mark plugin {evaluation_plugin_pid} as failed: {resp.text}"
+        )
+
+
+def mark_plugin_started(
+    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID
+) -> None:
+    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
     resp = requests.patch(url, json={"field": "started_at"}, headers=headers())
     if not resp.ok:
-        logger.warning(f"Failed to mark plugin {evaluation_plugin_pid} as started: {resp.text}")
+        logger.warning(
+            f"Failed to mark plugin {evaluation_plugin_pid} as started: {resp.text}"
+        )
 
 
-def mark_plugin_finished(evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID) -> None:
-    url = (
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
-    )
+def mark_plugin_finished(
+    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID
+) -> None:
+    url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
     resp = requests.patch(url, json={"field": "finished_at"}, headers=headers())
     if not resp.ok:
-        logger.warning(f"Failed to mark plugin {evaluation_plugin_pid} as finished: {resp.text}")
+        logger.warning(
+            f"Failed to mark plugin {evaluation_plugin_pid} as finished: {resp.text}"
+        )
 
 
 def get_dataset_file_content(file_name: str) -> bytes:
-    resp = requests.get(f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True, headers=headers())
+    resp = requests.get(
+        f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True, headers=headers()
+    )
     resp.raise_for_status()
 
     return resp.content
 
 
 def get_model_file_content(file_name: str) -> bytes:
-    resp = requests.get(f"{API_URL_PREFIX}/files/model/{file_name}", stream=True, headers=headers())
+    resp = requests.get(
+        f"{API_URL_PREFIX}/files/model/{file_name}", stream=True, headers=headers()
+    )
     resp.raise_for_status()
 
     return resp.content
 
 
 def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
-    resp = requests.get(f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,plugin", headers=headers())
+    resp = requests.get(
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,plugin",
+        headers=headers(),
+    )
     resp.raise_for_status()
     return resp.json()
 
@@ -137,11 +159,14 @@ def get_evaluation_inputs(evaluation_pid: uuid.UUID) -> dict[str, Any]:
     return resp.json()
 
 
-def store_input_value(evaluation_pid: uuid.UUID, input_pid: uuid.UUID, value: dict[str, Any]) -> None:
+def store_input_value(
+    evaluation_pid: uuid.UUID, input_pid: uuid.UUID, value: dict[str, Any]
+) -> None:
     """Store what the run was on (a local model file's name and hash) on one of its inputs."""
     resp = requests.patch(
         f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs/{input_pid}/value",
-        json={"value": value}, headers=headers(),
+        json={"value": value},
+        headers=headers(),
     )
     resp.raise_for_status()
 
@@ -171,9 +196,9 @@ def fit_measure(measure: dict[str, Any]) -> dict[str, Any]:
         if len(text) > MEASURE_TEXT_MAX:
             if field == "name":
                 tag = "…[" + hashlib.sha256(text.encode()).hexdigest()[:8] + "]"
-                out[field] = text[:MEASURE_TEXT_MAX - len(tag)].rstrip() + tag
+                out[field] = text[: MEASURE_TEXT_MAX - len(tag)].rstrip() + tag
             else:
-                out[field] = text[:MEASURE_TEXT_MAX - 1].rstrip() + "…"
+                out[field] = text[: MEASURE_TEXT_MAX - 1].rstrip() + "…"
             logger.warning(
                 f"measure {field} cut from {len(text)} to {MEASURE_TEXT_MAX} characters: {text[:80]!r}…"
             )
@@ -187,7 +212,11 @@ def post_measures(
         f"post_metrics called with {len(metrics)} metrics for evaluation {evaluation_pid}"
     )
 
-    payload = {str(evaluation_plugin_uuid): [fit_measure(m.model_dump(mode="json")) for m in metrics]}
+    payload = {
+        str(evaluation_plugin_uuid): [
+            fit_measure(m.model_dump(mode="json")) for m in metrics
+        ]
+    }
     logger.debug(f"Payload prepared, size: {len(payload)}")
 
     url = f"{API_URL_PREFIX}/evaluations/{str(evaluation_pid)}/measures"
@@ -207,12 +236,15 @@ def post_measures(
 
 
 def upload_artifact(
-    evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID, name: str, content: bytes
+    evaluation_pid: uuid.UUID,
+    evaluation_plugin_uuid: uuid.UUID,
+    name: str,
+    content: bytes,
 ) -> requests.Response:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/artifacts"
 
-    files = {'file': (name, content)}
-    data = {'evaluation_plugin_uuid': str(evaluation_plugin_uuid)}
+    files = {"file": (name, content)}
+    data = {"evaluation_plugin_uuid": str(evaluation_plugin_uuid)}
     response = requests.post(url, files=files, data=data, headers=headers())
 
     return response

@@ -51,7 +51,9 @@ def test_a_root_worker_without_the_plugin_user_refuses_to_run_the_plugin(monkeyp
 
 def test_the_plugin_user_is_never_root(monkeypatch):
     monkeypatch.setattr(plugin_process.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(plugin_process.pwd, "getpwnam", lambda name: _Entry(0, gid=0, home="/root"))
+    monkeypatch.setattr(
+        plugin_process.pwd, "getpwnam", lambda name: _Entry(0, gid=0, home="/root")
+    )
     with pytest.raises(RuntimeError):
         plugin_process.plugin_user("root")
 
@@ -59,15 +61,21 @@ def test_the_plugin_user_is_never_root(monkeypatch):
 def test_a_worker_that_is_not_root_runs_plugins_as_itself(monkeypatch):
     monkeypatch.setattr(plugin_process.os, "geteuid", lambda: 1000)
     monkeypatch.setattr(plugin_process.os, "getegid", lambda: 1000)
-    assert plugin_process.plugin_user("aisc-plugin") == PluginUser(1000, 1000, None, switch=False)
+    assert plugin_process.plugin_user("aisc-plugin") == PluginUser(
+        1000, 1000, None, switch=False
+    )
 
 
 def test_the_plugin_starts_as_its_user_with_no_groups_a_private_umask_and_its_own_home(
     monkeypatch, tmp_path
 ):
     calls = _captured_popen(monkeypatch)
-    worker_env = {"PATH": "/usr/bin", "HOME": "/root", "DJANGO_SECRET_KEY": "django",
-                  "INTERNAL_API_KEY": "internal"}
+    worker_env = {
+        "PATH": "/usr/bin",
+        "HOME": "/root",
+        "DJANGO_SECRET_KEY": "django",
+        "INTERNAL_API_KEY": "internal",
+    }
     plugin_env = celery_tasks.plugin_environment(worker_env, {})
     with open(tmp_path / "stderr.tmp", "w") as stderr:
         plugin_process.start(["python", "run.py"], tmp_path, stderr, plugin_env, PLUGIN)
@@ -86,7 +94,9 @@ def test_the_plugin_starts_as_its_user_with_no_groups_a_private_umask_and_its_ow
     assert "INTERNAL_API_KEY" not in kwargs["env"]
 
 
-def test_a_worker_that_is_not_root_starts_the_plugin_without_switching(monkeypatch, tmp_path):
+def test_a_worker_that_is_not_root_starts_the_plugin_without_switching(
+    monkeypatch, tmp_path
+):
     calls = _captured_popen(monkeypatch)
     me = PluginUser(1000, 1000, None, switch=False)
     with open(tmp_path / "stderr.tmp", "w") as stderr:
@@ -104,7 +114,11 @@ def test_the_run_folder_and_output_stay_roots_and_are_shared_with_the_plugin_gro
     monkeypatch, tmp_path
 ):
     chowns = []
-    monkeypatch.setattr(plugin_process.os, "chown", lambda path, uid, gid: chowns.append((path, uid, gid)))
+    monkeypatch.setattr(
+        plugin_process.os,
+        "chown",
+        lambda path, uid, gid: chowns.append((path, uid, gid)),
+    )
     output = tmp_path / "output"
     output.mkdir()
     plugin_process.prepare_workspace(tmp_path, output, PLUGIN)
@@ -119,7 +133,9 @@ def test_the_run_folder_and_output_stay_roots_and_are_shared_with_the_plugin_gro
 def test_the_runtime_script_is_copied_into_the_run_folder(tmp_path):
     script = plugin_process.copy_runtime(tmp_path)
     assert script.parent == tmp_path / "runtime"
-    assert script.read_bytes() == Path(plugin_process.plugin_runtime.__file__).read_bytes()
+    assert (
+        script.read_bytes() == Path(plugin_process.plugin_runtime.__file__).read_bytes()
+    )
 
 
 def _me():
@@ -130,7 +146,8 @@ def test_the_plugins_regular_files_are_read(tmp_path):
     (tmp_path / "measures.json").write_text("[]")
     (tmp_path / "report.pdf").write_bytes(b"pdf")
     assert plugin_process.read_outputs(tmp_path, _me()) == {
-        "measures.json": b"[]", "report.pdf": b"pdf"
+        "measures.json": b"[]",
+        "report.pdf": b"pdf",
     }
 
 
@@ -196,18 +213,26 @@ def worker(monkeypatch):
     """run_plugin with the backend, the installs and the plugin process faked."""
     seen = {"uploads": {}, "failed": [], "popen": []}
     monkeypatch.setattr(celery_tasks, "plugin_loader", _Loader())
-    monkeypatch.setattr(celery_tasks, "get_evaluation_request", lambda pid: {"status": "Running"})
+    monkeypatch.setattr(
+        celery_tasks, "get_evaluation_request", lambda pid: {"status": "Running"}
+    )
     monkeypatch.setattr(celery_tasks.subprocess, "run", lambda *a, **kw: _Ok())
     monkeypatch.setattr(celery_tasks, "mark_plugin_started", lambda *a: None)
     monkeypatch.setattr(celery_tasks, "mark_plugin_finished", lambda *a: None)
-    monkeypatch.setattr(celery_tasks, "mark_plugin_failed", lambda *a: seen["failed"].append(a))
+    monkeypatch.setattr(
+        celery_tasks, "mark_plugin_failed", lambda *a: seen["failed"].append(a)
+    )
     monkeypatch.setattr(celery_tasks, "_revoke_sibling_tasks", lambda *a: None)
     monkeypatch.setattr(
-        celery_tasks, "upload_artifact",
-        lambda evaluation, plugin, name, content: seen["uploads"].__setitem__(name, content),
+        celery_tasks,
+        "upload_artifact",
+        lambda evaluation, plugin, name, content: seen["uploads"].__setitem__(
+            name, content
+        ),
     )
     monkeypatch.setattr(
-        plugin_process, "plugin_user",
+        plugin_process,
+        "plugin_user",
         lambda: PluginUser(os.getuid(), os.getgid(), "/home/aisc-plugin", switch=True),
     )
     seen["leave"] = lambda output: (output / "measures.json").write_text("[]")
@@ -272,7 +297,12 @@ class _Answer:
 @pytest.fixture
 def platform(monkeypatch):
     """The platform's run-pass routes, faked; records every call."""
-    seen = {"calls": [], "mint": _Answer(201, {"pass": "the-pass", "expires_at": "2026-10-19T12:00:00Z"})}
+    seen = {
+        "calls": [],
+        "mint": _Answer(
+            201, {"pass": "the-pass", "expires_at": "2026-10-19T12:00:00Z"}
+        ),
+    }
     monkeypatch.setenv("PLATFORM_URL", "http://platform:8000")
     monkeypatch.setenv("PLATFORM_CONNECTIONS_TOKEN", "stack-token")
 
@@ -293,7 +323,9 @@ TARGET = "target:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/system"
 
 
 def _run_with(inputs):
-    return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep")
+    return celery_tasks.run_plugin.run(
+        "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep"
+    )
 
 
 def _resource(name, value):
@@ -308,7 +340,12 @@ def test_the_plugin_never_gets_the_stack_connections_token(worker, platform):
 
 
 def test_a_run_with_a_target_mints_a_pass_for_exactly_that_ref(worker, platform):
-    _run_with([_resource("target", TARGET), {"component_type": "datashape", "name": "shape", "json_value": {}}])
+    _run_with(
+        [
+            _resource("target", TARGET),
+            {"component_type": "datashape", "name": "shape", "json_value": {}},
+        ]
+    )
     method, url, headers, body = platform["calls"][0]
     assert (method, url) == ("POST", "http://platform:8000/internal/run-passes")
     assert headers["X-AISC-Service-Token"] == "stack-token"
@@ -318,8 +355,12 @@ def test_a_run_with_a_target_mints_a_pass_for_exactly_that_ref(worker, platform)
 
 
 def test_a_connection_input_is_a_ref_too(worker, platform):
-    _run_with([_resource("system", "connection:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/chatbot")])
-    assert platform["calls"][0][3]["refs"] == ["connection:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/chatbot"]
+    _run_with(
+        [_resource("system", "connection:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/chatbot")]
+    )
+    assert platform["calls"][0][3]["refs"] == [
+        "connection:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/chatbot"
+    ]
 
 
 def test_a_run_without_target_or_connection_inputs_mints_nothing(worker, platform):
@@ -347,7 +388,11 @@ def test_the_pass_is_revoked_after_the_run(worker, platform):
 
 
 def test_the_pass_is_revoked_also_when_the_plugin_fails(worker, platform, monkeypatch):
-    monkeypatch.setattr(plugin_process.subprocess, "Popen", lambda argv, **kwargs: _Process(returncode=1))
+    monkeypatch.setattr(
+        plugin_process.subprocess,
+        "Popen",
+        lambda argv, **kwargs: _Process(returncode=1),
+    )
     with pytest.raises(RuntimeError, match="Plugin failed"):
         _run_with([_resource("target", TARGET)])
     assert platform["calls"][-1][0] == "DELETE"

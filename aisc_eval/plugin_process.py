@@ -67,11 +67,15 @@ def install_user(name: str = env.PLUGIN_INSTALL_USER) -> PluginUser:
     """Who installs plugins: neither root nor the plugin user."""
     user = _user(name, "install")
     if user.switch and user.uid == plugin_user().uid:
-        raise RuntimeError(f"install user {name} is the plugin user: a plugin could change the install cache")
+        raise RuntimeError(
+            f"install user {name} is the plugin user: a plugin could change the install cache"
+        )
     return user
 
 
-def run_install(argv: list[str], user: PluginUser, timeout: int) -> subprocess.CompletedProcess[str]:
+def run_install(
+    argv: list[str], user: PluginUser, timeout: int
+) -> subprocess.CompletedProcess[str]:
     """One step of an install (uv venv, uv pip install) as the install user, in an environment of its own:
     the image's tools, its home and its own uv cache, started in its home. uv would otherwise read the
     configuration of the folder it starts in, the worker's /app, which only root may read."""
@@ -79,7 +83,12 @@ def run_install(argv: list[str], user: PluginUser, timeout: int) -> subprocess.C
     return subprocess.run(
         argv,
         cwd=home,
-        env={"PATH": INSTALL_PATH, "HOME": home, "UV_CACHE_DIR": f"{home}/.cache/uv", "UV_NO_CONFIG": "1"},
+        env={
+            "PATH": INSTALL_PATH,
+            "HOME": home,
+            "UV_CACHE_DIR": f"{home}/.cache/uv",
+            "UV_NO_CONFIG": "1",
+        },
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -130,7 +139,10 @@ def copy_runtime(workspace: Path) -> Path:
 
 
 def start(
-    argv: list[str], workspace: Path, stderr: IO[str], plugin_env: dict[str, str],
+    argv: list[str],
+    workspace: Path,
+    stderr: IO[str],
+    plugin_env: dict[str, str],
     user: PluginUser,
 ) -> subprocess.Popen[str]:
     """Start the plugin; its stdout is the worker's to read for progress lines."""
@@ -164,13 +176,23 @@ def read_outputs(output_dir: Path, user: PluginUser) -> dict[str, bytes]:
         for name in sorted(os.listdir(folder)):
             try:
                 # O_NONBLOCK: opening a FIFO would otherwise hold the worker until someone writes
-                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
+                fd = os.open(
+                    name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder
+                )
             except OSError as exc:
-                raise RuntimeError(f"Plugin output {name} is not a regular file of the plugin's") from exc
+                raise RuntimeError(
+                    f"Plugin output {name} is not a regular file of the plugin's"
+                ) from exc
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != user.uid or info.st_nlink != 1:
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != user.uid
+                or info.st_nlink != 1
+            ):
                 os.close(fd)
-                raise RuntimeError(f"Plugin output {name} is not a regular file of the plugin's")
+                raise RuntimeError(
+                    f"Plugin output {name} is not a regular file of the plugin's"
+                )
             with os.fdopen(fd, "rb") as file:
                 outputs[name] = file.read()
     finally:

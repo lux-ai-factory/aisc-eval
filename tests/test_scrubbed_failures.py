@@ -14,7 +14,9 @@ from test_plugin_process import _Process, worker  # noqa: F401  (the fixture)
 
 JUDGE = "judge-secret-value-1"
 SHAPED = "sk-proj-abcdefghijklmnopqrstu"
-SECRET_SETTING = [{"category": "secrets", "key": "judge_key", "encrypted_value": "ciphertext"}]
+SECRET_SETTING = [
+    {"category": "secrets", "key": "judge_key", "encrypted_value": "ciphertext"}
+]
 
 
 def scrub():
@@ -24,11 +26,24 @@ def scrub():
 def test_the_known_secrets_are_the_values_the_run_handed_out_longest_first():
     known = scrub().known_secrets(
         {"AISC_SECRET_JUDGE_KEY": JUDGE},
-        {"OPENAI_API_KEY": "sk-worker-abcdefghijklmnop", "API_KEY_OPENAI": celery_tasks.OPENAI_PLACEHOLDER,
-         "PATH": "/usr/bin"},
-        {"api_key": "cfg-key-12345678", "temperature": "0.2", "nested": {"token": "short"}},
-        "run-pass-abcdef123456")
-    assert known == ["sk-worker-abcdefghijklmnop", "run-pass-abcdef123456", JUDGE, "cfg-key-12345678"]
+        {
+            "OPENAI_API_KEY": "sk-worker-abcdefghijklmnop",
+            "API_KEY_OPENAI": celery_tasks.OPENAI_PLACEHOLDER,
+            "PATH": "/usr/bin",
+        },
+        {
+            "api_key": "cfg-key-12345678",
+            "temperature": "0.2",
+            "nested": {"token": "short"},
+        },
+        "run-pass-abcdef123456",
+    )
+    assert known == [
+        "sk-worker-abcdefghijklmnop",
+        "run-pass-abcdef123456",
+        JUDGE,
+        "cfg-key-12345678",
+    ]
 
 
 @pytest.fixture
@@ -36,7 +51,9 @@ def with_secret(monkeypatch):
     monkeypatch.setattr(celery_tasks, "decrypt_value", lambda value: JUDGE)
 
 
-def _plugin(monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None, measures="[]"):
+def _plugin(
+    monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None, measures="[]"
+):
     def popen(argv, **kwargs):
         kwargs["stderr"].write(stderr)
         kwargs["stderr"].flush()
@@ -50,10 +67,14 @@ def _plugin(monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None, meas
 
 
 def _run(project_settings):
-    return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], project_settings, "eval", "ep")
+    return celery_tasks.run_plugin.run(
+        "pkg", "Plugin", "1.0", {}, [], project_settings, "eval", "ep"
+    )
 
 
-def test_a_failed_plugins_stderr_is_reported_without_its_secrets(worker, with_secret, monkeypatch):
+def test_a_failed_plugins_stderr_is_reported_without_its_secrets(
+    worker, with_secret, monkeypatch
+):
     _plugin(monkeypatch, stderr=f"auth failed for {JUDGE} and {SHAPED}\n", returncode=1)
     with pytest.raises(RuntimeError) as raised:
         _run(SECRET_SETTING)
@@ -66,8 +87,15 @@ def test_a_failed_plugins_stderr_is_reported_without_its_secrets(worker, with_se
         assert "[redacted]" in text
 
 
-def test_the_execution_log_keeps_no_secret_the_plugin_printed(worker, with_secret, monkeypatch):
-    _plugin(monkeypatch, stdout=[f"using {JUDGE}\n"], stderr=f"warning: {JUDGE}\n", returncode=0)
+def test_the_execution_log_keeps_no_secret_the_plugin_printed(
+    worker, with_secret, monkeypatch
+):
+    _plugin(
+        monkeypatch,
+        stdout=[f"using {JUDGE}\n"],
+        stderr=f"warning: {JUDGE}\n",
+        returncode=0,
+    )
     _run(SECRET_SETTING)
     log = worker["uploads"]["plugin_execution.log"]
     assert JUDGE.encode() not in log
@@ -83,17 +111,31 @@ class _Failed:
 
 
 def test_a_failed_venv_step_is_reported_with_its_password_redacted(worker, monkeypatch):
-    monkeypatch.setattr(plugin_process, "run_install", lambda *a, **kw: _Failed("error: password=hunter22 rejected"))
+    monkeypatch.setattr(
+        plugin_process,
+        "run_install",
+        lambda *a, **kw: _Failed("error: password=hunter22 rejected"),
+    )
     with pytest.raises(RuntimeError) as raised:
         _run([])
     assert worker["failed"] == [("eval", "ep", "error: password=[redacted] rejected")]
     assert "hunter22" not in str(raised.value)
 
 
-def test_a_failed_install_is_reported_and_logged_with_its_key_redacted(worker, monkeypatch, caplog):
-    monkeypatch.setattr(plugin_process, "install_user", lambda: plugin_process.PluginUser(0, 0, None, switch=False))
+def test_a_failed_install_is_reported_and_logged_with_its_key_redacted(
+    worker, monkeypatch, caplog
+):
+    monkeypatch.setattr(
+        plugin_process,
+        "install_user",
+        lambda: plugin_process.PluginUser(0, 0, None, switch=False),
+    )
     monkeypatch.setattr(plugin_process, "prepare_install_folder", lambda *a, **kw: None)
-    monkeypatch.setattr(plugin_process, "run_install", lambda *a, **kw: _Failed("error: api_key=abcd1234efgh refused"))
+    monkeypatch.setattr(
+        plugin_process,
+        "run_install",
+        lambda *a, **kw: _Failed("error: api_key=abcd1234efgh refused"),
+    )
     with pytest.raises(RuntimeError):
         celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"])
     assert worker["failed"] == [("eval", "ep", "error: api_key=[redacted] refused")]
@@ -116,20 +158,33 @@ def test_the_api_client_sends_the_failure_text_scrubbed(monkeypatch):
     assert sent == [{"error_message": "x [redacted]"}]
 
 
-
 # What else of a run leaves the worker: progress, other exceptions, the error handler
 
 
-def test_the_progress_a_plugin_reports_is_stored_without_secrets(worker, with_secret, monkeypatch):
+def test_the_progress_a_plugin_reports_is_stored_without_secrets(
+    worker, with_secret, monkeypatch
+):
     import json
     import types
 
     stored = []
-    fake_app = types.SimpleNamespace(backend=types.SimpleNamespace(
-        store_result=lambda task_id, meta, state=None, **kw: stored.append(json.dumps(meta, default=str))))
+    fake_app = types.SimpleNamespace(
+        backend=types.SimpleNamespace(
+            store_result=lambda task_id, meta, state=None, **kw: stored.append(
+                json.dumps(meta, default=str)
+            )
+        )
+    )
     monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
-    line = json.dumps({"progress": 0.5, "extra": {"note": f"judging with {JUDGE}",
-                                                 "nested": [{"header": f"Bearer {SHAPED}"}]}})
+    line = json.dumps(
+        {
+            "progress": 0.5,
+            "extra": {
+                "note": f"judging with {JUDGE}",
+                "nested": [{"header": f"Bearer {SHAPED}"}],
+            },
+        }
+    )
     _plugin(monkeypatch, stdout=[line + "\n"], returncode=0)
     _run(SECRET_SETTING)
     assert stored, "the progress line was not stored"
@@ -145,7 +200,8 @@ def _everything_raised(exc):
 
 
 def test_an_exception_that_is_not_the_workers_own_is_raised_with_its_secrets_redacted(
-        worker, with_secret, monkeypatch, caplog):
+    worker, with_secret, monkeypatch, caplog
+):
     def refuse(evaluation, plugin, name, content):
         raise ConnectionError(f"upload refused for {JUDGE} with {SHAPED}")
 
@@ -161,13 +217,19 @@ def test_an_exception_that_is_not_the_workers_own_is_raised_with_its_secrets_red
         assert JUDGE not in failure and SHAPED not in failure
 
 
-def test_a_refused_run_pass_is_raised_with_its_secrets_redacted(worker, monkeypatch, caplog):
+def test_a_refused_run_pass_is_raised_with_its_secrets_redacted(
+    worker, monkeypatch, caplog
+):
     from aisc_eval.service import run_pass
 
     def refused(refs, plugin_pid):
-        raise run_pass.RunPassRefused(f"the platform refused the pass: Authorization: Bearer {SHAPED}")
+        raise run_pass.RunPassRefused(
+            f"the platform refused the pass: Authorization: Bearer {SHAPED}"
+        )
 
-    monkeypatch.setattr(celery_tasks.run_pass, "refs_of", lambda components: ["target:x/system"])
+    monkeypatch.setattr(
+        celery_tasks.run_pass, "refs_of", lambda components: ["target:x/system"]
+    )
     monkeypatch.setattr(celery_tasks.run_pass, "mint", refused)
     with pytest.raises(Exception) as raised:
         _run([])
@@ -177,13 +239,24 @@ def test_a_refused_run_pass_is_raised_with_its_secrets_redacted(worker, monkeypa
     assert SHAPED not in caplog.text
 
 
-def test_the_error_handler_logs_neither_the_configuration_nor_the_failure_in_clear(monkeypatch, caplog):
+def test_the_error_handler_logs_neither_the_configuration_nor_the_failure_in_clear(
+    monkeypatch, caplog
+):
     import logging
 
     monkeypatch.setattr(celery_tasks, "mark_failed", lambda *a, **kw: None)
-    request = {"args": ["pkg", "Plugin", "1.0", {"api_key": "cfg-key-12345678", "judge": f"Bearer {SHAPED}"}]}
+    request = {
+        "args": [
+            "pkg",
+            "Plugin",
+            "1.0",
+            {"api_key": "cfg-key-12345678", "judge": f"Bearer {SHAPED}"},
+        ]
+    }
     caplog.set_level(logging.DEBUG)
-    celery_tasks.handle_error.run("eval", request, RuntimeError(f"api_key=cfg-key-12345678 {SHAPED}"), None)
+    celery_tasks.handle_error.run(
+        "eval", request, RuntimeError(f"api_key=cfg-key-12345678 {SHAPED}"), None
+    )
     assert "cfg-key-12345678" not in caplog.text
     assert SHAPED not in caplog.text
     assert "eval" in caplog.text
@@ -200,19 +273,28 @@ def _stored_by_celery(exc):
     """What Celery keeps of a failed task (type, args, repr) and logs (the whole traceback, chain included)."""
     import json
 
-    return json.dumps({"type": type(exc).__name__, "args": [repr(a) for a in exc.args], "repr": repr(exc)}) \
-        + _everything_raised(exc)
+    return json.dumps(
+        {
+            "type": type(exc).__name__,
+            "args": [repr(a) for a in exc.args],
+            "repr": repr(exc),
+        }
+    ) + _everything_raised(exc)
 
 
 class _PostRefused(Exception):
     pass
 
 
-def test_a_failing_post_is_re_raised_scrubbed_with_nothing_chained(worker, monkeypatch, caplog):
+def test_a_failing_post_is_re_raised_scrubbed_with_nothing_chained(
+    worker, monkeypatch, caplog
+):
     import logging
 
     def refuse(*a, **kw):
-        raise _PostRefused(f"500 posting measures; echoed password={JUDGE} and {URL_CREDENTIALS}")
+        raise _PostRefused(
+            f"500 posting measures; echoed password={JUDGE} and {URL_CREDENTIALS}"
+        )
 
     monkeypatch.setattr(celery_tasks, "post_measures", refuse)
     caplog.set_level(logging.DEBUG)
@@ -234,7 +316,9 @@ class _CleanText(Exception):
         return "upload refused"
 
 
-def test_an_exception_whose_args_hold_a_secret_is_raised_scrubbed(worker, with_secret, monkeypatch, caplog):
+def test_an_exception_whose_args_hold_a_secret_is_raised_scrubbed(
+    worker, with_secret, monkeypatch, caplog
+):
     def refuse(*a, **kw):
         raise _CleanText("upload refused", JUDGE, {"token": SHAPED})
 
@@ -248,15 +332,27 @@ def test_an_exception_whose_args_hold_a_secret_is_raised_scrubbed(worker, with_s
     assert JUDGE not in caplog.text and SHAPED not in caplog.text
 
 
-def test_a_secret_used_as_a_key_in_progress_is_stored_scrubbed(worker, with_secret, monkeypatch):
+def test_a_secret_used_as_a_key_in_progress_is_stored_scrubbed(
+    worker, with_secret, monkeypatch
+):
     import json
     import types
 
     stored = []
-    fake_app = types.SimpleNamespace(backend=types.SimpleNamespace(
-        store_result=lambda task_id, meta, state=None, **kw: stored.append(json.dumps(meta, default=str))))
+    fake_app = types.SimpleNamespace(
+        backend=types.SimpleNamespace(
+            store_result=lambda task_id, meta, state=None, **kw: stored.append(
+                json.dumps(meta, default=str)
+            )
+        )
+    )
     monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
-    line = json.dumps({"progress": 0.3, "extra": {JUDGE: "as a key", "nested": {SHAPED: 1}, "plain": "kept"}})
+    line = json.dumps(
+        {
+            "progress": 0.3,
+            "extra": {JUDGE: "as a key", "nested": {SHAPED: 1}, "plain": "kept"},
+        }
+    )
     _plugin(monkeypatch, stdout=[line + "\n"], returncode=0)
     _run(SECRET_SETTING)
     assert stored, "the progress line was not stored"
@@ -265,14 +361,18 @@ def test_a_secret_used_as_a_key_in_progress_is_stored_scrubbed(worker, with_secr
         assert "kept" in meta
 
 
-def test_a_value_the_plugin_was_given_is_scrubbed_from_a_measure_failure(worker, with_secret, monkeypatch, caplog):
+def test_a_value_the_plugin_was_given_is_scrubbed_from_a_measure_failure(
+    worker, with_secret, monkeypatch, caplog
+):
     """The judge key has no recognisable shape; the worker knows it handed it over, so a measure that echoes it
     and fails to post leaves it in no stored failure text, raised error or log."""
     import json
     import logging
 
-    _plugin(monkeypatch, returncode=0, measures=json.dumps([{"name": "m", "score": JUDGE}]))
-    measures = _run(SECRET_SETTING)          # what the chain hands post_measurements
+    _plugin(
+        monkeypatch, returncode=0, measures=json.dumps([{"name": "m", "score": JUDGE}])
+    )
+    measures = _run(SECRET_SETTING)  # what the chain hands post_measurements
     caplog.set_level(logging.DEBUG)
     with pytest.raises(Exception) as raised:
         celery_tasks.post_measurements.run(measures, "eval", "ep")

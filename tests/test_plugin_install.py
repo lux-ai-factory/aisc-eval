@@ -23,7 +23,10 @@ class _Entry:
 
 def test_a_root_worker_installs_as_the_install_user(monkeypatch):
     monkeypatch.setattr(plugin_process.os, "geteuid", lambda: 0)
-    users = {"aisc-install": _Entry(10002), "aisc-plugin": _Entry(10001, gid=10001, home="/home/aisc-plugin")}
+    users = {
+        "aisc-install": _Entry(10002),
+        "aisc-plugin": _Entry(10001, gid=10001, home="/home/aisc-plugin"),
+    }
     monkeypatch.setattr(plugin_process.pwd, "getpwnam", lambda name: users[name])
     assert plugin_process.install_user("aisc-install") == INSTALLER
 
@@ -31,23 +34,42 @@ def test_a_root_worker_installs_as_the_install_user(monkeypatch):
 def test_the_install_user_is_never_root_nor_the_plugin_user(monkeypatch):
     monkeypatch.setattr(plugin_process.os, "geteuid", lambda: 0)
     for uid in (0, 10001):
-        monkeypatch.setattr(plugin_process.pwd, "getpwnam", lambda name, uid=uid: _Entry(uid))
-        monkeypatch.setattr(plugin_process, "plugin_user", lambda: PluginUser(10001, 10001, None, switch=True))
+        monkeypatch.setattr(
+            plugin_process.pwd, "getpwnam", lambda name, uid=uid: _Entry(uid)
+        )
+        monkeypatch.setattr(
+            plugin_process,
+            "plugin_user",
+            lambda: PluginUser(10001, 10001, None, switch=True),
+        )
         with pytest.raises(RuntimeError):
             plugin_process.install_user("aisc-install")
 
 
-def test_an_install_runs_as_its_user_with_its_own_cache_and_none_of_the_workers_environment(monkeypatch):
+def test_an_install_runs_as_its_user_with_its_own_cache_and_none_of_the_workers_environment(
+    monkeypatch,
+):
     calls = []
-    monkeypatch.setattr(plugin_process.subprocess, "run", lambda argv, **kw: calls.append((argv, kw)) or "done")
+    monkeypatch.setattr(
+        plugin_process.subprocess,
+        "run",
+        lambda argv, **kw: calls.append((argv, kw)) or "done",
+    )
     monkeypatch.setenv("DJANGO_SECRET_KEY", "canary")
     monkeypatch.setenv("INTERNAL_API_KEY", "canary")
-    assert plugin_process.run_install(["uv", "pip", "install", "x"], INSTALLER, timeout=5) == "done"
+    assert (
+        plugin_process.run_install(["uv", "pip", "install", "x"], INSTALLER, timeout=5)
+        == "done"
+    )
     [(argv, kw)] = calls
     assert argv == ["uv", "pip", "install", "x"]
     assert (kw["user"], kw["group"], kw["extra_groups"]) == (10002, 10002, [])
-    assert kw["env"] == {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/home/aisc-install",
-                         "UV_CACHE_DIR": "/home/aisc-install/.cache/uv", "UV_NO_CONFIG": "1"}
+    assert kw["env"] == {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/home/aisc-install",
+        "UV_CACHE_DIR": "/home/aisc-install/.cache/uv",
+        "UV_NO_CONFIG": "1",
+    }
     # not the worker's folder (/app, root's only): uv reads configuration from where it starts
     assert kw["cwd"] == "/home/aisc-install"
     # what it installs, the plugin user reads and runs
@@ -57,8 +79,12 @@ def test_an_install_runs_as_its_user_with_its_own_cache_and_none_of_the_workers_
 
 def test_a_worker_that_is_not_root_installs_as_itself(monkeypatch):
     calls = []
-    monkeypatch.setattr(plugin_process.subprocess, "run", lambda argv, **kw: calls.append(kw))
-    plugin_process.run_install(["uv"], PluginUser(1000, 1000, None, switch=False), timeout=5)
+    monkeypatch.setattr(
+        plugin_process.subprocess, "run", lambda argv, **kw: calls.append(kw)
+    )
+    plugin_process.run_install(
+        ["uv"], PluginUser(1000, 1000, None, switch=False), timeout=5
+    )
     assert calls[0]["user"] is None and calls[0]["extra_groups"] is None
     assert calls[0]["env"]["PATH"] == "/usr/local/bin:/usr/bin:/bin"
 
@@ -99,7 +125,11 @@ class _Loader:
 def installs(monkeypatch):
     seen = []
     monkeypatch.setattr(celery_tasks, "plugin_loader", _Loader())
-    monkeypatch.setattr(plugin_process, "install_user", lambda: PluginUser(os.getuid(), os.getgid(), None, switch=True))
+    monkeypatch.setattr(
+        plugin_process,
+        "install_user",
+        lambda: PluginUser(os.getuid(), os.getgid(), None, switch=True),
+    )
 
     def run_install(argv, user, timeout):
         seen.append((argv, user))
@@ -107,20 +137,31 @@ def installs(monkeypatch):
 
     monkeypatch.setattr(plugin_process, "run_install", run_install)
     # nothing installs as the worker
-    monkeypatch.setattr(celery_tasks.subprocess, "run", lambda *a, **kw: pytest.fail(f"run as the worker: {a}"))
+    monkeypatch.setattr(
+        celery_tasks.subprocess,
+        "run",
+        lambda *a, **kw: pytest.fail(f"run as the worker: {a}"),
+    )
     return seen
 
 
 def test_the_cache_warming_install_runs_as_the_install_user(installs):
     celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"])
-    assert [argv[:3] for argv, _ in installs] == [["uv", "venv", installs[0][0][2]], ["uv", "pip", "install"]]
+    assert [argv[:3] for argv, _ in installs] == [
+        ["uv", "venv", installs[0][0][2]],
+        ["uv", "pip", "install"],
+    ]
     assert all(user.uid == os.getuid() for _, user in installs)
 
 
 def test_a_runs_venv_is_made_and_filled_by_the_install_user(installs, monkeypatch):
     stopped = RuntimeError("stop before the plugin starts")
-    monkeypatch.setattr(celery_tasks, "get_evaluation_request", lambda pid: {"status": "Running"})
-    monkeypatch.setattr(celery_tasks, "mark_plugin_started", lambda *a: (_ for _ in ()).throw(stopped))
+    monkeypatch.setattr(
+        celery_tasks, "get_evaluation_request", lambda pid: {"status": "Running"}
+    )
+    monkeypatch.setattr(
+        celery_tasks, "mark_plugin_started", lambda *a: (_ for _ in ()).throw(stopped)
+    )
     monkeypatch.setattr(celery_tasks, "mark_plugin_failed", lambda *a: None)
     monkeypatch.setattr(celery_tasks, "_revoke_sibling_tasks", lambda *a: None)
     with pytest.raises(RuntimeError):
@@ -142,18 +183,29 @@ def test_a_local_plugins_source_is_copied_where_the_install_user_may_read_it(tmp
     assert all(p.stat().st_uid == os.getuid() for p in [copy, *copy.rglob("*")])
 
 
-def test_a_runs_local_plugin_is_installed_from_its_copy(installs, monkeypatch, tmp_path):
+def test_a_runs_local_plugin_is_installed_from_its_copy(
+    installs, monkeypatch, tmp_path
+):
     source = tmp_path / "pkg"
     source.mkdir()
     (source / "pyproject.toml").write_text("[project]\nname = 'pkg'\n")
-    monkeypatch.setattr(celery_tasks.plugin_loader, "discovered_packages",
-                        {"pkg": {"1.0": {"source": "local", "pkg_root": source}}})
+    monkeypatch.setattr(
+        celery_tasks.plugin_loader,
+        "discovered_packages",
+        {"pkg": {"1.0": {"source": "local", "pkg_root": source}}},
+    )
     stopped = RuntimeError("stop before the plugin starts")
-    monkeypatch.setattr(celery_tasks, "get_evaluation_request", lambda pid: {"status": "Running"})
-    monkeypatch.setattr(celery_tasks, "mark_plugin_started", lambda *a: (_ for _ in ()).throw(stopped))
+    monkeypatch.setattr(
+        celery_tasks, "get_evaluation_request", lambda pid: {"status": "Running"}
+    )
+    monkeypatch.setattr(
+        celery_tasks, "mark_plugin_started", lambda *a: (_ for _ in ()).throw(stopped)
+    )
     monkeypatch.setattr(celery_tasks, "mark_plugin_failed", lambda *a: None)
     monkeypatch.setattr(celery_tasks, "_revoke_sibling_tasks", lambda *a: None)
     with pytest.raises(RuntimeError):
         celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
-    install_cmd = [argv for argv, _ in installs if argv[:3] == ["uv", "pip", "install"]][0]
+    install_cmd = [
+        argv for argv, _ in installs if argv[:3] == ["uv", "pip", "install"]
+    ][0]
     assert Path(install_cmd[-1]) != source and Path(install_cmd[-1]).name == "source"

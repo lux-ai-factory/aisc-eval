@@ -3,6 +3,7 @@
 This module defines the Project class which serves as a container for configurations
 and associations between datasets, models, and their evaluation settings.
 """
+
 import uuid
 from pydantic import BaseModel
 
@@ -44,5 +45,6 @@ class Project(BaseModel):
     including the frequency of evaluations and the size of the time window to analyze.
     It also maintains a reference to the associated dataset.
     """
+
     name: str  # Name of the project
     plugins: list[Plugin]

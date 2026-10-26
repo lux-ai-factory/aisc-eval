@@ -479,9 +479,7 @@ def test_standalone_ignores_a_run_header_if_one_ever_arrives(
 
 
 @standalone_only
-def test_standalone_dispatched_tasks_carry_no_project_or_ticket(
-    backend, dispatched
-):
+def test_standalone_dispatched_tasks_carry_no_project_or_ticket(backend, dispatched):
     _run()
     _assert_arguments_carry_no_run(dispatched, "standalone")
     assert all(
