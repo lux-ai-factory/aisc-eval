@@ -1,3 +1,6 @@
+# ---- Node, for the promptfoo CLI plugins run (promptfoo's engines ask for Node >= 22.22.0) ----
+FROM node:22.22.0-bookworm-slim AS node
+
 # ---- Base ----
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS base
 
@@ -38,6 +41,15 @@ RUN mkdir -p /app/data /app/logs && \
 FROM base AS runtime
 
 ENV UV_NO_SYNC=1
+
+# A pinned Node and promptfoo CLI for plugins that drive promptfoo: /usr/local/bin is on the PATH a
+# plugin gets, and every file under /usr/local is readable and runnable by the plugin user.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+ARG PROMPTFOO_VERSION=0.125.1
+RUN npm install --global --no-fund --no-audit "promptfoo@${PROMPTFOO_VERSION}" && npm cache clean --force
 
 # Plugins run as this user, not as the root worker (aisc_eval/plugin_process.py): the kernel
 # then refuses them the worker's /proc/<pid>/environ, and /app, root's only, is closed to them.
