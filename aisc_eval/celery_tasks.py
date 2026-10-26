@@ -14,7 +14,7 @@ from celery import group, chain
 
 from aisc_eval import plugin_process
 from aisc_eval import run_context  # noqa: F401  (registers the run header handlers)
-from aisc_eval.scrub import known_secrets, scrub_text
+from aisc_eval.scrub import REDACTED, known_secrets, scrub_text
 from aisc_eval.celery_app import celery_app
 from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.service.api_client import (
@@ -133,11 +133,11 @@ plugin_loader: Loader = Loader(env.PLUGIN_PATH, env.PACKAGE_REGISTRY_URL, env.PA
 
 
 def _scrubbed(value, known=()):
-    """`value` with every string in it, at any depth, passed through scrub_text."""
+    """`value` with every string in it, at any depth, dict keys included, passed through scrub_text."""
     if isinstance(value, str):
         return scrub_text(value, known)
     if isinstance(value, dict):
-        return {key: _scrubbed(inner, known) for key, inner in value.items()}
+        return {_scrubbed(key, known): _scrubbed(inner, known) for key, inner in value.items()}
     if isinstance(value, (list, tuple)):
         return [_scrubbed(item, known) for item in value]
     return value
@@ -149,13 +149,29 @@ def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: st
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
 
 
-def _scrubbed_error(exc: BaseException, known=()) -> BaseException:
-    """An exception to raise in place of `exc`, with no secret in its text or in its chain.
+def _without_known(value, known):
+    """`value` with each known value (a secret the run handed its plugin) replaced, at any depth, dict keys included.
+    Only the known values: the rest of a measure is the plugin's result and is posted as it is."""
+    if isinstance(value, str):
+        for secret in known:
+            value = value.replace(secret, REDACTED)
+        return value
+    if isinstance(value, dict):
+        return {_without_known(key, known): _without_known(inner, known) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [_without_known(item, known) for item in value]
+    return value
 
-    `exc` itself when its text is clean and it chains nothing; else a RuntimeError of its scrubbed text, raised
-    `from None` by the caller. The original traceback goes to the log, scrubbed."""
+
+def _scrubbed_error(exc: BaseException, known=()) -> BaseException:
+    """An exception to raise in place of `exc`, with no secret in its text, its args or its chain.
+
+    `exc` itself when its text and args are clean and it chains nothing; else a RuntimeError of its scrubbed text,
+    raised `from None` by the caller (what Celery stores of a failed task is its type, args and text). The original
+    traceback goes to the log, scrubbed."""
     text = scrub_text(str(exc), known)
-    if text == str(exc) and exc.__cause__ is None and exc.__context__ is None:
+    args_clean = all(scrub_text(repr(arg), known) == repr(arg) for arg in exc.args)
+    if text == str(exc) and args_clean and exc.__cause__ is None and exc.__context__ is None:
         return exc
     logger.error(scrub_text("".join(tracebacks.format_exception(exc)), known))
     return RuntimeError(f"{type(exc).__name__}: {text}")
@@ -568,7 +584,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 upload_artifact(evaluation_pid, evaluation_plugin_pid, name, content)
 
             mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
-            return measures
+            # what the chain hands post_measurements (and the result backend keeps): no value the plugin was given
+            return _without_known(measures, known)
         except Exception as exc:
             _terminate_process(process)
             _fail_plugin_and_revoke(
@@ -586,12 +603,16 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
 @celery_app.task
 def post_measurements(measurements_dict: list[dict], evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID):
+    # run_plugin returns the measures without the values it handed the plugin; key shapes are scrubbed here
     try:
         measurements = [Measure(**m) for m in measurements_dict]
         post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
     except Exception as e:
         mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, scrub_text(str(e)))
-        raise
+        clean = _scrubbed_error(e)
+        if clean is e:
+            raise
+        raise clean from None
 
 
 @celery_app.task
