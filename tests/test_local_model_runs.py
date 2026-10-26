@@ -14,7 +14,7 @@ import pytest
 import requests
 
 from aisc_eval import celery_tasks
-from test_plugin_process import TARGET, _resource, platform, worker  # noqa: F401  (fixtures)
+from test_plugin_process import PROJECT, TARGET, _resource, platform, worker  # noqa: F401  (fixtures)
 
 MODEL_BYTES = b"an onnx graph"
 MARKER = {
@@ -205,7 +205,7 @@ def test_a_card_run_mints_its_pass_for_its_evaluation_plugin(run):
     seen = run["go"]([_resource("target", TARGET), _judge()])
     method, url, _headers, body = seen["platform"]["calls"][0]
     assert (method, url) == ("POST", "http://platform:8000/internal/run-passes")
-    assert body == {"refs": [TARGET], "evaluation_plugin": "ep"}
+    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT}
     assert seen["stored"] == []
     assert "target.json" in seen["inputs"]
     assert json.loads(seen["inputs"]["target.json"]) == {"value": TARGET}

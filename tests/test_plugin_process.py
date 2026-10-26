@@ -294,9 +294,16 @@ class _Answer:
         return self._body
 
 
+#: the platform pid of the project the faked run is of, as the backend puts it in the run's header
+PROJECT = "3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b"
+
+
 @pytest.fixture
 def platform(monkeypatch):
-    """The platform's run-pass routes, faked; records every call."""
+    """The platform's run-pass routes, faked; records every call. The run is of PROJECT: its run
+    context is set as the backend's aisc_run header sets it, and reset afterwards."""
+    from aisc_eval import run_context
+
     seen = {
         "calls": [],
         "mint": _Answer(
@@ -316,10 +323,14 @@ def platform(monkeypatch):
 
     monkeypatch.setattr(celery_tasks.run_pass.requests, "post", post)
     monkeypatch.setattr(celery_tasks.run_pass.requests, "delete", delete)
-    return seen
+    token = run_context._current.set(
+        {"project": PROJECT, "evaluation": "eval", "ticket": "t"}
+    )
+    yield seen
+    run_context._current.reset(token)
 
 
-TARGET = "target:3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b/system"
+TARGET = f"target:{PROJECT}/system"
 
 
 def _run_with(inputs):
@@ -349,7 +360,7 @@ def test_a_run_with_a_target_mints_a_pass_for_exactly_that_ref(worker, platform)
     method, url, headers, body = platform["calls"][0]
     assert (method, url) == ("POST", "http://platform:8000/internal/run-passes")
     assert headers["X-AISC-Service-Token"] == "stack-token"
-    assert body == {"refs": [TARGET], "evaluation_plugin": "ep"}
+    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT}
     [(_argv, kwargs)] = worker["popen"]
     assert kwargs["env"]["PLATFORM_RUN_PASS"] == "the-pass"
 

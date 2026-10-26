@@ -222,7 +222,7 @@ def test_a_refused_run_pass_is_raised_with_its_secrets_redacted(
 ):
     from aisc_eval.service import run_pass
 
-    def refused(refs, plugin_pid):
+    def refused(refs, plugin_pid, *args, **kwargs):
         raise run_pass.RunPassRefused(
             f"the platform refused the pass: Authorization: Bearer {SHAPED}"
         )

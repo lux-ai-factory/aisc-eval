@@ -5,6 +5,8 @@ other runs' queued tasks, lift their run tickets and call the backend as another
 
 from aisc_eval import celery_tasks
 
+from test_plugin_process import worker  # noqa: F401  (the fixture)
+
 WORKER_ENV = {
     "PATH": "/usr/bin",
     "HOME": "/root",
@@ -81,3 +83,45 @@ def test_project_secrets_are_added_and_the_openai_placeholder_kept():
 def test_a_real_openai_key_from_the_project_wins_over_the_placeholder():
     env = celery_tasks.plugin_environment(WORKER_ENV, {"API_KEY_OPENAI": "sk-real"})
     assert env["API_KEY_OPENAI"] == "sk-real"
+
+
+WORKER_KEYS = {
+    "AISC_TARGET_API_KEY": "sk-target-worker-0123456789",
+    "OPENAI_API_KEY": "sk-openai-worker-0123456789",
+    "API_KEY_OPENAI": "sk-openai2-worker-0123456789",
+}
+
+
+def test_the_workers_own_model_keys_never_reach_a_plugin():
+    env = celery_tasks.plugin_environment({**WORKER_ENV, **WORKER_KEYS}, {})
+    assert "AISC_TARGET_API_KEY" not in env
+    assert "OPENAI_API_KEY" not in env
+    assert env["API_KEY_OPENAI"] == celery_tasks.OPENAI_PLACEHOLDER
+    for value in WORKER_KEYS.values():
+        assert value not in env.values()
+
+
+def test_the_model_addresses_still_reach_a_plugin():
+    env = celery_tasks.plugin_environment(
+        {
+            **WORKER_ENV,
+            "AISC_TARGET_BASE_URL": "http://t/v1",
+            "OPENAI_BASE_URL": "http://o/v1",
+        },
+        {},
+    )
+    assert env["AISC_TARGET_BASE_URL"] == "http://t/v1"
+    assert env["OPENAI_BASE_URL"] == "http://o/v1"
+
+
+def test_no_model_key_name_is_passed_through():
+    for name in ("AISC_TARGET_API_KEY", "OPENAI_API_KEY", "API_KEY_OPENAI"):
+        assert name not in celery_tasks.PLUGIN_ENV_NAMES, name
+
+
+def test_a_run_hands_its_plugin_no_openai_key_of_the_worker(worker, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-worker-0123456789")
+    celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
+    [(_argv, kwargs)] = worker["popen"]
+    assert "OPENAI_API_KEY" not in kwargs["env"]
+    assert "sk-openai-worker-0123456789" not in kwargs["env"].values()
