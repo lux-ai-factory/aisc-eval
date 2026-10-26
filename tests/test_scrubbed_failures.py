@@ -115,3 +115,75 @@ def test_the_api_client_sends_the_failure_text_scrubbed(monkeypatch):
     api_client.mark_plugin_failed("e", "p", "x Bearer abc")
     assert sent == [{"error_message": "x [redacted]"}]
 
+
+
+# What else of a run leaves the worker: progress, other exceptions, the error handler
+
+
+def test_the_progress_a_plugin_reports_is_stored_without_secrets(worker, with_secret, monkeypatch):
+    import json
+    import types
+
+    stored = []
+    fake_app = types.SimpleNamespace(backend=types.SimpleNamespace(
+        store_result=lambda task_id, meta, state=None, **kw: stored.append(json.dumps(meta, default=str))))
+    monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
+    line = json.dumps({"progress": 0.5, "extra": {"note": f"judging with {JUDGE}",
+                                                 "nested": [{"header": f"Bearer {SHAPED}"}]}})
+    _plugin(monkeypatch, stdout=[line + "\n"], returncode=0)
+    _run(SECRET_SETTING)
+    assert stored, "the progress line was not stored"
+    for meta in stored:
+        assert JUDGE not in meta and SHAPED not in meta
+        assert "0.5" in meta
+
+
+def _everything_raised(exc):
+    import traceback
+
+    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+
+
+def test_an_exception_that_is_not_the_workers_own_is_raised_with_its_secrets_redacted(
+        worker, with_secret, monkeypatch, caplog):
+    def refuse(evaluation, plugin, name, content):
+        raise ConnectionError(f"upload refused for {JUDGE} with {SHAPED}")
+
+    monkeypatch.setattr(celery_tasks, "upload_artifact", refuse)
+    _plugin(monkeypatch, returncode=0)
+    with pytest.raises(Exception) as raised:
+        _run(SECRET_SETTING)
+    text = _everything_raised(raised.value)
+    assert "upload refused for" in text
+    assert JUDGE not in text and SHAPED not in text
+    assert JUDGE not in caplog.text and SHAPED not in caplog.text
+    for _evaluation, _plugin_pid, failure in worker["failed"]:
+        assert JUDGE not in failure and SHAPED not in failure
+
+
+def test_a_refused_run_pass_is_raised_with_its_secrets_redacted(worker, monkeypatch, caplog):
+    from aisc_eval.service import run_pass
+
+    def refused(refs, plugin_pid):
+        raise run_pass.RunPassRefused(f"the platform refused the pass: Authorization: Bearer {SHAPED}")
+
+    monkeypatch.setattr(celery_tasks.run_pass, "refs_of", lambda components: ["target:x/system"])
+    monkeypatch.setattr(celery_tasks.run_pass, "mint", refused)
+    with pytest.raises(Exception) as raised:
+        _run([])
+    text = _everything_raised(raised.value)
+    assert "refused the pass" in text
+    assert SHAPED not in text
+    assert SHAPED not in caplog.text
+
+
+def test_the_error_handler_logs_neither_the_configuration_nor_the_failure_in_clear(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(celery_tasks, "mark_failed", lambda *a, **kw: None)
+    request = {"args": ["pkg", "Plugin", "1.0", {"api_key": "cfg-key-12345678", "judge": f"Bearer {SHAPED}"}]}
+    caplog.set_level(logging.DEBUG)
+    celery_tasks.handle_error.run("eval", request, RuntimeError(f"api_key=cfg-key-12345678 {SHAPED}"), None)
+    assert "cfg-key-12345678" not in caplog.text
+    assert SHAPED not in caplog.text
+    assert "eval" in caplog.text
