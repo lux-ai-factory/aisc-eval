@@ -150,6 +150,16 @@ def _scrub_assignments(text: str) -> str:
     return SECRET_ASSIGNMENT.sub(_redact_assignment, text)
 
 
+def without_known_bytes(content: bytes, known: Iterable[str]) -> bytes:
+    """`content` with each known value (8 characters or more, longest first), encoded as UTF-8, replaced
+    by REDACTED in the raw bytes. Exact values only: no key shapes (a file is evidence, and the shape
+    rules rewrite prose) and no encoded forms. It works on any file, but a compressed one (xlsx, png,
+    zip) keeps whatever its compression hides."""
+    for value in _ordered_known(known):
+        content = content.replace(value.encode(), REDACTED.encode())
+    return content
+
+
 def scrub_text(text: str, known: Iterable[str] = ()) -> str:
     """`text` with each known value (8 characters or more, longest first), each key shape and the key-like value of
     each secret assignment replaced by REDACTED."""

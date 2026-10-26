@@ -14,7 +14,7 @@ from celery import group, chain
 
 from aisc_eval import plugin_process
 from aisc_eval import run_context  # noqa: F401  (registers the run header handlers)
-from aisc_eval.scrub import REDACTED, known_secrets, scrub_text
+from aisc_eval.scrub import REDACTED, known_secrets, scrub_text, without_known_bytes
 from aisc_eval.celery_app import celery_app
 from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.service.api_client import (
@@ -744,8 +744,14 @@ def run_plugin(
 
             # the log is the worker's, kept out of output/ where the plugin could plant a link
             outputs["plugin_execution.log"] = log_content.encode()
+            # every file without the values the run handed its plugin, in its name and its bytes
             for name, content in outputs.items():
-                upload_artifact(evaluation_pid, evaluation_plugin_pid, name, content)
+                upload_artifact(
+                    evaluation_pid,
+                    evaluation_plugin_pid,
+                    _without_known(name, known),
+                    without_known_bytes(content, known),
+                )
 
             mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
             # what the chain hands post_measurements (and the result backend keeps): no value the plugin was given
