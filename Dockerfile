@@ -18,6 +18,8 @@ FROM base AS builder
 
 # Install production dependencies with caching
 COPY pyproject.toml uv.lock ./
+# the plugin interface, plugin-manager and aisc_identity wheels the lock names (vendor/, not PyPI or GitHub)
+COPY vendor/ ./vendor/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 

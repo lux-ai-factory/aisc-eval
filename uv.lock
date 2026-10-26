@@ -7,6 +7,7 @@ name = "aisc-eval"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aisc-identity" },
     { name = "aisc-plugin-interface" },
     { name = "aisc-plugin-manager" },
     { name = "celery", extra = ["redis"] },
@@ -47,8 +48,9 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aisc-plugin-interface", specifier = ">=0.3.0" },
-    { name = "aisc-plugin-manager", git = "https://github.com/lux-ai-factory/aisc-plugin-manager?tag=v0.3.0" },
+    { name = "aisc-identity", path = "vendor/aisc_identity-0.1.0-py3-none-any.whl" },
+    { name = "aisc-plugin-interface", path = "vendor/aisc_plugin_interface-0.4.0-py3-none-any.whl" },
+    { name = "aisc-plugin-manager", path = "vendor/aisc_plugin_manager-0.3.0-py3-none-any.whl" },
     { name = "celery", extras = ["redis"], specifier = ">=5.6.3" },
     { name = "cryptography", specifier = ">=50.0.1" },
     { name = "flower", specifier = ">=2.2.0" },
@@ -87,26 +89,62 @@ test = [
 ]
 
 [[package]]
+name = "aisc-identity"
+version = "0.1.0"
+source = { path = "vendor/aisc_identity-0.1.0-py3-none-any.whl" }
+dependencies = [
+    { name = "pyjwt", extra = ["crypto"] },
+]
+wheels = [
+    { filename = "aisc_identity-0.1.0-py3-none-any.whl", hash = "sha256:dd2e97b754e20ef17a48fedce50339c585ab2641fd24cb65f8f0c1a70336925c" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.111" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.1" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "aisc-plugin-interface"
-version = "0.3.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.4.0"
+source = { path = "vendor/aisc_plugin_interface-0.4.0-py3-none-any.whl" }
 dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/88/88/0d8e08c11e3b3bcfac68c8180b5df9f9cda53c1a666c4c2afec7348f73b8/aisc_plugin_interface-0.3.0.tar.gz", hash = "sha256:fc8d1115bbad7a4202d03c106c4ab084107b02dbb1b31fcf0881159e54aba4ac", size = 18617, upload-time = "2026-09-24T14:05:32.006Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/78/c19bb8bd82f0903e22bc616a1fbd3e0fec86a909c36382da586f13e6e88c/aisc_plugin_interface-0.3.0-py3-none-any.whl", hash = "sha256:7d9f6de9ddbc1ed4f978c557e66a37a03a58b167b773aff48609c91759799aab", size = 28275, upload-time = "2026-09-24T14:05:30.847Z" },
+    { filename = "aisc_plugin_interface-0.4.0-py3-none-any.whl", hash = "sha256:a3bd229b124b87a4d9084dc6bd9d97d1a39677666f2af0c1d1ddb129dc5e680c" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.13.5" },
+    { name = "rich", specifier = ">=15.0.0" },
 ]
 
 [[package]]
 name = "aisc-plugin-manager"
 version = "0.3.0"
-source = { git = "https://github.com/lux-ai-factory/aisc-plugin-manager?tag=v0.3.0#cbc993b7ecc43db4aefa16ea5811f968ae49ae20" }
+source = { path = "vendor/aisc_plugin_manager-0.3.0-py3-none-any.whl" }
 dependencies = [
     { name = "aisc-plugin-interface" },
     { name = "httpx" },
     { name = "packaging" },
+]
+wheels = [
+    { filename = "aisc_plugin_manager-0.3.0-py3-none-any.whl", hash = "sha256:b0e2dce5334c4c69779a16bdd3a6f9883481c886cdef2e0ee5871c8e24674a33" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aisc-plugin-interface", specifier = ">=0.4.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "packaging", specifier = ">=26.3" },
 ]
 
 [[package]]
@@ -894,6 +932,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
+]
+
+[[package]]
+name = "pyjwt"
+version = "2.15.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/ea/5194e52748b0da83d71e082d75496eaec6e58f419f5e184786ded517e6a9/pyjwt-2.15.1.tar.gz", hash = "sha256:4f259e80cdfb6b3fc18a7de51fd1ef9ec79652f25019bae68975ca2468a34df8", size = 121252, upload-time = "2026-09-28T18:40:42.598Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/ca/44de4e75f8aadc457f0634be3b542815078ded46dca30efb960edeecad6e/pyjwt-2.15.1-py3-none-any.whl", hash = "sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193", size = 33860, upload-time = "2026-09-28T18:40:41.429Z" },
+]
+
+[package.optional-dependencies]
+crypto = [
+    { name = "cryptography" },
 ]
 
 [[package]]

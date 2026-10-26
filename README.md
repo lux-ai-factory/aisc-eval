@@ -87,6 +87,8 @@ To use the local `plugin-manager` and `plugin-interface` from the aisc repo:
 uv pip install --no-deps -e ../../shared/plugin-manager -e ../../shared/plugin-interface
 ```
 
+The lock already takes `aisc-plugin-interface` 0.4.0, the plugin-manager and `aisc-identity` from wheels under `vendor/`, built from this checkout and refreshed by the root's `scripts/vendor-plugin-interface.sh` when one of them changes; the editable install is only for working on the interface or the plugin-manager itself.
+
 ### Launching locally the AISC Evaluation Worker
 
 ```bash
