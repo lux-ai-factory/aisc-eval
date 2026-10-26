@@ -121,14 +121,12 @@ PLUGIN_ENV_NAMES = frozenset(
         "SSL_CERT_DIR",
         "REQUESTS_CA_BUNDLE",
         "CURL_CA_BUNDLE",
-        # the platform's connection resolver and target settings (aisc_plugin_interface.connections)
+        # the platform's connection resolver and the model addresses (aisc_plugin_interface.connections);
+        # the worker's own model keys never pass: a plugin's target key comes from its run's pass
         "PLATFORM_URL",
         "CONNECTIONS_ALLOWED_HOSTS",
         "AISC_TARGET_BASE_URL",
-        "AISC_TARGET_API_KEY",
         "OPENAI_BASE_URL",
-        "API_KEY_OPENAI",
-        "OPENAI_API_KEY",
     }
 )
 PLUGIN_ENV_PROXIES = frozenset({"http_proxy", "https_proxy", "no_proxy", "all_proxy"})
