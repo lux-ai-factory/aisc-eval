@@ -526,7 +526,7 @@ def run_plugin(
                 role = name.removeprefix("helper:").upper()
                 secret_key = f"AISC_HELPER_{role}_KEY"
                 try:
-                    resolved = resolve_helper(component["helper_ref"])
+                    resolved = resolve_helper(component.get("helper_ref"))
                 except HelperUnavailable as exc:
                     message = scrub_text(str(exc))
                     mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, message)

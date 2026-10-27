@@ -169,3 +169,37 @@ def test_key_never_logged(run, caplog):
         run["go"]([_helper_input()])
     assert KEY not in caplog.text
     assert all(KEY not in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        f"helper:{PROJECT}/..",
+        f"helper:{PROJECT}/.",
+        "helper:../x",
+        f"helper:{PROJECT}/a/b",
+        f"helper:{PROJECT}",
+        "helper:not-a-uuid/judge-a",
+        f"helper:{PROJECT}/Judge_A",
+        f"helper:{PROJECT}/",
+        "judge-a",
+    ],
+)
+def test_a_malformed_reference_fails_the_run_without_calling_the_platform(run, ref):
+    component = {**_helper_input(), "helper_ref": ref}
+    with pytest.raises(RuntimeError, match="malformed"):
+        run["go"]([component])
+    assert run["urls"] == []
+    assert run["worker"]["popen"] == []
+    [(_evaluation, _plugin, message)] = run["worker"]["failed"]
+    assert "malformed" in message
+
+
+def test_a_helper_input_without_a_reference_fails_the_run(run):
+    component = _helper_input()
+    del component["helper_ref"]
+    with pytest.raises(RuntimeError, match="malformed"):
+        run["go"]([component])
+    assert run["urls"] == []
+    [(_evaluation, _plugin, message)] = run["worker"]["failed"]
+    assert "malformed" in message

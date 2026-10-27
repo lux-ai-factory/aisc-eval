@@ -7,6 +7,7 @@ secret environment, never into a file, a log record or an error message.
 """
 
 import os
+import re
 from urllib.parse import quote
 
 import requests
@@ -23,12 +24,22 @@ class HelperUnavailable(RuntimeError):
     """The platform cannot give the run this helper; the message is fit to show the person."""
 
 
-def parse_ref(ref: str) -> tuple[str, str]:
-    """(platform project, helper name) of helper:<project>/<name>."""
-    project, _, name = (ref or "").removeprefix(REF_PREFIX).partition("/")
-    if not ref.startswith(REF_PREFIX) or not project or not name:
-        raise HelperUnavailable(f"the helper reference {ref!r} is malformed")
-    return project, name
+_PROJECT = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+#: the platform's rule for a helper's name
+_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+
+
+def parse_ref(ref: str | None) -> tuple[str, str]:
+    """(platform project, helper name) of helper:<project>/<name>. Both parts are checked against
+    the platform's own formats: they go into a URL path that carries the service token, so a
+    segment such as .. must never reach it."""
+    if isinstance(ref, str) and ref.startswith(REF_PREFIX):
+        project, _, name = ref[len(REF_PREFIX) :].partition("/")
+        if _PROJECT.fullmatch(project) and _NAME.fullmatch(name):
+            return project, name
+    raise HelperUnavailable("the helper reference is malformed")
 
 
 def resolve_helper(ref: str) -> dict:
