@@ -35,6 +35,7 @@ from aisc_eval.service.api_client import (
     store_input_value,
 )
 from aisc_eval.service import run_pass
+from aisc_eval.service.helpers import HelperUnavailable, resolve_helper
 from aisc_eval.utils.logging import get_logger
 
 from aisc_plugin_manager.loader import Loader
@@ -503,6 +504,7 @@ def run_plugin(
 
         input_mapping = {}
         llm_secret_settings = []
+        helper_secret_env: dict[str, str] = {}
         local_model: dict | None = None
         for component in input_components:
             component_type = component["component_type"]
@@ -518,6 +520,30 @@ def run_plugin(
                         "input": component.get("pid"),
                         "marker": local_model_marker(component, file_content),
                     }
+            elif component_type == "helper":
+                # the engine names the helper; its endpoint and key come from the platform, and the
+                # key goes to the plugin's environment only, under the name self.helper() reads
+                role = name.removeprefix("helper:").upper()
+                secret_key = f"AISC_HELPER_{role}_KEY"
+                try:
+                    resolved = resolve_helper(component["helper_ref"])
+                except HelperUnavailable as exc:
+                    message = scrub_text(str(exc))
+                    mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, message)
+                    raise RuntimeError(message) from None
+                if resolved.get("api_key"):
+                    helper_secret_env[_secret_env_name(secret_key)] = resolved[
+                        "api_key"
+                    ]
+                    payload = {"secret_key": secret_key}
+                else:
+                    payload = {}
+                payload.update(
+                    endpoint_url=resolved["endpoint_url"],
+                    model=(component.get("value") or {}).get("model"),
+                )
+                file_content = json.dumps(payload).encode("utf-8")
+                relative_path = f"{name}.json"
             elif component_type in {"datashape", "llm", "resource"}:
                 payload = dict(component.get("json_value") or {})
                 if component_type == "llm":
@@ -662,6 +688,7 @@ def run_plugin(
             secret_env = build_secret_environment(
                 project_settings + llm_secret_settings
             )
+            secret_env.update(helper_secret_env)
             known = known_secrets(secret_env, os.environ, plugin_config, minted)
             user = plugin_process.plugin_user()
             plugin_process.prepare_workspace(workspace_path, output_dir, user)
