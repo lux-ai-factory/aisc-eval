@@ -363,7 +363,32 @@ def install_package(
 @celery_app.task(bind=True)
 def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     logger.info(f"Running evaluation {evaluation_pid}")
+    try:
+        return _start_evaluation(evaluation_pid)
+    except Exception as exc:
+        # nothing was dispatched, so no handle_error will ever run: without this the run stays Pending
+        _fail_before_start(evaluation_pid, exc)
+        return {"evaluation_pid": evaluation_pid, "plugin_task_ids": []}
 
+
+def _fail_before_start(evaluation_pid: uuid.UUID, exc: BaseException) -> None:
+    """A run that could not start: each of its tests is marked failed with the reason (when the run's tests can
+    be read at all), then the run itself."""
+    reason = f"the run could not start: {type(exc).__name__}: {str(exc)}"[:500]
+    logger.error(f"Evaluation {evaluation_pid}: {scrub_text(reason)}")
+    try:
+        tests = get_evaluation_request(evaluation_pid).get("evaluation_plugins") or []
+    except Exception as read_failure:
+        logger.error(f"Evaluation {evaluation_pid}: its tests could not be read ({type(read_failure).__name__})")
+        tests = []
+    for test in tests:
+        if isinstance(test, dict) and test.get("pid"):
+            mark_plugin_failed(evaluation_pid, test["pid"], reason)
+    mark_failed(evaluation_pid)
+
+
+def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
+    """run_evaluation's work: read the run, then dispatch each package's install and its tests."""
     plugin_loader.list_packages(refresh=True)
 
     evaluation: Evaluation = get_evaluation(evaluation_pid)
