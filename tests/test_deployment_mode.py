@@ -70,3 +70,9 @@ def test_the_check_runs_when_a_worker_starts_not_when_flower_imports_the_app():
         for r in worker_init.receivers
         if callable(r[1])
     )
+
+
+def test_the_mode_is_asked_one_way_only():
+    """is_configurator() answers both questions; a second, unused negation is not kept."""
+    assert not hasattr(deployment, "is_standalone")
+    assert "is_standalone" not in (deployment.__doc__ or "")

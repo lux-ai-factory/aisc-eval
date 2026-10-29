@@ -4,7 +4,7 @@ One switch, AISC_DEPLOYMENT, read once at import into MODE. Every behaviour that
 differs between the two modes asks this module; nothing else reads the variable.
 
 This is the worker's own copy of the backend's aisc_backend.deployment contract
-(mode(), check_environment(), is_configurator(), is_standalone()): the worker does
+(mode(), check_environment(), is_configurator()): the worker does
 not import Django settings, and it has no .env loader (aisc_eval.utils.env reads
 os.environ directly, so there is nothing to read this after).
 """
@@ -52,10 +52,6 @@ def _check_on_worker_start(**_: object) -> None:
 
 def is_configurator() -> bool:
     return MODE == CONFIGURATOR
-
-
-def is_standalone() -> bool:
-    return not is_configurator()
 
 
 MODE = mode()
