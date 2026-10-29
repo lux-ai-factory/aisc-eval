@@ -254,9 +254,21 @@ def _terminate_process(process: subprocess.Popen | None) -> None:
             pass
 
 
-def _revoke_sibling_tasks(evaluation_pid: uuid.UUID, current_task_id: str) -> None:
+#: What a test of a run that failed is marked with when it is stopped, or never starts.
+STOPPED = "Stopped: another test of this run failed"
+#: The states of a test that has not finished: the ones a failure of the run stops.
+UNFINISHED = ("Pending", "Running")
+
+
+def _run_tasks_key(evaluation_pid: uuid.UUID) -> str:
+    return f"eval_tasks:{evaluation_pid}"
+
+
+def _revoke_sibling_tasks(
+    evaluation_pid: uuid.UUID, current_task_id: str | None
+) -> None:
     try:
-        raw = celery_app.backend.client.get(f"eval_tasks:{evaluation_pid}")
+        raw = celery_app.backend.client.get(_run_tasks_key(evaluation_pid))
         if raw:
             for tid in json.loads(raw):
                 if tid != str(current_task_id):
@@ -265,17 +277,42 @@ def _revoke_sibling_tasks(evaluation_pid: uuid.UUID, current_task_id: str) -> No
         logger.warning(f"Could not revoke sibling tasks: {e}")
 
 
-def _fail_plugin_and_revoke(
+def _stop_run(
     evaluation_pid: uuid.UUID,
-    evaluation_plugin_pid: uuid.UUID,
+    failed_pids: list[uuid.UUID],
     error_msg: str,
-    current_task_id: str,
+    current_task_id: str | None,
 ) -> None:
-    try:
-        mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, error_msg)
-    except Exception:
-        pass
+    """A test of the run failed: failed_pids are marked failed with error_msg, the run's other tasks are revoked
+    (those running stop, those queued never start), and each of its other tests not yet finished is marked
+    failed as STOPPED. A test that already finished keeps its result."""
+    for pid in failed_pids:
+        try:
+            mark_plugin_failed(evaluation_pid, pid, error_msg)
+        except Exception as e:
+            logger.warning(f"Could not mark test {pid} failed: {type(e).__name__}")
     _revoke_sibling_tasks(evaluation_pid, current_task_id)
+    try:
+        tests = get_evaluation_request(evaluation_pid).get("evaluation_plugins") or []
+    except Exception as e:
+        logger.warning(
+            f"Evaluation {evaluation_pid}: its other tests could not be read ({type(e).__name__})"
+        )
+        return
+    failed = {str(pid) for pid in failed_pids}
+    for test in tests:
+        if (
+            not isinstance(test, dict)
+            or str(test.get("pid")) in failed
+            or test.get("status") not in UNFINISHED
+        ):
+            continue
+        try:
+            mark_plugin_failed(evaluation_pid, test["pid"], STOPPED)
+        except Exception as e:
+            logger.warning(
+                f"Could not mark test {test['pid']} stopped: {type(e).__name__}"
+            )
 
 
 @celery_app.task(bind=True)
@@ -355,8 +392,7 @@ def install_package(
             f"Failed to cache {package_name}=={version}: {type(e).__name__}: {text}"
         )
         if evaluation_pid and evaluation_plugin_pids:
-            for pid in evaluation_plugin_pids:
-                mark_plugin_failed(evaluation_pid, pid, text)
+            _stop_run(evaluation_pid, evaluation_plugin_pids, text, self.request.id)
         raise
 
 
@@ -463,7 +499,7 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
 
     # store plugin task ids in redis so siblings can be revoked on failure
     celery_app.backend.client.set(
-        f"eval_tasks:{evaluation_pid}", json.dumps(plugin_task_ids), ex=7200
+        _run_tasks_key(evaluation_pid), json.dumps(plugin_task_ids), ex=7200
     )
 
     return {"evaluation_pid": evaluation_pid, "plugin_task_ids": plugin_task_ids}
@@ -485,18 +521,24 @@ def run_plugin(
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
         plugin_loader.list_packages()
 
-    # abort early if another plugin already failed this evaluation
+    # a test of a run that already failed never starts; one already marked stopped keeps its mark
     try:
         eval_data = get_evaluation_request(evaluation_pid)
         if eval_data.get("status") == "Failed":
             logger.info(
                 f"Evaluation {evaluation_pid} already failed — skipping plugin {plugin_name}"
             )
-            mark_plugin_failed(
-                evaluation_pid,
-                evaluation_plugin_pid,
-                "Aborted: evaluation already failed",
+            own = next(
+                (
+                    t
+                    for t in eval_data.get("evaluation_plugins") or []
+                    if isinstance(t, dict)
+                    and str(t.get("pid")) == str(evaluation_plugin_pid)
+                ),
+                {},
             )
+            if own.get("status") != "Failed":
+                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, STOPPED)
             return []
     except Exception:
         pass
@@ -784,12 +826,7 @@ def run_plugin(
             log_content = scrub_text(log_content, known)
 
             if returncode != 0:
-                _fail_plugin_and_revoke(
-                    evaluation_pid,
-                    evaluation_plugin_pid,
-                    scrub_text(stderr_content, known),
-                    str(self.request.id),
-                )
+                # the run is stopped once, with this message, by the handler below
                 raise RuntimeError(
                     f"Plugin failed: {scrub_text(log_stderr_content, known)}"
                 )
@@ -813,11 +850,11 @@ def run_plugin(
             return _without_known(measures, known)
         except Exception as exc:
             _terminate_process(process)
-            _fail_plugin_and_revoke(
+            _stop_run(
                 evaluation_pid,
-                evaluation_plugin_pid,
+                [evaluation_plugin_pid],
                 scrub_text(str(exc), known) or exc.__class__.__name__,
-                str(self.request.id),
+                self.request.id,
             )
             clean = _scrubbed_error(exc, known)
             if clean is exc:
@@ -839,7 +876,8 @@ def post_measurements(
         measurements = [Measure(**m) for m in measurements_dict]
         post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
     except Exception as e:
-        mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, scrub_text(str(e)))
+        # post_measurements is in no run's task list: every one of them is revoked
+        _stop_run(evaluation_pid, [evaluation_plugin_uuid], scrub_text(str(e)), None)
         clean = _scrubbed_error(e)
         if clean is e:
             raise
