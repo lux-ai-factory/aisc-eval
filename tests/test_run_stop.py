@@ -1,15 +1,17 @@
 """When one test of a run fails, the run stops: whichever task failed (its package's install, the test itself, or
 posting its measurements), the run's other tasks are revoked, so those running stop and those queued never start,
 and each of its other tests still Pending or Running is marked failed as stopped. A test that already finished
-keeps its result. The backend and the broker are
+keeps its result. The list of the run's tasks is kept as long as the run can last. The backend and the broker are
 faked as test_plugin_process.py fakes them."""
 
 import json
 import types
+import uuid
 
 import pytest
 
 from aisc_eval import celery_tasks, plugin_process
+from aisc_eval.data_model.evaluation import Evaluation
 
 from test_plugin_process import _Process, worker  # noqa: F401  (the fixture)
 
@@ -115,3 +117,50 @@ def test_a_test_already_marked_stopped_keeps_its_mark_when_it_starts(broker, mon
                         lambda pid: engine_run(status="Failed", own_status="Failed"))
     assert celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], EVALUATION, FAILING) == []
     assert broker["failed"] == []
+
+
+# ── The run's task list ──────────────────────────────────────────────────────
+
+PROJECT = "22222222-2222-2222-2222-222222222222"
+
+
+def two_packages():
+    def test(pid, package):
+        return {"pid": pid, "name": "Plugin", "package_name": package, "version": "1.0", "plugin_config": None,
+                "evaluation_inputs": []}
+
+    return Evaluation.model_validate({
+        "pid": "11111111-1111-1111-1111-111111111111", "project": {"pid": PROJECT, "name": "mijke"},
+        "evaluation_plugins": [test(str(uuid.uuid4()), "pkg-a"), test(str(uuid.uuid4()), "pkg-a"),
+                               test(str(uuid.uuid4()), "pkg-b")]})
+
+
+def test_the_runs_task_list_names_every_install_and_test_and_lasts_as_long_as_the_run(monkeypatch):
+    stored = {}
+
+    class _Workflow:
+        def __or__(self, other):
+            return self
+
+        def apply_async(self):
+            stored["dispatched"] = True
+
+    monkeypatch.setattr(celery_tasks.plugin_loader, "list_packages", lambda refresh=False: {})
+    monkeypatch.setattr(celery_tasks, "get_evaluation", lambda pid: two_packages())
+    monkeypatch.setattr(celery_tasks, "get_evaluation_inputs", lambda pid: {})
+    monkeypatch.setattr(celery_tasks, "get_project_settings_by_pid", lambda *a: [])
+    monkeypatch.setattr(celery_tasks, "group", lambda *a: _Workflow())
+    monkeypatch.setattr(celery_tasks, "chain", lambda *a: a)
+    fake_app = types.SimpleNamespace(
+        backend=types.SimpleNamespace(client=types.SimpleNamespace(
+            set=lambda key, value, ex: stored.update(key=key, value=json.loads(value), ex=ex))),
+        conf=types.SimpleNamespace(task_time_limit=24300))
+    monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
+
+    out = celery_tasks._start_evaluation(EVALUATION)
+    assert stored["dispatched"] and stored["key"] == f"eval_tasks:{EVALUATION}"
+    # two installs and three tests, all of them revocable; the tests are what the run answers
+    assert len(stored["value"]) == 5 and set(out["plugin_task_ids"]) < set(stored["value"])
+    # one worker runs a task at a time: 2 installs, 3 tests, 3 posts of their measurements and the finalisation,
+    # each as long as a task may take
+    assert stored["ex"] == 9 * 24300

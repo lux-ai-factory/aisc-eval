@@ -264,6 +264,12 @@ def _run_tasks_key(evaluation_pid: uuid.UUID) -> str:
     return f"eval_tasks:{evaluation_pid}"
 
 
+def _run_tasks_ttl(task_count: int) -> int:
+    """How long a run's task list is kept: as long as the run can last, each of its tasks taking the longest a
+    task may (task_time_limit), one after the other as the worker runs them."""
+    return task_count * int(celery_app.conf.task_time_limit)
+
+
 def _revoke_sibling_tasks(
     evaluation_pid: uuid.UUID, current_task_id: str | None
 ) -> None:
@@ -449,6 +455,7 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
     # build per-package chains: install_pkg -> group(run_plugin -> post_measurements)
     package_chains = []
     plugin_task_ids = []
+    install_task_ids = []
     for pkg_key, pkg_info in plugins_by_pkg.items():
         install_sig = install_package.si(
             pkg_info["package_name"],
@@ -456,6 +463,8 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
             evaluation_pid,
             [ep.pid for ep in pkg_info["plugins"]],
         )
+        install_sig.freeze()
+        install_task_ids.append(str(install_sig.id))
 
         plugin_chain_list = []
         for evaluation_plugin in pkg_info["plugins"]:
@@ -497,9 +506,12 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
     workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
     workflow.apply_async()
 
-    # store plugin task ids in redis so siblings can be revoked on failure
+    # the run's installs and tests, so a failure revokes them; kept as long as the run can last: every install,
+    # test and post of its measurements, and the finalisation
     celery_app.backend.client.set(
-        _run_tasks_key(evaluation_pid), json.dumps(plugin_task_ids), ex=7200
+        _run_tasks_key(evaluation_pid),
+        json.dumps(install_task_ids + plugin_task_ids),
+        ex=_run_tasks_ttl(len(install_task_ids) + 2 * len(plugin_task_ids) + 1),
     )
 
     return {"evaluation_pid": evaluation_pid, "plugin_task_ids": plugin_task_ids}
