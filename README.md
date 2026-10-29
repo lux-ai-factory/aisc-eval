@@ -149,9 +149,9 @@ section. See [official Python documentation on LogRecord attributes](https://doc
 
 Please do not push your local changes, except if necessary. For instance, DEBUG log in `logging.yaml` should not be pushed.
 
-## Changes on feat/unified-modules
+## Changes on pilot
 
-`feat/unified-modules` is the branch the Configurator uses. It is not held to
+`pilot` is the branch the Configurator uses. It is not held to
 `origin/master`. Compared with it:
 
 - **Deployment mode and run headers**: `aisc_eval/deployment.py`, `aisc_eval/run_context.py`, and
