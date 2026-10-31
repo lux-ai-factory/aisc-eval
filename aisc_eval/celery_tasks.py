@@ -333,48 +333,15 @@ def install_package(
     plugin_info = available_versions[version]
 
     try:
-        installer = plugin_process.install_user()
         with tempfile.TemporaryDirectory(delete=True) as cache_tmp:
-            if plugin_info["source"] == "local":
-                install_target = str(
-                    plugin_process.stage_local_source(
-                        plugin_info["pkg_root"].resolve(),
-                        Path(cache_tmp) / "source",
-                        installer,
-                    )
-                )
-            else:
-                install_target = f"{package_name}=={version}"
-            cache_venv = Path(cache_tmp) / "venv"
-            plugin_process.prepare_install_folder(cache_venv, installer)
-            made = plugin_process.run_install(
-                [
-                    "uv",
-                    "venv",
-                    str(cache_venv),
-                    "--allow-existing",
-                    "--python",
-                    "/usr/local/bin/python",
-                ],
-                installer,
-                timeout=60,
+            plugin_process.build_venv(
+                package_name,
+                version,
+                plugin_info,
+                Path(cache_tmp),
+                plugin_process.install_user(),
+                plugin_loader.devpi_client.simple_index_url,
             )
-            if made.returncode != 0:
-                raise RuntimeError(scrub_text(made.stderr))
-            # Always pass the devpi index. (We used to probe it with a 2s urlopen and drop
-            # --extra-index-url on timeout, but that probe hits the FULL /+simple/ root — which
-            # lists the whole PyPI mirror and is slow — so it intermittently timed out and silently
-            # dropped devpi, making registry plugins "not found". If devpi is truly down, let uv
-            # fail loudly instead.)
-            install_cmd = ["uv", "pip", "install", "--python", str(cache_venv)]
-            extra_url = plugin_loader.devpi_client.simple_index_url
-            if extra_url:
-                install_cmd.extend(["--extra-index-url", extra_url])
-            install_cmd.append(install_target)
-
-            result = plugin_process.run_install(install_cmd, installer, timeout=1000)
-            if result.returncode != 0:
-                raise RuntimeError(scrub_text(result.stderr))
 
         logger.info(
             f"Successfully cached {package_name}=={version} and all dependencies"
@@ -666,61 +633,23 @@ def run_plugin(
 
         runtime_script = plugin_process.copy_runtime(workspace_path)
 
-        installer = plugin_process.install_user()
-        if plugin_info["source"] == "local":
-            install_target = str(
-                plugin_process.stage_local_source(
-                    plugin_info["pkg_root"].resolve(),
-                    workspace_path / "source",
-                    installer,
-                )
+        # Steps 1 and 2: the venv, made and filled by the install user: the plugin may run it but not change it
+        logger.debug(f"Installing {package_name}=={version} into an isolated venv")
+        try:
+            venv = plugin_process.build_venv(
+                package_name,
+                version,
+                plugin_info,
+                workspace_path,
+                plugin_process.install_user(),
+                plugin_loader.devpi_client.simple_index_url,
             )
-        else:
-            install_target = f"{package_name}=={version}"
-
-        venv_dir = workspace_path / "venv"
-        venv_python = venv_dir / "bin" / "python"
-
-        # Step 1: Create isolated venv, as the install user: the plugin may run it but not change it
-        logger.debug(f"Creating isolated venv at {venv_dir}")
-        plugin_process.prepare_install_folder(venv_dir, installer)
-        venv_result = plugin_process.run_install(
-            [
-                "uv",
-                "venv",
-                str(venv_dir),
-                "--allow-existing",
-                "--python",
-                "/usr/local/bin/python",
-            ],
-            installer,
-            timeout=1000,
-        )
-        if venv_result.returncode != 0:
-            failure = scrub_text(venv_result.stderr or "")
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, failure)
-            raise RuntimeError(f"Failed to create venv: {failure}")
-
-        # Step 2: Install plugin and dependencies into the venv (online, from devpi).
-        # NOTE: we do NOT use --offline here. The evaluation run needs the network anyway (e.g.
-        # GPT4ALL downloads its model at run time), so offline isolation gave nothing, and it broke
-        # for registry plugins whose shared dep (aisc-plugin-interface) is resolved via a local
-        # workspace source and therefore never cached under the devpi index for the offline resolver.
-        # Installing online resolves everything from the devpi index (root/public bases root/pypi),
-        # exactly like install_package already does successfully.
-        logger.debug(f"Installing {install_target} into isolated venv")
-        install_cmd = ["uv", "pip", "install", "--python", str(venv_dir)]
-        extra_url = plugin_loader.devpi_client.simple_index_url
-        if extra_url:
-            install_cmd.extend(["--extra-index-url", extra_url])
-        install_cmd.append(install_target)
-        install_result = plugin_process.run_install(
-            install_cmd, installer, timeout=1000
-        )
-        if install_result.returncode != 0:
-            failure = scrub_text(install_result.stderr or "")
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, failure)
-            raise RuntimeError(f"Failed to install plugin: {failure}")
+        except plugin_process.InstallFailed as failed:
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, str(failed))
+            what = "create venv" if failed.step == "venv" else "install plugin"
+            raise RuntimeError(f"Failed to {what}: {failed}") from None
+        venv_python = venv.python
+        venv_result, install_result = venv.made, venv.installed
 
         # A pass to the platform for exactly the targets and connections this run names, all of the
         # run's own project: the platform pid the backend put in the run's aisc_run header

@@ -22,11 +22,13 @@ import shutil
 import signal
 import stat
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 from aisc_eval import plugin_runtime
+from aisc_eval.scrub import scrub_text
 from aisc_eval.utils import env
 
 #: files a plugin creates are its own: other plugin runs share its user
@@ -49,6 +51,8 @@ class PluginUser:
 INSTALL_PATH = "/usr/local/bin:/usr/bin:/bin"
 #: an install's files are read and run by the plugin user
 INSTALL_UMASK = 0o022
+#: seconds each install step may take: a first-time Python download or a large package is slow
+INSTALL_TIMEOUT = 1000
 
 
 def _user(name: str, role: str) -> PluginUser:
@@ -125,6 +129,77 @@ def prepare_install_folder(folder: Path, user: PluginUser) -> None:
     if user.switch:
         os.chown(folder, user.uid, user.gid)
     os.chmod(folder, 0o755)
+
+
+class InstallFailed(RuntimeError):
+    """A step of building a plugin's venv failed; the text is the step's scrubbed stderr."""
+
+    def __init__(self, step: str, text: str):
+        super().__init__(text)
+        #: "venv" (making it) or "install" (filling it)
+        self.step = step
+
+
+@dataclass(frozen=True)
+class Venv:
+    path: Path
+    #: the two steps, whose output goes to the run's log
+    made: subprocess.CompletedProcess[str]
+    installed: subprocess.CompletedProcess[str]
+
+    @property
+    def python(self) -> Path:
+        return self.path / "bin" / "python"
+
+
+def build_venv(
+    package_name: str,
+    version: str,
+    plugin_info: Mapping[str, Any],
+    folder: Path,
+    installer: PluginUser,
+    index_url: str | None,
+) -> Venv:
+    """The plugin installed in folder/venv by the install user: a local plugin from its copy in
+    folder/source, a catalogue one from the index (index_url, when there is one, besides PyPI).
+    InstallFailed when a step fails."""
+    if plugin_info["source"] == "local":
+        install_target = str(
+            stage_local_source(
+                plugin_info["pkg_root"].resolve(), folder / "source", installer
+            )
+        )
+    else:
+        install_target = f"{package_name}=={version}"
+    venv = folder / "venv"
+    prepare_install_folder(venv, installer)
+    made = run_install(
+        [
+            "uv",
+            "venv",
+            str(venv),
+            "--allow-existing",
+            "--python",
+            "/usr/local/bin/python",
+        ],
+        installer,
+        timeout=INSTALL_TIMEOUT,
+    )
+    if made.returncode != 0:
+        raise InstallFailed("venv", scrub_text(made.stderr or ""))
+    # Online, from the index: the run needs the network anyway (a plugin may download its model),
+    # and a plugin's shared dependency resolved from a local workspace source is never cached
+    # under the index for an offline resolver. The index is always passed: a probe of it was slow
+    # (its root lists the whole PyPI mirror) and dropped it on a timeout, so a catalogue plugin was
+    # "not found"; when it is down, uv says so.
+    install_cmd = ["uv", "pip", "install", "--python", str(venv)]
+    if index_url:
+        install_cmd.extend(["--extra-index-url", index_url])
+    install_cmd.append(install_target)
+    installed = run_install(install_cmd, installer, timeout=INSTALL_TIMEOUT)
+    if installed.returncode != 0:
+        raise InstallFailed("install", scrub_text(installed.stderr or ""))
+    return Venv(venv, made, installed)
 
 
 def prepare_workspace(workspace: Path, output_dir: Path, user: PluginUser) -> None:

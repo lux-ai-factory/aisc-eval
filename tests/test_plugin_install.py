@@ -209,3 +209,73 @@ def test_a_runs_local_plugin_is_installed_from_its_copy(
         argv for argv, _ in installs if argv[:3] == ["uv", "pip", "install"]
     ][0]
     assert Path(install_cmd[-1]) != source and Path(install_cmd[-1]).name == "source"
+
+
+# One way to build a plugin's environment, for the install that warms the cache and for each run
+
+
+def _recorded_installs(monkeypatch):
+    seen = []
+
+    def run_install(argv, user, timeout):
+        seen.append((argv, timeout))
+        return _Ok()
+
+    monkeypatch.setattr(plugin_process, "run_install", run_install)
+    return seen
+
+
+def test_a_venv_is_made_then_filled_from_the_index(monkeypatch, tmp_path):
+    seen = _recorded_installs(monkeypatch)
+    me = PluginUser(os.getuid(), os.getgid(), None, switch=False)
+    venv = plugin_process.build_venv(
+        "pkg", "1.0", {"source": "registry"}, tmp_path, me, "http://devpi/simple"
+    )
+    assert venv.path == tmp_path / "venv" and venv.python == tmp_path / "venv" / "bin" / "python"
+    (made, made_timeout), (filled, filled_timeout) = seen
+    assert made == [
+        "uv", "venv", str(tmp_path / "venv"), "--allow-existing", "--python", "/usr/local/bin/python"
+    ]
+    assert filled == [
+        "uv", "pip", "install", "--python", str(tmp_path / "venv"),
+        "--extra-index-url", "http://devpi/simple", "pkg==1.0",
+    ]
+    # a first-time Python download can be slow: neither step is cut short at a minute
+    assert made_timeout == filled_timeout == plugin_process.INSTALL_TIMEOUT
+
+
+def test_a_failed_step_is_refused_with_its_message_scrubbed(monkeypatch, tmp_path):
+    class _Failed(_Ok):
+        returncode = 1
+        stderr = "error: api_key=abcd1234efgh refused"
+
+    monkeypatch.setattr(plugin_process, "run_install", lambda *a, **kw: _Failed())
+    me = PluginUser(os.getuid(), os.getgid(), None, switch=False)
+    with pytest.raises(plugin_process.InstallFailed) as refused:
+        plugin_process.build_venv("pkg", "1.0", {"source": "registry"}, tmp_path, me, None)
+    assert str(refused.value) == "error: api_key=[redacted] refused"
+    assert refused.value.step == "venv"
+
+
+def test_both_tasks_build_the_venv_the_same_way(installs, monkeypatch):
+    seen = _recorded_installs(monkeypatch)
+    celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"])
+    warmed = list(seen)
+    seen.clear()
+    monkeypatch.setattr(
+        celery_tasks, "get_evaluation_request", lambda pid: {"status": "Running"}
+    )
+    monkeypatch.setattr(
+        celery_tasks,
+        "mark_plugin_started",
+        lambda *a: (_ for _ in ()).throw(RuntimeError("stop before the plugin starts")),
+    )
+    monkeypatch.setattr(celery_tasks, "mark_plugin_failed", lambda *a: None)
+    monkeypatch.setattr(celery_tasks, "_revoke_sibling_tasks", lambda *a: None)
+    with pytest.raises(RuntimeError):
+        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
+
+    def shape(calls):
+        return [(argv[:2], timeout) for argv, timeout in calls]
+
+    assert shape(warmed) == shape(seen) and len(seen) == 2
