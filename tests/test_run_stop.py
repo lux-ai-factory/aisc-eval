@@ -9,6 +9,7 @@ import types
 import uuid
 
 import pytest
+import requests
 
 from aisc_eval import celery_tasks, plugin_process
 from aisc_eval.data_model.evaluation import Evaluation
@@ -164,3 +165,67 @@ def test_the_runs_task_list_names_every_install_and_test_and_lasts_as_long_as_th
     # one worker runs a task at a time: 2 installs, 3 tests, 3 posts of their measurements and the finalisation,
     # each as long as a task may take
     assert stored["ex"] == 9 * 24300
+
+
+# ── Every way a test can fail stops the run once ────────────────────────────
+
+
+def own_marks(worker):
+    return [text for _evaluation, ep, text in worker["failed"] if ep == FAILING]
+
+
+def test_an_input_that_cannot_be_fetched_fails_the_test_once_and_stops_the_run(broker, monkeypatch):
+    def refused(name):
+        raise requests.HTTPError("404 for the dataset")
+
+    monkeypatch.setattr(celery_tasks, "get_dataset_file_content", refused)
+    with pytest.raises(requests.HTTPError):
+        celery_tasks.run_plugin.run(
+            "pkg", "Plugin", "1.0", {},
+            [{"component_type": "dataset", "name": "data", "data": "data.csv"}], [], EVALUATION, FAILING)
+    assert own_marks(broker) == ["404 for the dataset"]
+    assert stopped(broker) == [PENDING, RUNNING]
+    assert broker["revoked"] == TASKS
+
+
+def test_an_unsupported_input_fails_the_test_once_and_stops_the_run(broker):
+    with pytest.raises(ValueError):
+        celery_tasks.run_plugin.run(
+            "pkg", "Plugin", "1.0", {}, [{"component_type": "telepathy", "name": "x"}], [], EVALUATION, FAILING)
+    assert own_marks(broker) == ["Unsupported component type: telepathy"]
+    assert stopped(broker) == [PENDING, RUNNING]
+
+
+def test_a_failed_venv_fails_the_test_once_and_stops_the_run(broker, monkeypatch):
+    monkeypatch.setattr(plugin_process, "run_install",
+                        lambda *a, **kw: types.SimpleNamespace(returncode=1, stdout="", stderr="no python"))
+    with pytest.raises(RuntimeError):
+        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], EVALUATION, FAILING)
+    assert own_marks(broker) == ["no python"]
+    assert stopped(broker) == [PENDING, RUNNING]
+    assert broker["revoked"] == TASKS
+
+
+def test_a_minted_pass_is_revoked_when_the_test_fails_before_its_plugin_starts(broker, monkeypatch):
+    from aisc_eval import run_context
+
+    revoked_passes = []
+    monkeypatch.setattr(celery_tasks.run_pass, "mint", lambda *a, **kw: "the-pass")
+    monkeypatch.setattr(celery_tasks.run_pass, "revoke", revoked_passes.append)
+
+    def unreachable(*a):
+        raise ConnectionError("engine not answering")
+
+    monkeypatch.setattr(celery_tasks, "mark_plugin_started", unreachable)
+    token = run_context._current.set({"project": "p", "evaluation": EVALUATION, "ticket": "t"})
+    try:
+        with pytest.raises(ConnectionError):
+            celery_tasks.run_plugin.run(
+                "pkg", "Plugin", "1.0", {},
+                [{"component_type": "resource", "name": "target",
+                  "json_value": {"value": "target:p/system"}}], [], EVALUATION, FAILING)
+    finally:
+        run_context._current.reset(token)
+    assert revoked_passes == ["the-pass"]
+    assert own_marks(broker) == ["engine not answering"]
+    assert stopped(broker) == [PENDING, RUNNING]

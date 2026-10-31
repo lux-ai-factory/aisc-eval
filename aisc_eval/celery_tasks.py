@@ -35,7 +35,7 @@ from aisc_eval.service.api_client import (
     store_input_value,
 )
 from aisc_eval.service import run_pass
-from aisc_eval.service.helpers import HelperUnavailable, resolve_helper
+from aisc_eval.service.helpers import resolve_helper
 from aisc_eval.utils.logging import get_logger
 
 from aisc_plugin_manager.loader import Loader
@@ -519,8 +519,15 @@ def run_plugin(
 
     plugin_info = available_versions[version]
 
-    with tempfile.TemporaryDirectory(delete=True) as tmp_dir:
-        workspace_path = Path(tmp_dir)
+    # From here on every failure of the test ends in the one handler below: the test is marked failed
+    # once, the run's other tests are stopped, the plugin is ended, and the pass is revoked
+    workspace = tempfile.TemporaryDirectory(delete=True)
+    minted: str | None = None
+    process: subprocess.Popen | None = None
+    # the values this run hands its plugin, removed from every text the worker reports of it
+    known: list[str] = []
+    try:
+        workspace_path = Path(workspace.name)
 
         # Setup internal workspace structure
         input_dir = workspace_path / "input"
@@ -531,9 +538,6 @@ def run_plugin(
         # the backend could not load the plugin to say whether its model file is the local target:
         # running anyway could store a local run as if it were an AI card run
         if any(component.get("local_model_unknown") for component in input_components):
-            mark_plugin_failed(
-                evaluation_pid, evaluation_plugin_pid, LOCAL_MODEL_UNKNOWN
-            )
             raise RuntimeError(LOCAL_MODEL_UNKNOWN)
 
         input_mapping = {}
@@ -559,12 +563,8 @@ def run_plugin(
                 # key goes to the plugin's environment only, under the name self.helper() reads
                 role = name.removeprefix("helper:").upper()
                 secret_key = f"AISC_HELPER_{role}_KEY"
-                try:
-                    resolved = resolve_helper(component.get("helper_ref"))
-                except HelperUnavailable as exc:
-                    message = scrub_text(str(exc))
-                    mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, message)
-                    raise RuntimeError(message) from None
+                # a helper the platform cannot give fails the run with its reason, fit to show the person
+                resolved = resolve_helper(component.get("helper_ref"))
                 if resolved.get("api_key"):
                     helper_secret_env[_secret_env_name(secret_key)] = resolved[
                         "api_key"
@@ -606,9 +606,9 @@ def run_plugin(
         # it is never an AI card run, and it opens nothing on the platform (no run pass)
         if local_model is not None:
             if run_pass.refs_of(input_components):
-                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, BOTH_KINDS)
                 raise ValueError(BOTH_KINDS)
             (input_dir / "target.json").write_text(json.dumps(local_model["marker"]))
+            not_stored = None
             try:
                 store_input_value(
                     evaluation_pid, local_model["input"], local_model["marker"]
@@ -616,9 +616,10 @@ def run_plugin(
             except Exception as exc:
                 # the person reads this: the answer's status, never the backend's address
                 status = getattr(getattr(exc, "response", None), "status_code", None)
-                message = f"{MARKER_NOT_STORED} ({f'HTTP {status}' if status else 'no answer'})"
-                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, message)
-                raise RuntimeError(message) from None
+                not_stored = f"{MARKER_NOT_STORED} ({f'HTTP {status}' if status else 'no answer'})"
+            if not_stored:
+                # raised outside the except: the backend's error, which names its address, is not chained
+                raise RuntimeError(not_stored)
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
@@ -635,38 +636,26 @@ def run_plugin(
 
         # Steps 1 and 2: the venv, made and filled by the install user: the plugin may run it but not change it
         logger.debug(f"Installing {package_name}=={version} into an isolated venv")
-        try:
-            venv = plugin_process.build_venv(
-                package_name,
-                version,
-                plugin_info,
-                workspace_path,
-                plugin_process.install_user(),
-                plugin_loader.devpi_client.simple_index_url,
-            )
-        except plugin_process.InstallFailed as failed:
-            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, str(failed))
-            what = "create venv" if failed.step == "venv" else "install plugin"
-            raise RuntimeError(f"Failed to {what}: {failed}") from None
+        venv = plugin_process.build_venv(
+            package_name,
+            version,
+            plugin_info,
+            workspace_path,
+            plugin_process.install_user(),
+            plugin_loader.devpi_client.simple_index_url,
+        )
         venv_python = venv.python
         venv_result, install_result = venv.made, venv.installed
 
         # A pass to the platform for exactly the targets and connections this run names, all of the
         # run's own project: the platform pid the backend put in the run's aisc_run header
-        minted: str | None = None
         refs = run_pass.refs_of(input_components)
         if refs:
-            try:
-                minted = run_pass.mint(
-                    refs,
-                    str(evaluation_plugin_pid),
-                    project=(run_context.current() or {}).get("project"),
-                )
-            except run_pass.RunPassRefused as exc:
-                mark_plugin_failed(
-                    evaluation_pid, evaluation_plugin_pid, scrub_text(str(exc))
-                )
-                raise run_pass.RunPassRefused(scrub_text(str(exc))) from None
+            minted = run_pass.mint(
+                refs,
+                str(evaluation_plugin_pid),
+                project=(run_context.current() or {}).get("project"),
+            )
 
         # Step 3: Run plugin script with the isolated venv's Python
         logger.debug(f"Running plugin with: {venv_python} {runtime_script}")
@@ -675,123 +664,116 @@ def run_plugin(
 
         stdout_lines: list[str] = []
         stderr_path = workspace_path / "stderr.tmp"
-        process: subprocess.Popen | None = None
         returncode: int | None = None
         stderr_content = ""
-        # the values this run hands its plugin, removed from every text the worker reports of it
-        known: list[str] = []
-        try:
-            secret_env = build_secret_environment(
-                project_settings + llm_secret_settings
-            )
-            secret_env.update(helper_secret_env)
-            known = known_secrets(secret_env, os.environ, plugin_config, minted)
-            user = plugin_process.plugin_user()
-            plugin_process.prepare_workspace(workspace_path, output_dir, user)
-            with open(stderr_path, "w+") as stderr_file:
-                child_env = plugin_environment(os.environ, secret_env, minted)
-                process = plugin_process.start(
-                    [str(venv_python), str(runtime_script)],
-                    workspace_path,
-                    stderr_file,
-                    child_env,
-                    user,
-                )
-
-                if (stdout := process.stdout) is not None:
-                    for line in stdout:
-                        stdout_lines.append(line)
-                        stripped_line = line.strip()
-
-                        if stripped_line.startswith("{") and stripped_line.endswith(
-                            "}"
-                        ):
-                            try:
-                                progress_data = json.loads(stripped_line)
-                                task_progress = TaskProgress(**progress_data)
-
-                                progress_callback(
-                                    task_progress,
-                                    plugin_name,
-                                    str(self.request.id),
-                                    known,
-                                )
-                            except Exception:
-                                pass
-
-                returncode = plugin_process.wait(process)
-
-                stderr_file.seek(0)
-                stderr_content = stderr_file.read()
-
-            end_time = time.perf_counter()
-            duration = end_time - start_time
-            stdout_content = "".join(stdout_lines)
-
-            log_stdout_content = (
-                "====== Step 1: Venv Creation ======\n"
-                + (venv_result.stdout or "")
-                + "\n\n"
-                "====== Step 2: Plugin Install ======\n"
-                + (install_result.stdout or "")
-                + "\n\n"
-                "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
-            )
-            log_stderr_content = (
-                "====== Step 1: Venv Creation ======\n"
-                + (venv_result.stderr or "")
-                + "\n\n"
-                "====== Step 2: Plugin Install ======\n"
-                + (install_result.stderr or "")
-                + "\n\n"
-                "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
+        secret_env = build_secret_environment(project_settings + llm_secret_settings)
+        secret_env.update(helper_secret_env)
+        known = known_secrets(secret_env, os.environ, plugin_config, minted)
+        user = plugin_process.plugin_user()
+        plugin_process.prepare_workspace(workspace_path, output_dir, user)
+        with open(stderr_path, "w+") as stderr_file:
+            child_env = plugin_environment(os.environ, secret_env, minted)
+            process = plugin_process.start(
+                [str(venv_python), str(runtime_script)],
+                workspace_path,
+                stderr_file,
+                child_env,
+                user,
             )
 
-            log_content = "=== Plugin Execution Log ===\n\n"
-            log_content += f"Execution Time: {duration:.2f} seconds\n\n"
-            log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
-            log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
-            log_content += f"=== Return Code ===\n{returncode}\n"
-            log_content = scrub_text(log_content, known)
+            if (stdout := process.stdout) is not None:
+                for line in stdout:
+                    stdout_lines.append(line)
+                    stripped_line = line.strip()
 
-            if returncode != 0:
-                # the run is stopped once, with this message, by the handler below
-                raise RuntimeError(
-                    f"Plugin failed: {scrub_text(log_stderr_content, known)}"
-                )
+                    if stripped_line.startswith("{") and stripped_line.endswith("}"):
+                        try:
+                            progress_data = json.loads(stripped_line)
+                            task_progress = TaskProgress(**progress_data)
 
-            outputs = plugin_process.read_outputs(output_dir, user)
-            measures = json.loads(outputs.pop("measures.json", b"[]"))
+                            progress_callback(
+                                task_progress,
+                                plugin_name,
+                                str(self.request.id),
+                                known,
+                            )
+                        except Exception:
+                            pass
 
-            # the log is the worker's, kept out of output/ where the plugin could plant a link
-            outputs["plugin_execution.log"] = log_content.encode()
-            # every file without the values the run handed its plugin, in its name and its bytes
-            for name, content in outputs.items():
-                upload_artifact(
-                    evaluation_pid,
-                    evaluation_plugin_pid,
-                    _without_known(name, known),
-                    without_known_bytes(content, known),
-                )
+            returncode = plugin_process.wait(process)
 
-            mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
-            # what the chain hands post_measurements (and the result backend keeps): no value the plugin was given
-            return _without_known(measures, known)
-        except Exception as exc:
-            plugin_process.terminate(process)
-            _stop_run(
+            stderr_file.seek(0)
+            stderr_content = stderr_file.read()
+
+        end_time = time.perf_counter()
+        duration = end_time - start_time
+        stdout_content = "".join(stdout_lines)
+
+        log_stdout_content = (
+            "====== Step 1: Venv Creation ======\n"
+            + (venv_result.stdout or "")
+            + "\n\n"
+            "====== Step 2: Plugin Install ======\n"
+            + (install_result.stdout or "")
+            + "\n\n"
+            "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
+        )
+        log_stderr_content = (
+            "====== Step 1: Venv Creation ======\n"
+            + (venv_result.stderr or "")
+            + "\n\n"
+            "====== Step 2: Plugin Install ======\n"
+            + (install_result.stderr or "")
+            + "\n\n"
+            "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
+        )
+
+        log_content = "=== Plugin Execution Log ===\n\n"
+        log_content += f"Execution Time: {duration:.2f} seconds\n\n"
+        log_content += f"=== STDOUT ===\n{log_stdout_content}\n\n"
+        log_content += f"=== STDERR ===\n{log_stderr_content}\n\n"
+        log_content += f"=== Return Code ===\n{returncode}\n"
+        log_content = scrub_text(log_content, known)
+
+        if returncode != 0:
+            # the run is stopped once, with this message, by the handler below
+            raise RuntimeError(
+                f"Plugin failed: {scrub_text(log_stderr_content, known)}"
+            )
+
+        outputs = plugin_process.read_outputs(output_dir, user)
+        measures = json.loads(outputs.pop("measures.json", b"[]"))
+
+        # the log is the worker's, kept out of output/ where the plugin could plant a link
+        outputs["plugin_execution.log"] = log_content.encode()
+        # every file without the values the run handed its plugin, in its name and its bytes
+        for name, content in outputs.items():
+            upload_artifact(
                 evaluation_pid,
-                [evaluation_plugin_pid],
-                scrub_text(str(exc), known) or exc.__class__.__name__,
-                self.request.id,
+                evaluation_plugin_pid,
+                _without_known(name, known),
+                without_known_bytes(content, known),
             )
-            clean = _scrubbed_error(exc, known)
-            if clean is exc:
-                raise
-            raise clean from None
-        finally:
-            if minted:
-                run_pass.revoke(minted)
+
+        mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
+        # what the chain hands post_measurements (and the result backend keeps): no value the plugin was given
+        return _without_known(measures, known)
+    except Exception as exc:
+        plugin_process.terminate(process)
+        _stop_run(
+            evaluation_pid,
+            [evaluation_plugin_pid],
+            scrub_text(str(exc), known) or exc.__class__.__name__,
+            self.request.id,
+        )
+        clean = _scrubbed_error(exc, known)
+        if clean is exc:
+            raise
+        raise clean from None
+    finally:
+        if minted:
+            run_pass.revoke(minted)
+        workspace.cleanup()
 
 
 @celery_app.task
