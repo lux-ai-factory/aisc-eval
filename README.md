@@ -74,7 +74,6 @@ Read from the environment (`aisc_eval/utils/env.py`, `aisc_eval/deployment.py`, 
 | `PACKAGE_REGISTRY_URL`, `PACKAGE_REGISTRY_INDEX`, `PACKAGE_REGISTRY_USER`, `PACKAGE_REGISTRY_PASSWORD` | package index tests are installed from | empty | `http://devpi:3141`, `root/public`, no login |
 | `PLATFORM_URL` | the platform, for run passes and helper models | empty | `http://platform:8000` |
 | `PLATFORM_CONNECTIONS_TOKEN` | the worker's service token to the platform; never given to a plugin | empty | from the secrets |
-| `CACHE_DIR` | cache of plugin environments | `/tmp/cache` | default |
 | `PLUGIN_USER`, `PLUGIN_INSTALL_USER` | the users a root worker runs and installs plugins as | `aisc-plugin`, `aisc-install` | defaults |
 
 A plugin does not get the worker's environment. It runs with an allowlist (`PLUGIN_ENV_NAMES` in
