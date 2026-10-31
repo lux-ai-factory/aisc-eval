@@ -239,29 +239,6 @@ def test_a_refused_run_pass_is_raised_with_its_secrets_redacted(
     assert SHAPED not in caplog.text
 
 
-def test_the_error_handler_logs_neither_the_configuration_nor_the_failure_in_clear(
-    monkeypatch, caplog
-):
-    import logging
-
-    monkeypatch.setattr(celery_tasks, "mark_failed", lambda *a, **kw: None)
-    request = {
-        "args": [
-            "pkg",
-            "Plugin",
-            "1.0",
-            {"api_key": "cfg-key-12345678", "judge": f"Bearer {SHAPED}"},
-        ]
-    }
-    caplog.set_level(logging.DEBUG)
-    celery_tasks.handle_error.run(
-        "eval", request, RuntimeError(f"api_key=cfg-key-12345678 {SHAPED}"), None
-    )
-    assert "cfg-key-12345678" not in caplog.text
-    assert SHAPED not in caplog.text
-    assert "eval" in caplog.text
-
-
 # What still left the worker unscrubbed: a failing post, an exception's args, progress keys, a known value in a
 # measure
 

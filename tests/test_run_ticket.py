@@ -318,7 +318,6 @@ def test_every_task_keeps_its_upstream_signature():
         celery_tasks.run_plugin,
         celery_tasks.post_measurements,
         celery_tasks.finalize_evaluation,
-        celery_tasks.handle_error,
     ):
         params = inspect.signature(task.run).parameters
         assert "platform_pid" not in params and "ticket" not in params, task.name

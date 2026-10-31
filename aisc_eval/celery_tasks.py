@@ -408,7 +408,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     try:
         return _start_evaluation(evaluation_pid)
     except Exception as exc:
-        # nothing was dispatched, so no handle_error will ever run: without this the run stays Pending
+        # nothing was dispatched, so no later task will close the run: without this it stays Pending
         _fail_before_start(evaluation_pid, exc)
         return {"evaluation_pid": evaluation_pid, "plugin_task_ids": []}
 
@@ -916,31 +916,3 @@ def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
     except Exception as e:
         logger.error(f"Failed to finalize evaluation {evaluation_id}: {e}")
         mark_failed(evaluation_id)
-
-
-@celery_app.task
-def handle_error(
-    evaluation_id: uuid.UUID,
-    request: object,
-    exc: BaseException,
-    traceback: object,
-) -> None:
-    # never the request (it holds the plugin configuration) nor the raw failure: its type and scrubbed text
-    known = known_secrets({}, {}, _request_config(request), None)
-    logger.error(
-        f"Error in evaluation {evaluation_id}: {type(exc).__name__}: {scrub_text(str(exc), known)}"
-    )
-    mark_failed(evaluation_id)
-    logger.error(f"Evaluation {evaluation_id} marked as failed due to error.")
-
-
-def _request_config(request: object):
-    """The plugin configuration among a task request's arguments (run_plugin's fourth), if one is there."""
-    args = (
-        request.get("args")
-        if isinstance(request, dict)
-        else getattr(request, "args", None)
-    )
-    if isinstance(args, (list, tuple)):
-        return [arg for arg in args if isinstance(arg, dict)]
-    return None
