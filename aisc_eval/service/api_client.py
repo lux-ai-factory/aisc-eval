@@ -3,7 +3,6 @@ import uuid
 from typing import Any
 
 import requests
-from pydantic import BaseModel
 from aisc_plugin_interface import Measure
 
 from aisc_eval import deployment, run_context
@@ -51,10 +50,6 @@ def get_project_settings_by_pid(
     return resp.json()
 
 
-class EvaluationStatusUpdateDTO(BaseModel):
-    status: str
-
-
 def get_evaluation_plugins_status(evaluation_pid: uuid.UUID) -> dict:
     """Get plugin status information for an evaluation."""
     resp = requests.get(
@@ -72,12 +67,6 @@ def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
 
 
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
-    payload = EvaluationStatusUpdateDTO(status="failed").model_dump()
-    requests.put(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}",
-        json=payload,
-        headers=headers(),
-    )
     resp = requests.put(
         f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed",
         headers=headers(),
