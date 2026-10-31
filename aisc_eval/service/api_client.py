@@ -13,6 +13,9 @@ from aisc_eval.utils.logging import get_logger
 
 logger = get_logger()
 
+#: (connect, read) seconds a call to the backend may take before the worker gives up on it
+TIMEOUT = (5, 60)
+
 
 def headers(run: dict[str, str] | None = None) -> dict[str, str | None]:
     """The headers of an internal call, read at call time.
@@ -38,6 +41,31 @@ def headers(run: dict[str, str] | None = None) -> dict[str, str | None]:
     return found
 
 
+def _refusal(resp: requests.Response) -> requests.HTTPError:
+    """The error for a refused call: its status and the backend's reason, never its address."""
+    text = f"the backend answered HTTP {resp.status_code}"
+    try:
+        detail = resp.json().get("detail")
+    except (ValueError, AttributeError):
+        detail = None
+    if isinstance(detail, str) and detail:
+        text += f": {detail[:300]}"
+    return requests.HTTPError(text, response=resp)
+
+
+def _send(method: str, url: str, **kwargs: Any) -> requests.Response:
+    """One call to the backend with the internal headers, given up after TIMEOUT; a refusal raises."""
+    resp = getattr(requests, method)(url, headers=headers(), timeout=TIMEOUT, **kwargs)
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError:
+        pass
+    else:
+        return resp
+    # raised outside the except: requests' own error names the URL, the backend's address, and is not chained
+    raise _refusal(resp)
+
+
 def get_project_settings_by_pid(
     project_pid: uuid.UUID, project_config_selections: list[dict]
 ) -> list[dict]:
@@ -45,6 +73,7 @@ def get_project_settings_by_pid(
         f"{API_URL_PREFIX}/projects/settings/{project_pid}/by-pid",
         json={"project_config_selections": project_config_selections},
         headers=headers(),
+        timeout=TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()
@@ -52,24 +81,20 @@ def get_project_settings_by_pid(
 
 def get_evaluation_plugins_status(evaluation_pid: uuid.UUID) -> dict:
     """Get plugin status information for an evaluation."""
-    resp = requests.get(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/status",
-        headers=headers(),
-    )
-    resp.raise_for_status()
-    return resp.json()
+    return _send(
+        "get", f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/status"
+    ).json()
 
 
 def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
-    return requests.put(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done", headers=headers()
-    )
+    return _send("put", f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done")
 
 
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
     resp = requests.put(
         f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed",
         headers=headers(),
+        timeout=TIMEOUT,
     )
     if not resp.ok:
         logger.warning(
@@ -83,7 +108,10 @@ def mark_plugin_failed(
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/fail"
     # a last guard for any caller: key shapes and secret assignments never leave the worker
     resp = requests.patch(
-        url, json={"error_message": scrub_text(error_message)}, headers=headers()
+        url,
+        json={"error_message": scrub_text(error_message)},
+        headers=headers(),
+        timeout=TIMEOUT,
     )
     if not resp.ok:
         logger.warning(
@@ -95,54 +123,35 @@ def mark_plugin_started(
     evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID
 ) -> None:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
-    resp = requests.patch(url, json={"field": "started_at"}, headers=headers())
-    if not resp.ok:
-        logger.warning(
-            f"Failed to mark plugin {evaluation_plugin_pid} as started: {resp.text}"
-        )
+    _send("patch", url, json={"field": "started_at"})
 
 
 def mark_plugin_finished(
     evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID
 ) -> None:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
-    resp = requests.patch(url, json={"field": "finished_at"}, headers=headers())
-    if not resp.ok:
-        logger.warning(
-            f"Failed to mark plugin {evaluation_plugin_pid} as finished: {resp.text}"
-        )
+    _send("patch", url, json={"field": "finished_at"})
 
 
 def get_dataset_file_content(file_name: str) -> bytes:
-    resp = requests.get(
-        f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True, headers=headers()
-    )
-    resp.raise_for_status()
-
-    return resp.content
+    return _send("get", f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True).content
 
 
 def get_model_file_content(file_name: str) -> bytes:
-    resp = requests.get(
-        f"{API_URL_PREFIX}/files/model/{file_name}", stream=True, headers=headers()
-    )
-    resp.raise_for_status()
-
-    return resp.content
+    return _send("get", f"{API_URL_PREFIX}/files/model/{file_name}", stream=True).content
 
 
 def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
-    resp = requests.get(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,plugin",
-        headers=headers(),
-    )
-    resp.raise_for_status()
-    return resp.json()
+    return _send(
+        "get", f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?include=project,plugin"
+    ).json()
 
 
 def get_evaluation_inputs(evaluation_pid: uuid.UUID) -> dict[str, Any]:
     resp = requests.get(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs", headers=headers()
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs",
+        headers=headers(),
+        timeout=TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()
@@ -152,12 +161,11 @@ def store_input_value(
     evaluation_pid: uuid.UUID, input_pid: uuid.UUID, value: dict[str, Any]
 ) -> None:
     """Store what the run was on (a local model file's name and hash) on one of its inputs."""
-    resp = requests.patch(
+    _send(
+        "patch",
         f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs/{input_pid}/value",
         json={"value": value},
-        headers=headers(),
     )
-    resp.raise_for_status()
 
 
 def get_evaluation(
@@ -211,7 +219,7 @@ def post_measures(
     url = f"{API_URL_PREFIX}/evaluations/{str(evaluation_pid)}/measures"
     logger.debug(f"Posting to URL: {url}")
 
-    response = requests.post(url, json=payload, headers=headers())
+    response = _send("post", url, json=payload)
     logger.debug(f"Response status: {response.status_code}")
     logger.debug(f"Response headers: {dict(response.headers)}")
     logger.debug(f"Response content: {response.text}")
@@ -234,6 +242,4 @@ def upload_artifact(
 
     files = {"file": (name, content)}
     data = {"evaluation_plugin_uuid": str(evaluation_plugin_uuid)}
-    response = requests.post(url, files=files, data=data, headers=headers())
-
-    return response
+    return _send("post", url, files=files, data=data)
