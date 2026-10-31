@@ -4,8 +4,11 @@ INTERNAL_API_KEY) and the worker's files. The worker then reads what the plugin 
 output folder as root, so that folder must not let the plugin point it at anything else."""
 
 import os
+import signal
 import stat
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -138,6 +141,96 @@ def test_the_runtime_script_is_copied_into_the_run_folder(tmp_path):
     )
 
 
+# A plugin is the leader of its own process group: what it starts is ended with it.
+
+#: a plugin that starts a sleeping grandchild, writes its pid, then (when told) waits itself
+_STARTS_A_GRANDCHILD = """
+import subprocess, sys, time
+child = subprocess.Popen(["sleep", "60"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+open(sys.argv[1], "w").write(str(child.pid))
+if sys.argv[2] == "wait":
+    time.sleep(60)
+"""
+
+
+def _gone(pid: int, within: float = 5.0) -> bool:
+    """True once pid has ended (a zombie waiting for its new parent counts as ended)."""
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except FileNotFoundError:
+            return True
+        if state == "Z":
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _start_grandparent(tmp_path, then):
+    pid_file = tmp_path / "grandchild.pid"
+    with open(tmp_path / "stderr.tmp", "w") as stderr:
+        process = plugin_process.start(
+            [sys.executable, "-c", _STARTS_A_GRANDCHILD, str(pid_file), then],
+            tmp_path,
+            stderr,
+            {"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            _me(),
+        )
+    deadline = time.monotonic() + 10
+    while not pid_file.exists() or not pid_file.read_text():
+        assert time.monotonic() < deadline, "the plugin never started its grandchild"
+        time.sleep(0.05)
+    return process, int(pid_file.read_text())
+
+
+def _kill(pid):
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def test_the_plugin_starts_in_a_session_of_its_own(monkeypatch, tmp_path):
+    calls = _captured_popen(monkeypatch)
+    with open(tmp_path / "stderr.tmp", "w") as stderr:
+        plugin_process.start(["python"], tmp_path, stderr, {}, _me())
+    [(_, kwargs)] = calls
+    assert kwargs["start_new_session"] is True
+
+
+def test_what_a_plugin_left_running_ends_when_the_plugin_ends(tmp_path):
+    process, grandchild = _start_grandparent(tmp_path, "exit")
+    try:
+        assert process.stdout is not None and process.stdout.read() == ""
+        assert plugin_process.wait(process) == 0
+        assert _gone(grandchild)
+    finally:
+        _kill(grandchild)
+
+
+def test_a_terminated_plugin_takes_what_it_started_with_it(tmp_path):
+    process, grandchild = _start_grandparent(tmp_path, "wait")
+    try:
+        plugin_process.terminate(process)
+        assert process.poll() is not None
+        assert _gone(grandchild)
+    finally:
+        _kill(grandchild)
+        _kill(process.pid)
+
+
+def test_terminating_no_plugin_or_one_that_ended_is_harmless(tmp_path):
+    plugin_process.terminate(None)
+    process, grandchild = _start_grandparent(tmp_path, "exit")
+    try:
+        process.wait()
+        plugin_process.terminate(process)
+        assert _gone(grandchild)
+    finally:
+        _kill(grandchild)
+
+
 def _me():
     return PluginUser(os.getuid(), os.getgid(), None, switch=False)
 
@@ -184,6 +277,9 @@ def test_a_folder_or_fifo_in_the_output_is_refused_without_blocking(tmp_path):
 
 
 class _Process:
+    #: no group: killpg refuses a negative group, and the worker fixture records group signals anyway
+    pid = -1
+
     def __init__(self, returncode=0):
         self.stdout = iter(["plain line\n"])
         self.returncode = returncode
@@ -211,8 +307,13 @@ class _Loader:
 @pytest.fixture
 def worker(monkeypatch):
     """run_plugin with the backend, the installs and the plugin process faked."""
-    seen = {"uploads": {}, "failed": [], "popen": []}
+    seen = {"uploads": {}, "failed": [], "popen": [], "group_signals": []}
     monkeypatch.setattr(celery_tasks, "plugin_loader", _Loader())
+    monkeypatch.setattr(
+        plugin_process.os,
+        "killpg",
+        lambda pgid, sig: seen["group_signals"].append((pgid, sig)),
+    )
     monkeypatch.setattr(
         celery_tasks, "get_evaluation_request", lambda pid: {"status": "Running"}
     )
@@ -258,6 +359,11 @@ def test_run_plugin_starts_the_plugin_as_the_plugin_user(worker):
     assert kwargs["env"]["HOME"] == "/home/aisc-plugin"
     # the runtime script is read from the run folder: the plugin user cannot read /app
     assert Path(argv[1]).parent == Path(kwargs["cwd"]) / "runtime"
+
+
+def test_run_plugin_ends_what_the_plugin_left_running(worker):
+    _run()
+    assert worker["group_signals"] == [(-1, signal.SIGKILL)]
 
 
 def test_run_plugin_uploads_its_own_log_and_the_plugins_files(worker):

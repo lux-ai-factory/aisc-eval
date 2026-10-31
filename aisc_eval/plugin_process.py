@@ -6,6 +6,10 @@ unprivileged plugin user with no supplementary groups, so the kernel refuses it 
 /app included. The worker then reads what the plugin left in output/ as root, so that folder
 must not let the plugin point the worker at anything else.
 
+A plugin starts in a session of its own, so it leads a process group: what it starts (a model
+server, a browser) is in that group, and the worker ends the group with the plugin, whether the
+plugin ended or the worker stops it.
+
 Installing a plugin runs its code too (a source package builds itself), so it is done as a third
 user, the install user, with nothing of the worker's environment. Not the plugin user: the install
 cache is the install user's, and a plugin able to write to it would plant a package in the next
@@ -15,6 +19,7 @@ run's install. A run's environment is the install user's, so the plugin may run 
 import os
 import pwd
 import shutil
+import signal
 import stat
 import subprocess
 from dataclasses import dataclass
@@ -161,7 +166,41 @@ def start(
         group=user.gid if user.switch else None,
         # setgroups([]): root's supplementary groups would otherwise stay with the plugin
         extra_groups=[] if user.switch else None,
+        # the plugin leads its own process group, which the worker ends with it
+        start_new_session=True,
     )
+
+
+def _signal_group(process: subprocess.Popen, sig: signal.Signals) -> None:
+    """Send sig to the plugin's process group; a group with nobody left in it is fine."""
+    try:
+        os.killpg(process.pid, sig)
+    except OSError:
+        pass
+
+
+def wait(process: subprocess.Popen) -> int:
+    """The plugin's return code, once it ended; whatever it left running in its group is killed."""
+    returncode = process.wait()
+    _signal_group(process, signal.SIGKILL)
+    return returncode
+
+
+def terminate(process: subprocess.Popen | None) -> None:
+    """Stop the plugin and everything in its group: SIGTERM, then SIGKILL after 5 seconds."""
+    if process is None:
+        return
+    try:
+        if process.poll() is None:
+            _signal_group(process, signal.SIGTERM)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        _signal_group(process, signal.SIGKILL)
+        process.wait(timeout=5)
+    except Exception:
+        pass
 
 
 def read_outputs(output_dir: Path, user: PluginUser) -> dict[str, bytes]:

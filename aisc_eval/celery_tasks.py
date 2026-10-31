@@ -242,18 +242,6 @@ def _scrubbed_error(exc: BaseException, known=()) -> BaseException:
     return RuntimeError(f"{type(exc).__name__}: {text}")
 
 
-def _terminate_process(process: subprocess.Popen | None) -> None:
-    if process is not None and process.poll() is None:
-        try:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-        except Exception:
-            pass
-
-
 #: What a test of a run that failed is marked with when it is stopped, or never starts.
 STOPPED = "Stopped: another test of this run failed"
 #: The states of a test that has not finished: the ones a failure of the run stops.
@@ -802,7 +790,7 @@ def run_plugin(
                             except Exception:
                                 pass
 
-                returncode = process.wait()
+                returncode = plugin_process.wait(process)
 
                 stderr_file.seek(0)
                 stderr_content = stderr_file.read()
@@ -861,7 +849,7 @@ def run_plugin(
             # what the chain hands post_measurements (and the result backend keeps): no value the plugin was given
             return _without_known(measures, known)
         except Exception as exc:
-            _terminate_process(process)
+            plugin_process.terminate(process)
             _stop_run(
                 evaluation_pid,
                 [evaluation_plugin_pid],
