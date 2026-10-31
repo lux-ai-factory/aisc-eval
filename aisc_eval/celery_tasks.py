@@ -564,7 +564,10 @@ def run_plugin(
                 role = name.removeprefix("helper:").upper()
                 secret_key = f"AISC_HELPER_{role}_KEY"
                 # a helper the platform cannot give fails the run with its reason, fit to show the person
-                resolved = resolve_helper(component.get("helper_ref"))
+                resolved = resolve_helper(
+                    component.get("helper_ref"),
+                    (run_context.current() or {}).get("project"),
+                )
                 if resolved.get("api_key"):
                     helper_secret_env[_secret_env_name(secret_key)] = resolved[
                         "api_key"

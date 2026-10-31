@@ -2,8 +2,9 @@
 
 The engine hands the worker a helper input as a reference (helper:<platform project>/<name>) and
 the model picked for the run, never an endpoint or a key. The worker asks the platform for the
-helper's endpoint and key with the stack's service token; the key goes only into the plugin's
-secret environment, never into a file, a log record or an error message.
+helper's endpoint and key with the stack's service token, naming the run's own project, and never
+asks for a helper of another project; the key goes only into the plugin's secret environment, never
+into a file, a log record or an error message.
 """
 
 import os
@@ -42,10 +43,16 @@ def parse_ref(ref: str | None) -> tuple[str, str]:
     raise HelperUnavailable("the helper reference is malformed")
 
 
-def resolve_helper(ref: str) -> dict:
-    """The platform's {"label", "endpoint_url", "roles", "api_key"} for the helper `ref` names;
-    HelperUnavailable with the platform's own reason when it is removed or its key unreadable."""
+def resolve_helper(ref: str, run_project: str | None) -> dict:
+    """The platform's {"label", "endpoint_url", "roles", "api_key"} for the helper `ref` names, for a
+    run of `run_project` (the platform pid of the evaluation's project); HelperUnavailable with the
+    platform's own reason when it is removed or its key unreadable, and without asking the platform
+    when the run has no project or the helper is of another one."""
     project, name = parse_ref(ref)
+    if not run_project:
+        raise HelperUnavailable("no helper: the run carries no platform project")
+    if project.lower() != str(run_project).lower():
+        raise HelperUnavailable("the helper is of another project than the run")
     base = (os.environ.get("PLATFORM_URL") or "").rstrip("/")
     token = os.environ.get("PLATFORM_CONNECTIONS_TOKEN") or ""
     if not base or not token:
@@ -53,7 +60,8 @@ def resolve_helper(ref: str) -> dict:
     try:
         resp = requests.get(
             f"{base}/internal/projects/{quote(project, safe='')}/helpers/{quote(name, safe='')}/resolve",
-            headers={"X-AISC-Service-Token": token},
+            # the platform refuses a helper of another project than the run's
+            headers={"X-AISC-Service-Token": token, "X-AISC-Project": str(run_project)},
             timeout=30,
             allow_redirects=False,
         )

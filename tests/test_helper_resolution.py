@@ -98,7 +98,8 @@ def test_the_resolve_call_carries_the_service_token_and_names_the_helper(run):
         url
         == f"http://platform:8000/internal/projects/{PROJECT}/helpers/judge-a/resolve"
     )
-    assert headers == {"X-AISC-Service-Token": "stack-token"}
+    # the run's project, for the platform to refuse a helper of another project
+    assert headers == {"X-AISC-Service-Token": "stack-token", "X-AISC-Project": PROJECT}
 
 
 @helper_model("judge", "Judge model", required=True)
@@ -203,3 +204,29 @@ def test_a_helper_input_without_a_reference_fails_the_run(run):
     assert run["urls"] == []
     [(_evaluation, _plugin, message)] = run["worker"]["failed"]
     assert "malformed" in message
+
+
+OTHER_PROJECT = "9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b"
+
+
+def test_a_helper_of_another_project_fails_the_run_without_calling_the_platform(run):
+    component = {**_helper_input(), "helper_ref": f"helper:{OTHER_PROJECT}/judge-a"}
+    with pytest.raises(RuntimeError, match="another project"):
+        run["go"]([component])
+    assert run["urls"] == []
+    assert run["worker"]["popen"] == []
+    [(_evaluation, _plugin, message)] = run["worker"]["failed"]
+    assert "another project" in message
+
+
+def test_a_run_with_no_project_resolves_no_helper(run):
+    from aisc_eval import run_context
+
+    token = run_context._current.set(None)
+    try:
+        with pytest.raises(RuntimeError, match="no platform project"):
+            run["go"]([_helper_input()])
+    finally:
+        run_context._current.reset(token)
+    assert run["urls"] == []
+    assert run["worker"]["popen"] == []

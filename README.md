@@ -21,8 +21,9 @@ What the test assesses is reached through the platform, never with its secrets i
   and forwards the call. The worker revokes the pass when the plugin has ended. A run on a local model file gets
   no pass; a run that names both a local model file and an AI card target is refused.
 - **Helper models** (judge, attacker, grader, embedder, generator): the worker asks the platform for each helper
-  model's endpoint and key just before the plugin starts, and gives the key to the plugin as a secret environment
-  variable. The plugin calls the helper model directly.
+  model's endpoint and key just before the plugin starts, naming the run's project (a helper of another project
+  is refused without asking), and gives the key to the plugin as a secret environment variable. The plugin calls
+  the helper model directly.
 
 There is no resume. Tasks are acknowledged only when they end (`task_acks_late`), so if the worker stops in the
 middle, the broker hands each unfinished task (an install, or one test) to a worker again, and it starts over
