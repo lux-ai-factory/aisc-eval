@@ -79,6 +79,30 @@ def mint(refs: list[str], evaluation_plugin_uuid: str, project: str | None) -> s
     return run_pass
 
 
+def trace(run_pass: str) -> bytes | None:
+    """The run's calls to the system under test, as the platform recorded them (JSON lines ending with the
+    seal), read with the run's pass before it is revoked. None when the platform cannot give them; the
+    platform keeps them anyway, so a failure here is only logged."""
+    try:
+        resp = requests.get(
+            f"{_platform_url()}/internal/run-passes/trace",
+            headers={"X-AISC-Run-Pass": run_pass},
+            timeout=60,
+            allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        logger.warning(
+            f"Could not read the run's calls from the platform ({exc.__class__.__name__}); they stay in its trace"
+        )
+        return None
+    if resp.status_code != 200:
+        logger.warning(
+            f"The platform did not give the run's calls ({resp.status_code}); they stay in its trace"
+        )
+        return None
+    return resp.content
+
+
 def revoke(run_pass: str) -> None:
     """Revoke a pass; a failure is only logged, the pass expires anyway."""
     try:

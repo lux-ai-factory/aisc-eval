@@ -1,4 +1,5 @@
 import hashlib
+import re
 import json
 import os
 import subprocess
@@ -320,15 +321,7 @@ def install_package(
     """Install a package once using uv run to cache dependencies."""
     logger.info(f"Caching package {package_name}=={version}")
 
-    if not plugin_loader.discovered_packages:
-        plugin_loader.list_packages()
-
-    if package_name not in plugin_loader.discovered_packages:
-        raise KeyError(f"Package '{package_name}' not found.")
-
-    available_versions = plugin_loader.discovered_packages[package_name]
-    if version not in available_versions:
-        raise KeyError(f"Version '{version}' of package '{package_name}' not found.")
+    available_versions = _versions_of(package_name, version)
 
     plugin_info = available_versions[version]
 
@@ -510,12 +503,7 @@ def run_plugin(
     except Exception:
         pass
 
-    if package_name not in plugin_loader.discovered_packages:
-        raise KeyError(f"Package '{package_name}' not found.")
-
-    available_versions = plugin_loader.discovered_packages[package_name]
-    if version not in available_versions:
-        raise KeyError(f"Version '{version}' of package '{package_name}' not found.")
+    available_versions = _versions_of(package_name, version)
 
     plugin_info = available_versions[version]
 
@@ -739,9 +727,21 @@ def run_plugin(
         log_content = scrub_text(log_content, known)
 
         if returncode != 0:
+            # the whole log is the run's file, failed or not; the run's error is the plugin's own reason
+            try:
+                upload_artifact(
+                    evaluation_pid,
+                    evaluation_plugin_pid,
+                    "plugin_execution.log",
+                    log_content.encode(),
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"The failed run's log was not kept as a file ({exc.__class__.__name__})"
+                )
             # the run is stopped once, with this message, by the handler below
             raise RuntimeError(
-                f"Plugin failed: {scrub_text(log_stderr_content, known)}"
+                f"Plugin failed: {plugin_reason(scrub_text(stderr_content, known), returncode)}"
             )
 
         outputs = plugin_process.read_outputs(output_dir, user)
@@ -775,8 +775,58 @@ def run_plugin(
         raise clean from None
     finally:
         if minted:
+            _keep_the_runs_calls(evaluation_pid, evaluation_plugin_pid, minted, known)
             run_pass.revoke(minted)
         workspace.cleanup()
+
+
+def _versions_of(package_name: str, version: str) -> dict:
+    """The known versions of a package, which must hold `version`. The worker lists the index once and keeps
+    the list, so a version published since is not in it: the index is listed again (refreshed, not the kept
+    list) before it is refused."""
+    known = plugin_loader.discovered_packages
+    if version not in (known.get(package_name) or {}):
+        plugin_loader.list_packages(refresh=True)
+        known = plugin_loader.discovered_packages
+    if package_name not in known:
+        raise KeyError(f"Package '{package_name}' not found.")
+    if version not in known[package_name]:
+        raise KeyError(f"Version '{version}' of package '{package_name}' not found.")
+    return known[package_name]
+
+
+#: how much of a failed plugin's reason a run's error keeps (the whole log is the run's file)
+REASON_MAX = 500
+#: an exception's class before its message ("pkg.module.RunRefused: "), left out of the reason
+_EXCEPTION_CLASS = re.compile(r"^(?:\w+\.)*[A-Z]\w*: ")
+
+
+def plugin_reason(stderr_text: str, returncode: int) -> str:
+    """What a failed plugin said last on its error stream (its exception's message, without the class),
+    cut to REASON_MAX: the run's error names the reason, not the environment setup or the installs."""
+    lines = [line.strip() for line in (stderr_text or "").splitlines() if line.strip()]
+    if not lines:
+        return f"it ended with code {returncode} and no error message; its log is the run's file"
+    reason = _EXCEPTION_CLASS.sub("", lines[-1]) or lines[-1]
+    return reason if len(reason) <= REASON_MAX else reason[: REASON_MAX - 1] + "…"
+
+
+#: the run's calls to the system under test, as the platform recorded them, kept with the run's files
+CALLS_FILE = "system-under-test-calls.jsonl"
+
+
+def _keep_the_runs_calls(evaluation_pid, evaluation_plugin_pid, minted, known) -> None:
+    """Upload the run's recorded calls as one of its files, whether the plugin succeeded or failed. Never
+    fails the run: the platform's trace still holds every call."""
+    calls = run_pass.trace(minted)
+    if calls is None:
+        return
+    try:
+        upload_artifact(evaluation_pid, evaluation_plugin_pid, CALLS_FILE, without_known_bytes(calls, known))
+    except Exception as exc:
+        logger.warning(
+            f"The run's calls were not kept as a file ({exc.__class__.__name__}); they stay in the platform's trace"
+        )
 
 
 @celery_app.task

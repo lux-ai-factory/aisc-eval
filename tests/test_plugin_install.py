@@ -279,3 +279,37 @@ def test_both_tasks_build_the_venv_the_same_way(installs, monkeypatch):
         return [(argv[:2], timeout) for argv, timeout in calls]
 
     assert shape(warmed) == shape(seen) and len(seen) == 2
+
+
+class _LoaderThatLearns:
+    """A worker that listed the index before a new version was published: the index has it now. Like the real
+    loader (aisc_plugin_manager.loader.Loader.list_packages), it keeps its list unless asked to refresh it."""
+
+    def __init__(self):
+        self.discovered_packages = {"pkg": {"1.0": {"source": "registry"}}}
+        self.listed = 0
+
+    def list_packages(self, refresh=False):
+        if refresh or not self.discovered_packages:
+            self.listed += 1
+            self.discovered_packages = {"pkg": {"1.0": {"source": "registry"}, "1.1": {"source": "registry"}}}
+        return self.discovered_packages
+
+    class devpi_client:
+        simple_index_url = None
+
+
+def test_a_version_published_after_the_worker_listed_the_index_is_found(installs, monkeypatch):
+    loader = _LoaderThatLearns()
+    monkeypatch.setattr(celery_tasks, "plugin_loader", loader)
+    celery_tasks.install_package.run("pkg", "1.1", "eval", ["ep"])
+    assert loader.listed == 1
+    assert [argv[:3] for argv, _ in installs][-1] == ["uv", "pip", "install"]
+
+
+def test_a_version_the_index_does_not_have_is_still_refused(installs, monkeypatch):
+    loader = _LoaderThatLearns()
+    monkeypatch.setattr(celery_tasks, "plugin_loader", loader)
+    with pytest.raises(KeyError, match="Version '9.9'"):
+        celery_tasks.install_package.run("pkg", "9.9", "eval", ["ep"])
+    assert loader.listed == 1

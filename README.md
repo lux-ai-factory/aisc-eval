@@ -40,8 +40,8 @@ This repo is built into the image `aisc-eval`, used by two services of `docker-c
 
 - **`aisc-eval-worker`**: `celery -A aisc_eval.celery_worker worker`, after installing the
   `shared/plugin-manager` and `shared/plugin-interface` packages of the aisc repo in editable mode.
-- **`aisc-eval-flower`**: Flower, the Celery monitor, behind the gateway at `/flower/`. It starts only with the
-  compose profile `inspect`; its link is under Manage, Background tasks, for admins.
+- **`aisc-eval-flower`**: Flower, the Celery monitor, behind the gateway at `/flower/`. It starts with the
+  stack; its link is under Manage, Background tasks, for admins.
 
 Both are started with `AISC_DEPLOYMENT: configurator`. To run the engine on its own, the aisc
 repo has `docker-compose.engine-standalone.yml`, where the variable is unset.
