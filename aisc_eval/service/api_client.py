@@ -134,11 +134,15 @@ def mark_plugin_finished(
 
 
 def get_dataset_file_content(file_name: str) -> bytes:
-    return _send("get", f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True).content
+    return _send(
+        "get", f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True
+    ).content
 
 
 def get_model_file_content(file_name: str) -> bytes:
-    return _send("get", f"{API_URL_PREFIX}/files/model/{file_name}", stream=True).content
+    return _send(
+        "get", f"{API_URL_PREFIX}/files/model/{file_name}", stream=True
+    ).content
 
 
 def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:

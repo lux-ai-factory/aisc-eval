@@ -53,7 +53,9 @@ def test_a_key_shape_that_is_no_known_value_is_left_as_it_is(worker, with_secret
 
 
 def test_the_runs_pass_is_replaced(worker, with_secret, platform):
-    platform["mint"] = _Answer(201, {"pass": RUN_PASS, "expires_at": "2026-10-19T12:00:00Z"})
+    platform["mint"] = _Answer(
+        201, {"pass": RUN_PASS, "expires_at": "2026-10-19T12:00:00Z"}
+    )
     uploads = run(
         worker,
         {"trace.txt": f"called with {RUN_PASS}\n".encode()},

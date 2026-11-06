@@ -246,8 +246,10 @@ def _scrubbed_error(exc: BaseException, known=()) -> BaseException:
 #: What a test of a run that failed is marked with when it is stopped, or never starts.
 STOPPED = "Stopped: another test of this run failed"
 #: a test the queue handed out again after the worker stopped while it ran (task_acks_late): it is not run twice
-INTERRUPTED = ("Interrupted: the worker stopped while this test was running. It is not run again, so the system "
-               "under test is not sent everything a second time; its record of calls and any files it saved are kept.")
+INTERRUPTED = (
+    "Interrupted: the worker stopped while this test was running. It is not run again, so the system "
+    "under test is not sent everything a second time; its record of calls and any files it saved are kept."
+)
 #: The states of a test that has not finished: the ones a failure of the run stops.
 UNFINISHED = ("Pending", "Running")
 
@@ -372,7 +374,9 @@ def _fail_before_start(evaluation_pid: uuid.UUID, exc: BaseException) -> None:
     try:
         tests = get_evaluation_request(evaluation_pid).get("evaluation_plugins") or []
     except Exception as read_failure:
-        logger.error(f"Evaluation {evaluation_pid}: its tests could not be read ({type(read_failure).__name__})")
+        logger.error(
+            f"Evaluation {evaluation_pid}: its tests could not be read ({type(read_failure).__name__})"
+        )
         tests = []
     for test in tests:
         if isinstance(test, dict) and test.get("pid"):
@@ -506,17 +510,30 @@ def run_plugin(
         # a test the queue hands out a second time (its first delivery was never acknowledged: the worker
         # stopped, or RabbitMQ closed a delivery held past its consumer timeout) is never run again: once
         # finished it has nothing left to do, and one cut off is marked interrupted
-        own = next((t for t in eval_data.get("evaluation_plugins") or []
-                    if isinstance(t, dict) and str(t.get("pid")) == str(evaluation_plugin_pid)), {})
+        own = next(
+            (
+                t
+                for t in eval_data.get("evaluation_plugins") or []
+                if isinstance(t, dict)
+                and str(t.get("pid")) == str(evaluation_plugin_pid)
+            ),
+            {},
+        )
         if own.get("finished_at"):
-            logger.warning(f"Test {evaluation_plugin_pid} of {evaluation_pid} already finished: not run again")
+            logger.warning(
+                f"Test {evaluation_plugin_pid} of {evaluation_pid} already finished: not run again"
+            )
             return []
         if own.get("started_at"):
-            logger.warning(f"Test {evaluation_plugin_pid} of {evaluation_pid} was cut off: marked interrupted")
+            logger.warning(
+                f"Test {evaluation_plugin_pid} of {evaluation_pid} was cut off: marked interrupted"
+            )
             try:
                 mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, INTERRUPTED)
-            except Exception as exc:                  # not marked: still never run a second time
-                logger.error(f"Test {evaluation_plugin_pid} could not be marked interrupted: {type(exc).__name__}")
+            except Exception as exc:  # not marked: still never run a second time
+                logger.error(
+                    f"Test {evaluation_plugin_pid} could not be marked interrupted: {type(exc).__name__}"
+                )
             return []
     except Exception:
         pass
@@ -840,7 +857,12 @@ def _keep_the_runs_calls(evaluation_pid, evaluation_plugin_pid, minted, known) -
     if calls is None:
         return
     try:
-        upload_artifact(evaluation_pid, evaluation_plugin_pid, CALLS_FILE, without_known_bytes(calls, known))
+        upload_artifact(
+            evaluation_pid,
+            evaluation_plugin_pid,
+            CALLS_FILE,
+            without_known_bytes(calls, known),
+        )
     except Exception as exc:
         logger.warning(
             f"The run's calls were not kept as a file ({exc.__class__.__name__}); they stay in the platform's trace"

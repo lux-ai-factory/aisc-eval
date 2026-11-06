@@ -539,17 +539,27 @@ def test_a_failed_revoke_does_not_fail_the_run(worker, platform, monkeypatch):
 TRACE_FILE = "system-under-test-calls.jsonl"
 
 
-def test_the_runs_calls_are_read_with_its_pass_and_kept_as_a_file_before_the_revoke(worker, platform):
+def test_the_runs_calls_are_read_with_its_pass_and_kept_as_a_file_before_the_revoke(
+    worker, platform
+):
     _run_with([_resource("target", TARGET)])
     methods = [(c[0], c[1]) for c in platform["calls"]]
-    assert methods[-2:] == [("GET", "http://platform:8000/internal/run-passes/trace"),
-                            ("DELETE", "http://platform:8000/internal/run-passes")]
+    assert methods[-2:] == [
+        ("GET", "http://platform:8000/internal/run-passes/trace"),
+        ("DELETE", "http://platform:8000/internal/run-passes"),
+    ]
     assert platform["calls"][-2][2]["X-AISC-Run-Pass"] == "the-pass"
     assert worker["uploads"][TRACE_FILE] == platform["trace"].content
 
 
-def test_the_runs_calls_are_kept_also_when_the_plugin_fails(worker, platform, monkeypatch):
-    monkeypatch.setattr(plugin_process.subprocess, "Popen", lambda argv, **kwargs: _Process(returncode=1))
+def test_the_runs_calls_are_kept_also_when_the_plugin_fails(
+    worker, platform, monkeypatch
+):
+    monkeypatch.setattr(
+        plugin_process.subprocess,
+        "Popen",
+        lambda argv, **kwargs: _Process(returncode=1),
+    )
     with pytest.raises(RuntimeError, match="Plugin failed"):
         _run_with([_resource("target", TARGET)])
     assert worker["uploads"][TRACE_FILE] == platform["trace"].content
@@ -580,37 +590,67 @@ def _failing_with(stderr_text):
         kwargs["stderr"].write(stderr_text)
         kwargs["stderr"].flush()
         return _Process(returncode=1)
+
     return popen
 
 
-def test_a_failed_plugin_is_reported_by_its_own_reason_not_its_install_output(worker, monkeypatch):
-    monkeypatch.setattr(plugin_process.subprocess, "Popen", _failing_with(
-        "Traceback (most recent call last):\n  File \"plugin.py\", line 293, in _run\n"
-        "aisc_plugin_strongreject_mijke.plugin.RunRefused: evaluator 'strongreject_rubric' needs a judge model\n"))
+def test_a_failed_plugin_is_reported_by_its_own_reason_not_its_install_output(
+    worker, monkeypatch
+):
+    monkeypatch.setattr(
+        plugin_process.subprocess,
+        "Popen",
+        _failing_with(
+            'Traceback (most recent call last):\n  File "plugin.py", line 293, in _run\n'
+            "aisc_plugin_strongreject_mijke.plugin.RunRefused: evaluator 'strongreject_rubric' needs a judge model\n"
+        ),
+    )
     with pytest.raises(RuntimeError) as failed:
         _run()
-    assert str(failed.value) == "Plugin failed: evaluator 'strongreject_rubric' needs a judge model"
+    assert (
+        str(failed.value)
+        == "Plugin failed: evaluator 'strongreject_rubric' needs a judge model"
+    )
     [(_evaluation, _plugin, message)] = worker["failed"]
-    assert message == str(failed.value) and "Step 1" not in message and "Step 2" not in message
+    assert (
+        message == str(failed.value)
+        and "Step 1" not in message
+        and "Step 2" not in message
+    )
 
 
 def test_a_failed_plugin_keeps_its_whole_log_as_a_file(worker, monkeypatch):
-    monkeypatch.setattr(plugin_process.subprocess, "Popen", _failing_with("ValueError: no target bound\n"))
+    monkeypatch.setattr(
+        plugin_process.subprocess,
+        "Popen",
+        _failing_with("ValueError: no target bound\n"),
+    )
     with pytest.raises(RuntimeError):
         _run()
     log = worker["uploads"]["plugin_execution.log"]
-    assert b"=== Plugin Execution Log ===" in log and b"Plugin Install" in log and b"no target bound" in log
+    assert (
+        b"=== Plugin Execution Log ===" in log
+        and b"Plugin Install" in log
+        and b"no target bound" in log
+    )
 
 
 def test_a_failed_plugin_that_says_nothing_still_says_it_failed(worker, monkeypatch):
     monkeypatch.setattr(plugin_process.subprocess, "Popen", _failing_with(""))
     with pytest.raises(RuntimeError) as failed:
         _run()
-    assert str(failed.value) == "Plugin failed: it ended with code 1 and no error message; its log is the run's file"
+    assert (
+        str(failed.value)
+        == "Plugin failed: it ended with code 1 and no error message; its log is the run's file"
+    )
 
 
 def test_a_long_reason_is_cut(worker, monkeypatch):
-    monkeypatch.setattr(plugin_process.subprocess, "Popen", _failing_with("RuntimeError: " + "x" * 2000 + "\n"))
+    monkeypatch.setattr(
+        plugin_process.subprocess,
+        "Popen",
+        _failing_with("RuntimeError: " + "x" * 2000 + "\n"),
+    )
     with pytest.raises(RuntimeError) as failed:
         _run()
     assert len(str(failed.value)) <= 520 and str(failed.value).endswith("…")

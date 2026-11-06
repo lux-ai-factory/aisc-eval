@@ -231,14 +231,28 @@ def test_a_venv_is_made_then_filled_from_the_index(monkeypatch, tmp_path):
     venv = plugin_process.build_venv(
         "pkg", "1.0", {"source": "registry"}, tmp_path, me, "http://devpi/simple"
     )
-    assert venv.path == tmp_path / "venv" and venv.python == tmp_path / "venv" / "bin" / "python"
+    assert (
+        venv.path == tmp_path / "venv"
+        and venv.python == tmp_path / "venv" / "bin" / "python"
+    )
     (made, made_timeout), (filled, filled_timeout) = seen
     assert made == [
-        "uv", "venv", str(tmp_path / "venv"), "--allow-existing", "--python", "/usr/local/bin/python"
+        "uv",
+        "venv",
+        str(tmp_path / "venv"),
+        "--allow-existing",
+        "--python",
+        "/usr/local/bin/python",
     ]
     assert filled == [
-        "uv", "pip", "install", "--python", str(tmp_path / "venv"),
-        "--extra-index-url", "http://devpi/simple", "pkg==1.0",
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(tmp_path / "venv"),
+        "--extra-index-url",
+        "http://devpi/simple",
+        "pkg==1.0",
     ]
     # a first-time Python download can be slow: neither step is cut short at a minute
     assert made_timeout == filled_timeout == plugin_process.INSTALL_TIMEOUT
@@ -252,7 +266,9 @@ def test_a_failed_step_is_refused_with_its_message_scrubbed(monkeypatch, tmp_pat
     monkeypatch.setattr(plugin_process, "run_install", lambda *a, **kw: _Failed())
     me = PluginUser(os.getuid(), os.getgid(), None, switch=False)
     with pytest.raises(plugin_process.InstallFailed) as refused:
-        plugin_process.build_venv("pkg", "1.0", {"source": "registry"}, tmp_path, me, None)
+        plugin_process.build_venv(
+            "pkg", "1.0", {"source": "registry"}, tmp_path, me, None
+        )
     assert str(refused.value) == "error: api_key=[redacted] refused"
     assert refused.value.step == "venv"
 
@@ -292,14 +308,18 @@ class _LoaderThatLearns:
     def list_packages(self, refresh=False):
         if refresh or not self.discovered_packages:
             self.listed += 1
-            self.discovered_packages = {"pkg": {"1.0": {"source": "registry"}, "1.1": {"source": "registry"}}}
+            self.discovered_packages = {
+                "pkg": {"1.0": {"source": "registry"}, "1.1": {"source": "registry"}}
+            }
         return self.discovered_packages
 
     class devpi_client:
         simple_index_url = None
 
 
-def test_a_version_published_after_the_worker_listed_the_index_is_found(installs, monkeypatch):
+def test_a_version_published_after_the_worker_listed_the_index_is_found(
+    installs, monkeypatch
+):
     loader = _LoaderThatLearns()
     monkeypatch.setattr(celery_tasks, "plugin_loader", loader)
     celery_tasks.install_package.run("pkg", "1.1", "eval", ["ep"])

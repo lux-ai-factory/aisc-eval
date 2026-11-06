@@ -16,4 +16,3 @@ def test_celery_tasks_import():
         assert hasattr(celery_tasks, "celery_app")
     except ImportError as e:
         pytest.fail(f"Failed to import Celery tasks: {e}")
-

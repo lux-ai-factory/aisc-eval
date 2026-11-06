@@ -28,7 +28,9 @@ class _Answer:
 
     def raise_for_status(self):
         if not self.ok:
-            raise requests.HTTPError(f"{self.status_code} for url: {api_client.API_URL_PREFIX}/x")
+            raise requests.HTTPError(
+                f"{self.status_code} for url: {api_client.API_URL_PREFIX}/x"
+            )
 
 
 @pytest.fixture
@@ -36,6 +38,7 @@ def backend(monkeypatch):
     """requests' verbs, recording the keyword arguments of each call; answers with seen['answer']."""
     seen = {"calls": [], "answer": _Answer()}
     for verb in ("get", "put", "patch", "post"):
+
         def call(url, _verb=verb, **kwargs):
             seen["calls"].append((_verb, url, kwargs))
             return seen["answer"]
@@ -46,19 +49,33 @@ def backend(monkeypatch):
 
 #: every call of the api_client, with arguments that reach the network
 CALLS = {
-    "get_project_settings_by_pid": lambda: api_client.get_project_settings_by_pid(EVALUATION, []),
-    "get_evaluation_plugins_status": lambda: api_client.get_evaluation_plugins_status(EVALUATION),
+    "get_project_settings_by_pid": lambda: api_client.get_project_settings_by_pid(
+        EVALUATION, []
+    ),
+    "get_evaluation_plugins_status": lambda: api_client.get_evaluation_plugins_status(
+        EVALUATION
+    ),
     "mark_completed": lambda: api_client.mark_completed(EVALUATION),
     "mark_failed": lambda: api_client.mark_failed(EVALUATION),
-    "mark_plugin_failed": lambda: api_client.mark_plugin_failed(EVALUATION, PLUGIN_RUN, "x"),
-    "mark_plugin_started": lambda: api_client.mark_plugin_started(EVALUATION, PLUGIN_RUN),
-    "mark_plugin_finished": lambda: api_client.mark_plugin_finished(EVALUATION, PLUGIN_RUN),
+    "mark_plugin_failed": lambda: api_client.mark_plugin_failed(
+        EVALUATION, PLUGIN_RUN, "x"
+    ),
+    "mark_plugin_started": lambda: api_client.mark_plugin_started(
+        EVALUATION, PLUGIN_RUN
+    ),
+    "mark_plugin_finished": lambda: api_client.mark_plugin_finished(
+        EVALUATION, PLUGIN_RUN
+    ),
     "get_dataset_file_content": lambda: api_client.get_dataset_file_content("d.csv"),
     "get_model_file_content": lambda: api_client.get_model_file_content("m.pkl"),
     "get_evaluation_request": lambda: api_client.get_evaluation_request(EVALUATION),
     "get_evaluation_inputs": lambda: api_client.get_evaluation_inputs(EVALUATION),
-    "store_input_value": lambda: api_client.store_input_value(EVALUATION, PLUGIN_RUN, {}),
-    "upload_artifact": lambda: api_client.upload_artifact(EVALUATION, PLUGIN_RUN, "a.txt", b"a"),
+    "store_input_value": lambda: api_client.store_input_value(
+        EVALUATION, PLUGIN_RUN, {}
+    ),
+    "upload_artifact": lambda: api_client.upload_artifact(
+        EVALUATION, PLUGIN_RUN, "a.txt", b"a"
+    ),
 }
 
 
@@ -76,13 +93,23 @@ def test_posting_measures_gives_up_in_time(backend):
 
 
 @pytest.mark.parametrize(
-    "name", ["mark_completed", "mark_plugin_started", "mark_plugin_finished", "upload_artifact"]
+    "name",
+    [
+        "mark_completed",
+        "mark_plugin_started",
+        "mark_plugin_finished",
+        "upload_artifact",
+    ],
 )
-def test_a_refused_report_is_an_error_with_its_status_and_not_the_backends_address(backend, name):
+def test_a_refused_report_is_an_error_with_its_status_and_not_the_backends_address(
+    backend, name
+):
     backend["answer"] = _Answer(503, {"detail": "the engine is restarting"})
     with pytest.raises(requests.HTTPError) as refused:
         CALLS[name]()
-    assert str(refused.value) == "the backend answered HTTP 503: the engine is restarting"
+    assert (
+        str(refused.value) == "the backend answered HTTP 503: the engine is restarting"
+    )
     assert api_client.API_URL_PREFIX not in str(refused.value)
     assert refused.value.response.status_code == 503
 

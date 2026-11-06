@@ -41,5 +41,7 @@ def test_mark_failed_sends_one_status_update_in_the_query_string() -> None:
         mark_failed(TEST_UUIDS["evaluation"])
 
     put.assert_called_once()
-    assert put.call_args.args[0].endswith(f"/evaluations/{TEST_UUIDS['evaluation']}?status=Failed")
+    assert put.call_args.args[0].endswith(
+        f"/evaluations/{TEST_UUIDS['evaluation']}?status=Failed"
+    )
     assert "json" not in put.call_args.kwargs

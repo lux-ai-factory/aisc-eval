@@ -72,7 +72,9 @@ def test_mint_sends_the_project_in_the_body(platform):
     }
 
 
-def test_the_worker_reads_the_project_from_the_run_context(worker, platform, monkeypatch):
+def test_the_worker_reads_the_project_from_the_run_context(
+    worker, platform, monkeypatch
+):
     seen = []
 
     def mint(refs, evaluation_plugin_uuid, project=None, **kwargs):
