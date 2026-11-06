@@ -1,7 +1,7 @@
 # AISC Evaluation module
 
 `aisc-eval` is the Celery worker of **the engine** of AISC (the AI Assessment Sandbox Configurator). It runs the
-tests of step 4 (Collect evidence) as the compose service `aisc-eval-worker`, next to `aisc-backend` (the
+tests of step 4 (AI Assessment Sandbox) as the compose service `aisc-eval-worker`, next to `aisc-backend` (the
 engine's API) and `aisc-webapp` (its pages).
 
 ## How it works

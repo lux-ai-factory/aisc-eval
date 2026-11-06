@@ -71,3 +71,60 @@ def test_a_run_whose_details_cannot_be_read_at_all_is_still_marked_failed(platfo
     celery_tasks.run_evaluation.run(EVALUATION)
     assert platform_calls["failed"] == [EVALUATION]
     assert platform_calls["plugin_failed"] == []
+
+
+# ---- a test the queue hands out again is never run twice ----
+# A task is acknowledged when it ends (task_acks_late). When the worker dies before that (RabbitMQ closes a
+# delivery held past its consumer timeout, a restart), the queue hands the same test out again: running it
+# again would send every message to the system under test a second time.
+
+def _second_delivery(monkeypatch, own):
+    run = {**engine_run([]), "status": "Running"}
+    run["evaluation_plugins"][0].update(own)
+    monkeypatch.setattr(celery_tasks, "get_evaluation_request", lambda pid: run)
+
+    def never(*args, **kwargs):
+        raise AssertionError("the test was started again")
+    monkeypatch.setattr(celery_tasks, "_versions_of", never)
+
+
+def _deliver():
+    return celery_tasks.run_plugin.run("aisc-plugin-strongreject-mijke", "StrongRejectPlugin", "0.1.3", {}, [], [],
+                                       EVALUATION, uuid.UUID(EVALUATION_PLUGIN))
+
+
+def test_a_test_that_already_finished_is_not_run_again(platform_calls, monkeypatch):
+    _second_delivery(monkeypatch, {"started_at": "2026-11-04T19:32:51Z", "finished_at": "2026-11-04T20:50:07Z"})
+    assert _deliver() == []
+    assert platform_calls["plugin_failed"] == []
+
+
+def test_a_test_interrupted_while_running_is_marked_and_not_run_again(platform_calls, monkeypatch):
+    _second_delivery(monkeypatch, {"started_at": "2026-11-04T19:32:51Z", "finished_at": None})
+    assert _deliver() == []
+    [(pid, ep, message)] = platform_calls["plugin_failed"]
+    assert ep == uuid.UUID(EVALUATION_PLUGIN) and message == celery_tasks.INTERRUPTED
+
+
+def test_a_test_delivered_for_the_first_time_runs(platform_calls, monkeypatch):
+    run = {**engine_run([]), "status": "Running"}
+    run["evaluation_plugins"][0].update({"started_at": None, "finished_at": None})
+    monkeypatch.setattr(celery_tasks, "get_evaluation_request", lambda pid: run)
+    reached = []
+
+    def versions(*args):
+        reached.append(args)
+        raise RuntimeError("stop here: the test went on to start")
+    monkeypatch.setattr(celery_tasks, "_versions_of", versions)
+    with pytest.raises(RuntimeError, match="went on to start"):
+        _deliver()
+    assert reached
+
+
+def test_a_cut_off_test_is_not_run_again_even_when_it_cannot_be_marked(platform_calls, monkeypatch):
+    _second_delivery(monkeypatch, {"started_at": "2026-11-04T19:32:51Z", "finished_at": None})
+
+    def engine_down(*args, **kwargs):
+        raise ConnectionError("the engine does not answer")
+    monkeypatch.setattr(celery_tasks, "mark_plugin_failed", engine_down)
+    assert _deliver() == []
