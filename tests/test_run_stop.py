@@ -304,7 +304,11 @@ def test_a_minted_pass_is_revoked_when_the_test_fails_before_its_plugin_starts(
 
     revoked_passes = []
     monkeypatch.setattr(celery_tasks.run_pass, "mint", lambda *a, **kw: "the-pass")
-    monkeypatch.setattr(celery_tasks.run_pass, "revoke", revoked_passes.append)
+    monkeypatch.setattr(
+        celery_tasks.run_pass,
+        "revoke",
+        lambda run_pass, run=None: revoked_passes.append(run_pass),
+    )
 
     def unreachable(*a):
         raise ConnectionError("engine not answering")

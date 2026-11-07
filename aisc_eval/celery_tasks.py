@@ -822,7 +822,7 @@ def run_plugin(
     finally:
         if minted:
             _keep_the_runs_calls(evaluation_pid, evaluation_plugin_pid, minted, known)
-            run_pass.revoke(minted)
+            run_pass.revoke(minted, run_context.current())
         workspace.cleanup()
 
 

@@ -103,12 +103,21 @@ def trace(run_pass: str) -> bytes | None:
     return resp.content
 
 
-def revoke(run_pass: str) -> None:
-    """Revoke a pass; a failure is only logged, the pass expires anyway."""
+def revoke(run_pass: str, run: dict | None = None) -> None:
+    """Revoke a pass; a failure is only logged, the pass expires anyway. The platform seals the run's calls
+    in the ledger as it ends the pass, citing the request and the run of the run's start: the request_id and
+    run_id the backend put in the run's aisc_run header (`run`), sent when the run has them."""
+    headers = {"X-AISC-Run-Pass": run_pass}
+    for key, header in (
+        ("request_id", "X-AISC-Request-Id"),
+        ("run_id", "X-AISC-Run-Id"),
+    ):
+        if (run or {}).get(key):
+            headers[header] = str(run[key])
     try:
         resp = requests.delete(
             f"{_platform_url()}/internal/run-passes",
-            headers={"X-AISC-Run-Pass": run_pass},
+            headers=headers,
             timeout=30,
             allow_redirects=False,
         )
