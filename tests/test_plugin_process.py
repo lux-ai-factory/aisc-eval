@@ -370,13 +370,29 @@ def test_run_plugin_uploads_its_own_log_and_the_plugins_files(worker):
     def leave(output):
         (output / "measures.json").write_text("[]")
         (output / "chart.png").write_bytes(b"png")
-        (output / "plugin_execution.log").write_text("forged")
 
     worker["leave"] = leave
     _run()
     assert worker["uploads"]["chart.png"] == b"png"
     assert b"=== Plugin Execution Log ===" in worker["uploads"]["plugin_execution.log"]
     assert "measures.json" not in worker["uploads"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [celery_tasks.CALLS_FILE, "plugin_execution.log", "System-Under-Test-Calls.JSONL"],
+)
+def test_a_plugin_file_named_like_the_workers_own_files_fails_the_run(worker, name):
+    def leave(output):
+        (output / "measures.json").write_text("[]")
+        (output / name).write_text('{"fake": 1}')
+
+    worker["leave"] = leave
+    with pytest.raises(RuntimeError, match=name):
+        _run()
+    assert worker["failed"]
+    assert worker["uploads"].get(celery_tasks.CALLS_FILE) is None
+    assert b"fake" not in worker["uploads"].get("plugin_execution.log", b"")
 
 
 def test_run_plugin_fails_a_plugin_that_points_its_output_elsewhere(worker):

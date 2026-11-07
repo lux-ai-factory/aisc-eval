@@ -780,6 +780,13 @@ def run_plugin(
             )
 
         outputs = plugin_process.read_outputs(output_dir, user)
+        # the run's log and its recorded calls are the worker's files: a plugin file of either name would sit
+        # beside them (or stand in for the calls when the trace cannot be read), so the run fails instead
+        for name in outputs:
+            if name.casefold() in _WORKERS_FILES:
+                raise RuntimeError(
+                    f"Plugin output {name} has the name of a file the worker keeps for the run"
+                )
         measures = json.loads(outputs.pop("measures.json", b"[]"))
 
         # the log is the worker's, kept out of output/ where the plugin could plant a link
@@ -848,6 +855,8 @@ def plugin_reason(stderr_text: str, returncode: int) -> str:
 
 #: the run's calls to the system under test, as the platform recorded them, kept with the run's files
 CALLS_FILE = "system-under-test-calls.jsonl"
+#: the names of the files the worker itself keeps with a run, which no plugin output may take
+_WORKERS_FILES = {CALLS_FILE.casefold(), "plugin_execution.log"}
 
 
 def _keep_the_runs_calls(evaluation_pid, evaluation_plugin_pid, minted, known) -> None:
