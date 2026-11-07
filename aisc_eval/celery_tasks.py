@@ -488,55 +488,59 @@ def run_plugin(
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
         plugin_loader.list_packages()
 
-    # a test of a run that already failed never starts; one already marked stopped keeps its mark
+    # whether this test may start is read from the run; a run that cannot be read is tried again later, and
+    # the test never starts without that answer (it may be a second delivery of a test already started)
     try:
         eval_data = get_evaluation_request(evaluation_pid)
-        if eval_data.get("status") == "Failed":
-            logger.info(
-                f"Evaluation {evaluation_pid} already failed — skipping plugin {plugin_name}"
-            )
-            own = next(
-                (
-                    t
-                    for t in eval_data.get("evaluation_plugins") or []
-                    if isinstance(t, dict)
-                    and str(t.get("pid")) == str(evaluation_plugin_pid)
-                ),
-                {},
-            )
-            if own.get("status") != "Failed":
-                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, STOPPED)
-            return []
-        # a test the queue hands out a second time (its first delivery was never acknowledged: the worker
-        # stopped, or RabbitMQ closed a delivery held past its consumer timeout) is never run again: once
-        # finished it has nothing left to do, and one cut off is marked interrupted
-        own = next(
-            (
-                t
-                for t in eval_data.get("evaluation_plugins") or []
-                if isinstance(t, dict)
-                and str(t.get("pid")) == str(evaluation_plugin_pid)
-            ),
-            {},
+    except Exception as exc:
+        logger.warning(
+            f"Run {evaluation_pid} could not be read ({type(exc).__name__}): test {evaluation_plugin_pid} not started"
         )
-        if own.get("finished_at"):
-            logger.warning(
-                f"Test {evaluation_plugin_pid} of {evaluation_pid} already finished: not run again"
-            )
-            return []
-        if own.get("started_at"):
-            logger.warning(
-                f"Test {evaluation_plugin_pid} of {evaluation_pid} was cut off: marked interrupted"
-            )
+        raise self.retry(
+            exc=exc, countdown=READ_RETRY_SECONDS, max_retries=READ_RETRIES
+        )
+    own = next(
+        (
+            t
+            for t in eval_data.get("evaluation_plugins") or []
+            if isinstance(t, dict) and str(t.get("pid")) == str(evaluation_plugin_pid)
+        ),
+        {},
+    )
+    # a test of a run that already failed never starts; one already marked stopped keeps its mark
+    if eval_data.get("status") == "Failed":
+        logger.info(
+            f"Evaluation {evaluation_pid} already failed — skipping plugin {plugin_name}"
+        )
+        if own.get("status") != "Failed":
             try:
-                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, INTERRUPTED)
-            except Exception as exc:  # not marked: still never run a second time
+                mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, STOPPED)
+            except (
+                Exception
+            ) as exc:  # not marked: the run has failed, the test still never starts
                 logger.error(
-                    f"Test {evaluation_plugin_pid} could not be marked interrupted: {type(exc).__name__}"
+                    f"Test {evaluation_plugin_pid} could not be marked stopped: {type(exc).__name__}"
                 )
-            return []
-    except Exception:
-        pass
+        return []
+    # a test the queue hands out a second time (its first delivery was never acknowledged: the worker
+    # stopped, or RabbitMQ closed a delivery held past its consumer timeout) is never run again: once
+    # finished it has nothing left to do, and one cut off is marked interrupted
+    if own.get("finished_at"):
+        logger.warning(
+            f"Test {evaluation_plugin_pid} of {evaluation_pid} already finished: not run again"
+        )
+        return []
+    if own.get("started_at"):
+        logger.warning(
+            f"Test {evaluation_plugin_pid} of {evaluation_pid} was cut off: marked interrupted"
+        )
+        try:
+            mark_plugin_failed(evaluation_pid, evaluation_plugin_pid, INTERRUPTED)
+        except Exception as exc:  # not marked: still never run a second time
+            logger.error(
+                f"Test {evaluation_plugin_pid} could not be marked interrupted: {type(exc).__name__}"
+            )
+        return []
 
     available_versions = _versions_of(package_name, version)
 
@@ -837,6 +841,9 @@ def _versions_of(package_name: str, version: str) -> dict:
     return known[package_name]
 
 
+#: how often, and how many seconds apart, a test whose run cannot be read is tried again before it gives up
+READ_RETRIES = 5
+READ_RETRY_SECONDS = 30
 #: how much of a failed plugin's reason a run's error keeps (the whole log is the run's file)
 REASON_MAX = 500
 #: an exception's class before its message ("pkg.module.RunRefused: "), left out of the reason

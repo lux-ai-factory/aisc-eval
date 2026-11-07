@@ -189,3 +189,28 @@ def test_a_cut_off_test_is_not_run_again_even_when_it_cannot_be_marked(
 
     monkeypatch.setattr(celery_tasks, "mark_plugin_failed", engine_down)
     assert _deliver() == []
+
+
+def test_a_test_whose_run_cannot_be_read_is_not_run_blind(platform_calls, monkeypatch):
+    _second_delivery(monkeypatch, {})
+
+    def engine_down(pid):
+        raise ConnectionError("the engine does not answer")
+
+    monkeypatch.setattr(celery_tasks, "get_evaluation_request", engine_down)
+    with pytest.raises(ConnectionError):
+        _deliver()
+
+
+def test_a_test_of_a_failed_run_does_not_start_even_when_it_cannot_be_marked(
+    platform_calls, monkeypatch
+):
+    _second_delivery(monkeypatch, {"started_at": None, "finished_at": None})
+    run = {**engine_run([]), "status": "Failed"}
+    monkeypatch.setattr(celery_tasks, "get_evaluation_request", lambda pid: run)
+
+    def engine_down(*args, **kwargs):
+        raise ConnectionError("the engine does not answer")
+
+    monkeypatch.setattr(celery_tasks, "mark_plugin_failed", engine_down)
+    assert _deliver() == []
