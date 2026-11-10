@@ -58,15 +58,13 @@ def load_plugin(plugin_spec: str):
     plugin_class = getattr(module, class_name)
 
     if not issubclass(plugin_class, BaseEvaluationPlugin):
-        raise ValueError(
-            f"{class_name} is not a subclass of BaseEvaluationPlugin"
-        )
+        raise ValueError(f"{class_name} is not a subclass of BaseEvaluationPlugin")
 
     return plugin_class
 
 
 def main():
-    working_dir =  Path.cwd()
+    working_dir = Path.cwd()
 
     try:
         config_path = working_dir / "config.json"
@@ -84,14 +82,15 @@ def main():
             print("❌ Missing 'plugin_source' in config.json", file=sys.stderr)
             sys.exit(1)
 
-
         print(f"📦 Loading plugin: {plugin_source}")
         plugin_class = load_plugin(plugin_source)
 
         print(f"🔌 Instantiating plugin: {plugin_class.__name__}")
         plugin = plugin_class()
 
-        plugin._set_artifact_callback(partial(write_artifact_file, output_dir=output_dir))
+        plugin._set_artifact_callback(
+            partial(write_artifact_file, output_dir=output_dir)
+        )
 
         plugin._set_progress_callback(print_progress)
         if hasattr(plugin, "_set_project_settings"):
@@ -127,6 +126,7 @@ def main():
     except Exception as e:
         print(f"❌ Plugin execution failed: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
