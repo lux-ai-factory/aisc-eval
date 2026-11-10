@@ -185,9 +185,13 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
         logger.info(f"Successfully cached {package_name}=={version} and all dependencies")
     except Exception as e:
         logger.error(f"Failed to cache {package_name}=={version}: {e}", exc_info=True)
-        if evaluation_pid and evaluation_plugin_pids:
+        if evaluation_plugin_pids:
             for pid in evaluation_plugin_pids:
                 mark_plugin_failed(evaluation_pid, pid, str(e))
+        if evaluation_pid:
+            # Mark the eval failed here too: the link_error errback may not fire
+            # for chord/chain members, which would leave the eval Pending forever.
+            mark_failed(evaluation_pid)
         raise
 
 
