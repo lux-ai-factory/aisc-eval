@@ -9,8 +9,7 @@ from datetime import datetime
 
 import pytest
 
-from aisc_eval.data_model.evaluation import Feature, FeatureType
-from aisc_eval.data_model.measure import Measure
+from aisc_eval.data_model.evaluation import Evaluation, Project
 
 
 def test_celery_tasks_import():
@@ -26,19 +25,15 @@ def test_celery_tasks_import():
 
 def test_evaluation_data_model():
     """Test that evaluation data models work correctly."""
+    from aisc_plugin_interface import Measure
 
     # Test metric creation
     metric = Measure(name="test_metric", score=0.95, time=datetime.now())
     assert metric.name == "test_metric"
     assert metric.score == 0.95
 
-    # Test feature creation
-    feature = Feature(
-        pid=uuid.uuid4(),
-        name="test_feature",
-        feature_type=FeatureType.FLOAT,
-        min_value=0.0,
-        max_value=1.0,
-    )
-    assert feature.name == "test_feature"
-    assert feature.feature_type == FeatureType.FLOAT
+    # Test evaluation creation
+    project = Project(pid=uuid.uuid4(), name="test-project")
+    evaluation = Evaluation(pid=uuid.uuid4(), project=project, evaluation_plugins=[])
+    assert evaluation.project.name == "test-project"
+    assert evaluation.evaluation_plugins == []
