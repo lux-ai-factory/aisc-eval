@@ -477,7 +477,10 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
             mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
             return measures
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
+            # SystemExit = revoked with terminate=True: kill the plugin's
+            # subprocess before the base task converts the abort to a
+            # serializable failure, otherwise it keeps running orphaned.
             _terminate_process(process)
             _fail_plugin_and_revoke(
                 evaluation_pid, evaluation_plugin_pid, str(exc) or exc.__class__.__name__, str(self.request.id)
