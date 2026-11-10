@@ -44,11 +44,23 @@ def test_plugin_help_text_dedents_indented_triple_quoted_description():
 
 
 def test_build_project_settings_excludes_secrets():
-    settings = build_project_settings([
-        {"key": "threshold", "category": "variables", "json_value": {"value": 0.8}},
-        {"key": "shape", "category": "datashape", "json_value": {"features": []}},
-        {"key": "token", "category": "secrets", "encrypted_value": "ciphertext"},
-    ])
+    settings = build_project_settings(
+        [
+            {
+                "key": "threshold",
+                "plugin_config_key": "threshold",
+                "category": "variables",
+                "json_value": {"value": 0.8},
+            },
+            {
+                "key": "shape",
+                "plugin_config_key": "shape",
+                "category": "datashape",
+                "json_value": {"features": []},
+            },
+            {"key": "token", "category": "secrets", "encrypted_value": "ciphertext"},
+        ]
+    )
 
     assert settings == {"threshold": 0.8, "shape": {"features": []}}
 
@@ -65,8 +77,16 @@ def test_plugin_accessors_use_separate_channels(monkeypatch):
 
 
 def test_build_secret_environment_uses_plugin_key_namespace(monkeypatch):
-    monkeypatch.setattr("aisc_eval.celery_tasks.decrypt_value", lambda value: f"decrypted:{value}")
+    monkeypatch.setattr(
+        "aisc_eval.celery_tasks.decrypt_value", lambda value: f"decrypted:{value}"
+    )
 
-    assert build_secret_environment([
-        {"key": "open_ai_key", "category": "secrets", "encrypted_value": "ciphertext"},
-    ]) == {"AISC_SECRET_OPEN_AI_KEY": "decrypted:ciphertext"}
+    assert build_secret_environment(
+        [
+            {
+                "key": "open_ai_key",
+                "category": "secrets",
+                "encrypted_value": "ciphertext",
+            },
+        ]
+    ) == {"AISC_SECRET_OPEN_AI_KEY": "decrypted:ciphertext"}

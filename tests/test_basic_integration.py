@@ -1,16 +1,16 @@
-"""Basic integration tests for VERA Evaluation service.
+"""Basic integration tests for the AISC Evaluation service.
 
 These tests verify core functionality without requiring external services.
 They are designed to run in CI environments reliably.
 """
 
 import uuid
-from datetime import datetime
 
 import pytest
+from pydantic import ValidationError
 
-from aisc_eval.data_model.evaluation import Feature, FeatureType
-from aisc_eval.data_model.measure import Measure
+from aisc_eval.data_model.evaluation import Evaluation, Project
+from aisc_eval.data_model.project import Plugin
 
 
 def test_celery_tasks_import():
@@ -24,21 +24,31 @@ def test_celery_tasks_import():
         pytest.fail(f"Failed to import Celery tasks: {e}")
 
 
-def test_evaluation_data_model():
-    """Test that evaluation data models work correctly."""
+def test_evaluation_requires_a_project():
+    """An evaluation without a project cannot be built."""
+    with pytest.raises(ValidationError):
+        Evaluation.model_validate({"pid": str(uuid.uuid4())})
 
-    # Test metric creation
-    metric = Measure(name="test_metric", score=0.95, time=datetime.now())
-    assert metric.name == "test_metric"
-    assert metric.score == 0.95
 
-    # Test feature creation
-    feature = Feature(
-        pid=uuid.uuid4(),
-        name="test_feature",
-        feature_type=FeatureType.FLOAT,
-        min_value=0.0,
-        max_value=1.0,
+def test_evaluation_model_carries_project_and_plugins():
+    """An evaluation exposes its project and the plugins it will run."""
+    evaluation = Evaluation.model_validate(
+        {
+            "pid": str(uuid.uuid4()),
+            "project": {"pid": str(uuid.uuid4()), "name": "LCLD"},
+            "evaluation_plugins": [
+                {
+                    "pid": str(uuid.uuid4()),
+                    "name": "DemoPlugin",
+                    "package_name": "demo-pkg",
+                    "version": "0.1.0",
+                    "evaluation_inputs": [],
+                }
+            ],
+        }
     )
-    assert feature.name == "test_feature"
-    assert feature.feature_type == FeatureType.FLOAT
+
+    assert isinstance(evaluation.project, Project)
+    assert evaluation.project.name == "LCLD"
+    assert isinstance(evaluation.evaluation_plugins[0], Plugin)
+    assert evaluation.evaluation_plugins[0].name == "DemoPlugin"
