@@ -15,7 +15,7 @@ from pathlib import Path
 from celery import group, chain
 
 from aisc_eval import plugin_runtime
-from aisc_eval.celery_app import celery_app
+from aisc_eval.celery_app import celery_app, StopAwareTask
 from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.service.api_client import (
     mark_completed,
@@ -276,7 +276,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     return {"evaluation_pid": evaluation_pid, "plugin_task_ids": plugin_task_ids}
 
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, base=StopAwareTask)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
                input_components: list[dict], project_settings: list[dict],
                evaluation_pid: uuid.UUID,

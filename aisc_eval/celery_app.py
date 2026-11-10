@@ -1,9 +1,26 @@
-from celery import Celery
+from celery import Celery, Task
 
 from aisc_eval.utils import env
 from aisc_eval.utils.logging import get_logger
 
 logger = get_logger()
+
+
+class StopAwareTask(Task):
+    """Convert billiard's SIGTERM SystemExit into a serializable failure.
+
+    When Celery revokes a running task with ``terminate=True`` (SIGTERM), the
+    worker process is interrupted with a ``SystemExit``. ``SystemExit`` is a
+    ``BaseException``, which the JSON result backend cannot serialize, so it
+    reaches the task pool as ``EncodeError`` and crashes the worker. Turning
+    it into a regular ``RuntimeError`` keeps the backend store working.
+    """
+
+    def __call__(self, *args, **kwargs):
+        try:
+            return super().__call__(*args, **kwargs)
+        except SystemExit:
+            raise RuntimeError("Aborted: task revoked/terminated") from None
 
 
 logger.debug(f"CELERY REDIS BACKEND URL: {env.REDIS_BACKEND_URL}")
