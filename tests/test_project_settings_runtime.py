@@ -45,9 +45,9 @@ def test_plugin_help_text_dedents_indented_triple_quoted_description():
 
 def test_build_project_settings_excludes_secrets():
     settings = build_project_settings([
-        {"key": "threshold", "category": "variables", "json_value": {"value": 0.8}},
-        {"key": "shape", "category": "datashape", "json_value": {"features": []}},
-        {"key": "token", "category": "secrets", "encrypted_value": "ciphertext"},
+        {"plugin_config_key": "threshold", "category": "variables", "json_value": {"value": 0.8}},
+        {"plugin_config_key": "shape", "category": "datashape", "json_value": {"features": []}},
+        {"plugin_config_key": "token", "category": "secrets", "encrypted_value": "ciphertext"},
     ])
 
     assert settings == {"threshold": 0.8, "shape": {"features": []}}
