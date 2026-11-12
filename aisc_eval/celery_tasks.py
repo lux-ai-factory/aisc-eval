@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import io
@@ -25,7 +26,6 @@ from aisc_eval.service.api_client import (
     mark_plugin_failed,
     post_measures,
     get_evaluation,
-    get_evaluation_request,
     get_evaluation_plugins_status,
     get_dataset_file_content,
     get_model_file_content,
@@ -34,6 +34,7 @@ from aisc_eval.service.api_client import (
     get_evaluation_inputs,
 )
 from aisc_eval.utils.logging import get_logger
+from aisc_eval.utils.scrub import scrub_bytes, scrub_secrets
 
 from aisc_plugin_manager.loader import Loader
 from aisc_plugin_interface import TaskProgress, Measure
@@ -77,6 +78,55 @@ def build_secret_environment(settings: list[dict]) -> dict[str, str]:
             )
             values[env_key] = decrypt_value(setting["encrypted_value"])
     return values
+
+
+_PLUGIN_ENV_ALLOWLIST = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "TZ",
+    "UV_CACHE_DIR",
+    "UV_PYTHON",
+)
+
+
+def plugin_child_env() -> dict[str, str]:
+    """The environment a plugin subprocess may see.
+
+    A plugin is untrusted catalogue code. It gets a small allowlist of the
+    worker's environment instead of a copy of it, so no worker credential
+    (database, registry, keycloak) reaches the plugin. Run secrets are added by
+    the caller under the ``AISC_SECRET_`` prefix.
+    """
+    return {
+        name: os.environ[name] for name in _PLUGIN_ENV_ALLOWLIST if name in os.environ
+    }
+
+
+def _embed_input_files(input_components: list[dict]) -> None:
+    """Fetch dataset/model bytes at dispatch so the run needs no mid-run call (I1)."""
+    for component in input_components:
+        component_type = component.get("component_type")
+        if component_type == "dataset":
+            content = get_dataset_file_content(component["data"])
+        elif component_type == "model":
+            content = get_model_file_content(component["data"])
+        else:
+            continue
+        component["content_b64"] = base64.b64encode(content).decode("ascii")
+
+
+def _decode_input_file(component: dict) -> bytes:
+    """The bytes the run was dispatched with; a run is self-contained (I1)."""
+    encoded = component.get("content_b64")
+    if not encoded:
+        raise ValueError(
+            f"input '{component.get('name')}' was dispatched without its bytes; "
+            "the run must be self-contained"
+        )
+    return base64.b64decode(encoded)
 
 
 def validate_input_file(content: bytes, file_name: str, datashape: dict) -> dict:
@@ -263,6 +313,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 )
 
             input_components = inputs_by_plugin.get(str(evaluation_plugin.pid), [])
+            _embed_input_files(input_components)
 
             run_plugin_sig = run_plugin.si(
                 evaluation_plugin.package_name,
@@ -316,22 +367,6 @@ def run_plugin(
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
         plugin_loader.list_packages()
 
-    # abort early if another plugin already failed this evaluation
-    try:
-        eval_data = get_evaluation_request(evaluation_pid)
-        if eval_data.get("status") == "Failed":
-            logger.info(
-                f"Evaluation {evaluation_pid} already failed — skipping plugin {plugin_name}"
-            )
-            mark_plugin_failed(
-                evaluation_pid,
-                evaluation_plugin_pid,
-                "Aborted: evaluation already failed",
-            )
-            return []
-    except Exception:
-        pass
-
     if package_name not in plugin_loader.discovered_packages:
         raise KeyError(f"Package '{package_name}' not found.")
 
@@ -356,10 +391,10 @@ def run_plugin(
             component_type = component["component_type"]
             name = component["name"]
             if component_type == "dataset":
-                file_content = get_dataset_file_content(component["data"])
+                file_content = _decode_input_file(component)
                 relative_path = component["data"]
             elif component_type == "model":
-                file_content = get_model_file_content(component["data"])
+                file_content = _decode_input_file(component)
                 relative_path = component["data"]
             elif component_type in {"datashape", "llm", "resource"}:
                 payload = dict(component.get("json_value") or {})
@@ -446,6 +481,8 @@ def run_plugin(
         start_time = time.perf_counter()
         mark_plugin_started(evaluation_pid, evaluation_plugin_pid)
 
+        run_secrets = build_secret_environment(project_settings + llm_secret_settings)
+        secret_values = list(run_secrets.values())
         stdout_lines: list[str] = []
         stderr_path = workspace_path / "stderr.tmp"
         process: subprocess.Popen | None = None
@@ -453,10 +490,8 @@ def run_plugin(
         stderr_content = ""
         try:
             with open(stderr_path, "w+") as stderr_file:
-                child_env = os.environ.copy()
-                child_env.update(
-                    build_secret_environment(project_settings + llm_secret_settings)
-                )
+                child_env = plugin_child_env()
+                child_env.update(run_secrets)
                 process = subprocess.Popen(
                     [str(venv_python), str(runtime_script)],
                     cwd=str(workspace_path),
@@ -492,25 +527,28 @@ def run_plugin(
 
             end_time = time.perf_counter()
             duration = end_time - start_time
-            stdout_content = "".join(stdout_lines)
+            stdout_content = scrub_secrets("".join(stdout_lines), secret_values)
+            stderr_content = scrub_secrets(stderr_content, secret_values)
 
-            log_stdout_content = (
+            log_stdout_content = scrub_secrets(
                 "====== Step 1: Venv Creation ======\n"
                 + (venv_result.stdout or "")
                 + "\n\n"
                 "====== Step 2: Plugin Install ======\n"
                 + (install_result.stdout or "")
                 + "\n\n"
-                "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
+                "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n",
+                secret_values,
             )
-            log_stderr_content = (
+            log_stderr_content = scrub_secrets(
                 "====== Step 1: Venv Creation ======\n"
                 + (venv_result.stderr or "")
                 + "\n\n"
                 "====== Step 2: Plugin Install ======\n"
                 + (install_result.stderr or "")
                 + "\n\n"
-                "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n"
+                "====== Step 3: Plugin Run ======\n" + stderr_content + "\n\n",
+                secret_values,
             )
 
             log_file = output_dir / "plugin_execution.log"
@@ -541,7 +579,7 @@ def run_plugin(
                         evaluation_pid,
                         evaluation_plugin_pid,
                         file.name,
-                        file.read_bytes(),
+                        scrub_bytes(file.read_bytes(), secret_values),
                     )
 
             mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
@@ -551,7 +589,7 @@ def run_plugin(
             _fail_plugin_and_revoke(
                 evaluation_pid,
                 evaluation_plugin_pid,
-                str(exc) or exc.__class__.__name__,
+                scrub_secrets(str(exc) or exc.__class__.__name__, secret_values),
                 str(self.request.id),
             )
             raise
