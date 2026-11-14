@@ -1,3 +1,5 @@
+import os
+
 from celery import Celery
 
 from aisc_eval.utils import env
@@ -6,7 +8,8 @@ from aisc_eval.utils.logging import get_logger
 logger = get_logger()
 
 
-logger.debug(f"CELERY REDIS BACKEND URL: {env.REDIS_BACKEND_URL}")
+# the host only: the URL carries the Redis password
+logger.debug(f"CELERY REDIS BACKEND HOST: {os.getenv('REDIS_HOST', 'redis')}")
 logger.debug("=== CELERY APP INITIALIZATION ===")
 
 celery_app: Celery = Celery(
