@@ -4,6 +4,7 @@ model and the secret's name, the key in the plugin's secret environment."""
 
 import json
 import logging
+import socket
 
 import pytest
 import requests
@@ -46,8 +47,19 @@ def _llm_input():
 
 @pytest.fixture
 def run(worker, platform, monkeypatch):  # noqa: F811
-    """run_plugin with the platform's resolve route faked; what the plugin was given."""
+    """run_plugin with the platform's resolve route faked; what the plugin was given. The helper's
+    host is a public address, as the worker checks it before the run starts."""
     seen = {"resolve": _Answer(200, RESOLVED), "urls": [], "inputs": {}, "venvs": []}
+    real_getaddrinfo = socket.getaddrinfo
+
+    def getaddrinfo(host, port, *a, **k):
+        if host == "llm.example":
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))
+            ]
+        return real_getaddrinfo(host, port, *a, **k)
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
 
     def get(url, headers=None, **kwargs):
         seen["urls"].append((url, dict(headers or {})))

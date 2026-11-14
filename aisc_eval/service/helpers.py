@@ -43,6 +43,24 @@ def parse_ref(ref: str | None) -> tuple[str, str]:
     raise HelperUnavailable("the helper reference is malformed")
 
 
+def check_endpoint(resolved: dict) -> None:
+    """HelperUnavailable, with the reason, unless the helper's endpoint may be reached under the project's
+    network rule that came with it (allowed hosts, denied addresses, floor), checked on the address its name
+    resolves to now: an internal or denied address, or a name that does not resolve, fails the run before the
+    plugin starts. An answer without a rule is checked as one that allows no internal host."""
+    from aisc_plugin_interface import connections
+
+    try:
+        connections.guard_url(
+            resolved["endpoint_url"],
+            resolved.get("allowed_hosts") or [],
+            resolved.get("denied_addresses") or [],
+            resolved.get("floor_hosts"),
+        )
+    except connections.BlockedAddress as exc:
+        raise HelperUnavailable(f"the helper's endpoint: {exc}") from None
+
+
 def resolve_helper(ref: str, run_project: str | None) -> dict:
     """The platform's {"label", "endpoint_url", "roles", "api_key"} for the helper `ref` names, for a
     run of `run_project` (the platform pid of the evaluation's project); HelperUnavailable with the
