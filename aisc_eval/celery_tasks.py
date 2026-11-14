@@ -36,7 +36,7 @@ from aisc_eval.service.api_client import (
     store_input_value,
 )
 from aisc_eval.service import run_pass
-from aisc_eval.service.helpers import resolve_helper
+from aisc_eval.service.helpers import check_endpoint, resolve_helper
 from aisc_eval.utils.logging import get_logger
 
 from aisc_plugin_manager.loader import Loader
@@ -595,6 +595,8 @@ def run_plugin(
                     component.get("helper_ref"),
                     (run_context.current() or {}).get("project"),
                 )
+                # its address under the project's network rule, now, before anything is built
+                check_endpoint(resolved)
                 if resolved.get("api_key"):
                     helper_secret_env[_secret_env_name(secret_key)] = resolved[
                         "api_key"
