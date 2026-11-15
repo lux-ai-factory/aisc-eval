@@ -330,6 +330,12 @@ def test_a_version_published_after_the_worker_listed_the_index_is_found(
 def test_a_version_the_index_does_not_have_is_still_refused(installs, monkeypatch):
     loader = _LoaderThatLearns()
     monkeypatch.setattr(celery_tasks, "plugin_loader", loader)
+    stops = []
+    monkeypatch.setattr(celery_tasks, "_stop_run", lambda *a: stops.append(a))
     with pytest.raises(KeyError, match="Version '9.9'"):
         celery_tasks.install_package.run("pkg", "9.9", "eval", ["ep"])
     assert loader.listed == 1
+    # the refusal fails the run's tests with its reason, as any failed install does
+    assert [(evaluation, tests, reason) for evaluation, tests, reason, _task in stops] == [
+        ("eval", ["ep"], "Version '9.9' of package 'pkg' not found.")
+    ]

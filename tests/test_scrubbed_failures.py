@@ -10,7 +10,7 @@ import pytest
 from aisc_eval import celery_tasks, plugin_process
 from aisc_eval.service import api_client
 
-from test_plugin_process import _Process, worker  # noqa: F401  (the fixture)
+from test_plugin_process import ONE_MEASURE, ONE_MEASURE_POSTED, _Process, worker  # noqa: F401  (the fixture)
 
 JUDGE = "judge-secret-value-1"
 SHAPED = "sk-proj-abcdefghijklmnopqrstu"
@@ -52,7 +52,7 @@ def with_secret(monkeypatch):
 
 
 def _plugin(
-    monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None, measures="[]"
+    monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None, measures=ONE_MEASURE
 ):
     def popen(argv, **kwargs):
         kwargs["stderr"].write(stderr)
@@ -276,7 +276,7 @@ def test_a_failing_post_is_re_raised_scrubbed_with_nothing_chained(
     monkeypatch.setattr(celery_tasks, "post_measures", refuse)
     caplog.set_level(logging.DEBUG)
     with pytest.raises(Exception) as raised:
-        celery_tasks.post_measurements.run([], "eval", "ep")
+        celery_tasks.post_measurements.run(ONE_MEASURE_POSTED, "eval", "ep")
     seen = _stored_by_celery(raised.value)
     assert "500 posting measures" in seen
     for secret in (JUDGE, "hunter22url"):

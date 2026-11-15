@@ -11,7 +11,7 @@ import pytest
 
 from aisc_eval import celery_tasks, plugin_process, plugin_runtime
 
-from test_plugin_process import _Process, worker  # noqa: F401  (the fixture)
+from test_plugin_process import ONE_MEASURE, _Process, worker  # noqa: F401  (the fixture)
 
 CRED = "cred-0123456789abcdef"
 VARIABLE = "AISC_SECRET_CONFIG_MODEL_CREDENTIAL"
@@ -56,7 +56,7 @@ def _plugin(monkeypatch, seen, *, stderr="", returncode=0):
         seen["env"] = kwargs["env"]
         kwargs["stderr"].write(stderr)
         kwargs["stderr"].flush()
-        (workspace / "output" / "measures.json").write_text("[]")
+        (workspace / "output" / "measures.json").write_text(ONE_MEASURE)
         return _Process(returncode=returncode)
 
     monkeypatch.setattr(plugin_process.subprocess, "Popen", popen)

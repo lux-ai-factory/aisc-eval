@@ -12,7 +12,7 @@ import requests
 from aisc_eval import celery_tasks, plugin_process
 from aisc_eval.service import helpers
 from aisc_plugin_interface import BaseEvaluationPlugin, HelperModel, helper_model
-from test_plugin_process import PROJECT, _Answer, platform, worker  # noqa: F401  (fixtures)
+from test_plugin_process import ONE_MEASURE, PROJECT, _Answer, platform, worker  # noqa: F401  (fixtures)
 
 KEY = "sk-test-123"
 ENDPOINT = "https://llm.example/v1"
@@ -79,7 +79,7 @@ def run(worker, platform, monkeypatch):  # noqa: F811
         seen["inputs"] = {
             path.name: path.read_bytes() for path in (output.parent / "input").iterdir()
         }
-        (output / "measures.json").write_text("[]")
+        (output / "measures.json").write_text(ONE_MEASURE)
 
     worker["leave"] = leave
     seen["worker"] = worker

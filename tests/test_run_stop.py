@@ -14,7 +14,7 @@ import requests
 from aisc_eval import celery_tasks, plugin_process
 from aisc_eval.data_model.evaluation import Evaluation
 
-from test_plugin_process import _Process, worker  # noqa: F401  (the fixture)
+from test_plugin_process import ONE_MEASURE_POSTED, _Process, worker  # noqa: F401  (the fixture)
 
 EVALUATION = "eval"
 FAILING = "ep"
@@ -112,7 +112,7 @@ def test_a_failed_post_of_the_measurements_stops_the_runs_other_tests(
 
     monkeypatch.setattr(celery_tasks, "post_measures", refuse)
     with pytest.raises(RuntimeError):
-        celery_tasks.post_measurements.run([], EVALUATION, FAILING)
+        celery_tasks.post_measurements.run(ONE_MEASURE_POSTED, EVALUATION, FAILING)
     assert broker["failed"][0] == (EVALUATION, FAILING, "500 posting measures")
     assert stopped(broker) == [PENDING, RUNNING]
     assert broker["revoked"] == TASKS
@@ -125,7 +125,7 @@ def test_a_run_whose_tests_cannot_be_read_still_revokes_its_tasks(broker, monkey
     monkeypatch.setattr(celery_tasks, "get_evaluation_request", unreachable)
     monkeypatch.setattr(celery_tasks, "post_measures", unreachable)
     with pytest.raises(ConnectionError):
-        celery_tasks.post_measurements.run([], EVALUATION, FAILING)
+        celery_tasks.post_measurements.run(ONE_MEASURE_POSTED, EVALUATION, FAILING)
     assert stopped(broker) == []
     assert broker["revoked"] == TASKS
 

@@ -198,7 +198,7 @@ def test_a_test_whose_run_cannot_be_read_is_not_run_blind(platform_calls, monkey
         raise ConnectionError("the engine does not answer")
 
     monkeypatch.setattr(celery_tasks, "get_evaluation_request", engine_down)
-    with pytest.raises(ConnectionError):
+    with pytest.raises(RuntimeError, match="could not be read"):
         _deliver()
 
 

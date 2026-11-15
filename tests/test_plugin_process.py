@@ -3,6 +3,7 @@ the kernel refuses the plugin the worker's /proc/<pid>/environ (DJANGO_SECRET_KE
 INTERNAL_API_KEY) and the worker's files. The worker then reads what the plugin left in its
 output folder as root, so that folder must not let the plugin point it at anything else."""
 
+import json
 import os
 import signal
 import stat
@@ -297,6 +298,12 @@ class _Ok:
     stderr = ""
 
 
+#: what a plugin that ends well leaves: a test with no measure has no result and fails
+ONE_MEASURE = '[{"name": "score", "score": 1.0}]'
+#: the same measure as run_plugin hands it to post_measurements
+ONE_MEASURE_POSTED = json.loads(ONE_MEASURE)
+
+
 class _Loader:
     discovered_packages = {"pkg": {"1.0": {"source": "registry"}}}
 
@@ -336,7 +343,7 @@ def worker(monkeypatch):
         "plugin_user",
         lambda: PluginUser(os.getuid(), os.getgid(), "/home/aisc-plugin", switch=True),
     )
-    seen["leave"] = lambda output: (output / "measures.json").write_text("[]")
+    seen["leave"] = lambda output: (output / "measures.json").write_text(ONE_MEASURE)
 
     def popen(argv, **kwargs):
         seen["popen"].append((argv, kwargs))
@@ -352,7 +359,7 @@ def _run():
 
 
 def test_run_plugin_starts_the_plugin_as_the_plugin_user(worker):
-    assert _run() == []
+    assert _run() == json.loads(ONE_MEASURE)
     [(argv, kwargs)] = worker["popen"]
     assert kwargs["user"] == os.getuid()
     assert kwargs["extra_groups"] == []
@@ -368,7 +375,7 @@ def test_run_plugin_ends_what_the_plugin_left_running(worker):
 
 def test_run_plugin_uploads_its_own_log_and_the_plugins_files(worker):
     def leave(output):
-        (output / "measures.json").write_text("[]")
+        (output / "measures.json").write_text(ONE_MEASURE)
         (output / "chart.png").write_bytes(b"png")
 
     worker["leave"] = leave
@@ -384,7 +391,7 @@ def test_run_plugin_uploads_its_own_log_and_the_plugins_files(worker):
 )
 def test_a_plugin_file_named_like_the_workers_own_files_fails_the_run(worker, name):
     def leave(output):
-        (output / "measures.json").write_text("[]")
+        (output / "measures.json").write_text(ONE_MEASURE)
         (output / name).write_text('{"fake": 1}')
 
     worker["leave"] = leave
@@ -547,7 +554,7 @@ def test_a_failed_revoke_does_not_fail_the_run(worker, platform, monkeypatch):
         raise celery_tasks.run_pass.requests.ConnectionError("down")
 
     monkeypatch.setattr(celery_tasks.run_pass.requests, "delete", unreachable)
-    assert _run_with([_resource("target", TARGET)]) == []
+    assert _run_with([_resource("target", TARGET)]) == json.loads(ONE_MEASURE)
     assert worker["failed"] == []
 
 
@@ -584,7 +591,7 @@ def test_the_runs_calls_are_kept_also_when_the_plugin_fails(
 
 def test_a_trace_the_platform_cannot_give_does_not_change_the_run(worker, platform):
     platform["trace"] = celery_tasks.run_pass.requests.ConnectionError("down")
-    assert _run_with([_resource("target", TARGET)]) == []
+    assert _run_with([_resource("target", TARGET)]) == json.loads(ONE_MEASURE)
     assert worker["failed"] == [] and TRACE_FILE not in worker["uploads"]
     assert platform["calls"][-1][0] == "DELETE"
 
