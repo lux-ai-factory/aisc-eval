@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 from celery import group, chain
 
-from aisc_eval import plugin_process
+from aisc_eval import plugin_process, run_registry
 from aisc_eval import run_context  # also registers the run header handlers
 from aisc_eval.scrub import REDACTED, known_secrets, scrub_text, without_known_bytes
 from aisc_eval.celery_app import celery_app
@@ -23,6 +23,7 @@ from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.service.api_client import (
     mark_completed,
     mark_failed,
+    mark_processing,
     mark_plugin_started,
     mark_plugin_finished,
     mark_plugin_failed,
@@ -274,7 +275,7 @@ class StartRefused(RuntimeError):
 
 
 def _run_tasks_key(evaluation_pid: uuid.UUID) -> str:
-    return f"eval_tasks:{evaluation_pid}"
+    return run_registry.tasks_key(evaluation_pid)
 
 
 def _run_tasks_ttl(task_count: int) -> int:
@@ -397,21 +398,39 @@ def _fail_before_start(evaluation_pid: uuid.UUID, exc: BaseException) -> None:
     reason = f"the run could not start: {type(exc).__name__}: {str(exc)}"[:500]
     logger.error(f"Evaluation {evaluation_pid}: {scrub_text(reason)}")
     try:
-        tests = get_evaluation_request(evaluation_pid).get("evaluation_plugins") or []
-    except Exception as read_failure:
-        logger.error(
-            f"Evaluation {evaluation_pid}: its tests could not be read ({type(read_failure).__name__})"
-        )
-        tests = []
-    for test in tests:
-        if isinstance(test, dict) and test.get("pid"):
-            mark_plugin_failed(evaluation_pid, test["pid"], reason)
-    mark_failed(evaluation_pid)
+        try:
+            tests = (
+                get_evaluation_request(evaluation_pid).get("evaluation_plugins") or []
+            )
+        except Exception as read_failure:
+            logger.error(
+                f"Evaluation {evaluation_pid}: its tests could not be read ({type(read_failure).__name__})"
+            )
+            tests = []
+        for test in tests:
+            if not (isinstance(test, dict) and test.get("pid")):
+                continue
+            # one test that cannot be marked keeps neither the others nor the run from being marked
+            try:
+                mark_plugin_failed(evaluation_pid, test["pid"], reason)
+            except Exception as mark_failure:
+                logger.error(
+                    f"Test {test['pid']} could not be marked failed ({type(mark_failure).__name__})"
+                )
+    finally:
+        mark_failed(evaluation_pid)
 
 
 def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
-    """run_evaluation's work: read the run, then dispatch each package's install and its tests."""
+    """run_evaluation's work: read the run, claim it, register it for the sweep, dispatch each package's install
+    and its tests, and show it Processing. A run that has already ended (a person stopped it) is not dispatched;
+    a second delivery finds the claim and dispatches nothing."""
     plugin_loader.list_packages(refresh=True)
+
+    status = get_evaluation_request(evaluation_pid).get("status")
+    if status in ("Failed", "Done"):
+        logger.info(f"Evaluation {evaluation_pid} is {status}: nothing dispatched")
+        return {"evaluation_pid": evaluation_pid, "plugin_task_ids": []}
 
     evaluation: Evaluation = get_evaluation(evaluation_pid)
     inputs_by_plugin: dict[str, list[dict]] = get_evaluation_inputs(evaluation_pid)
@@ -436,6 +455,8 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
     package_chains = []
     plugin_task_ids = []
     install_task_ids = []
+    tests: dict[str, str] = {}
+    installs: dict[str, str] = {}
     for pkg_key, pkg_info in plugins_by_pkg.items():
         install_sig = install_package.si(
             pkg_info["package_name"],
@@ -474,6 +495,8 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
             # freeze to get a stable task id before dispatching
             run_plugin_sig.freeze()
             plugin_task_ids.append(str(run_plugin_sig.id))
+            tests[str(evaluation_plugin.pid)] = str(run_plugin_sig.id)
+            installs[str(evaluation_plugin.pid)] = str(install_sig.id)
 
             post_measurements_sig = post_measurements.s(
                 evaluation_pid, evaluation_plugin.pid
@@ -482,17 +505,57 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
 
         package_chains.append(chain(install_sig, group(plugin_chain_list)))
 
+    # the run's installs and tests, so a failure or a Stop revokes them; kept as long as the run can last: every
+    # install, test and post of its measurements, and the finalisation. Set only when absent: the claim
+    client = celery_app.backend.client
+    ttl = _run_tasks_ttl(len(install_task_ids) + 2 * len(plugin_task_ids) + 1)
+    if not run_registry.claim(
+        client, evaluation_pid, install_task_ids + plugin_task_ids, ttl
+    ):
+        entry = run_registry.entry_of(client, evaluation_pid)
+        logger.warning(
+            f"Evaluation {evaluation_pid} was already dispatched: this delivery dispatches nothing"
+        )
+        return {
+            "evaluation_pid": evaluation_pid,
+            "plugin_task_ids": list(entry.tests.values()) if entry else [],
+        }
+
+    run = run_context.current()
+    claimed_at = time.time()
+    deadline = claimed_at + ttl
+    expiry = run_registry.ticket_expiry(run)
+    if expiry is not None:
+        deadline = min(deadline, expiry - run_registry.DEADLINE_MARGIN_S)
+    run_registry.register(
+        client,
+        run_registry.RegisteredRun(
+            evaluation=str(evaluation_pid),
+            run=run,
+            claimed_at=claimed_at,
+            deadline=deadline,
+            tests=tests,
+            installs=installs,
+        ),
+        ttl + run_registry.DEADLINE_MARGIN_S,
+    )
+
     # dispatch: each package's plugins start after its install, no waiting for other packages
     workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
-    workflow.apply_async()
+    try:
+        workflow.apply_async()
+    except Exception:
+        # nothing was sent: the claim goes, and run_evaluation fails the run
+        run_registry.release(client, evaluation_pid)
+        raise
 
-    # the run's installs and tests, so a failure revokes them; kept as long as the run can last: every install,
-    # test and post of its measurements, and the finalisation
-    celery_app.backend.client.set(
-        _run_tasks_key(evaluation_pid),
-        json.dumps(install_task_ids + plugin_task_ids),
-        ex=_run_tasks_ttl(len(install_task_ids) + 2 * len(plugin_task_ids) + 1),
-    )
+    try:
+        mark_processing(evaluation_pid)
+    except Exception as exc:
+        # the run goes on; it only keeps showing Pending
+        logger.warning(
+            f"Evaluation {evaluation_pid} could not be shown Processing ({type(exc).__name__})"
+        )
 
     return {"evaluation_pid": evaluation_pid, "plugin_task_ids": plugin_task_ids}
 

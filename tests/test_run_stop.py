@@ -206,18 +206,24 @@ def test_the_runs_task_list_names_every_install_and_test_and_lasts_as_long_as_th
     monkeypatch.setattr(
         celery_tasks.plugin_loader, "list_packages", lambda refresh=False: {}
     )
+    def keep_the_task_list(key, value, ex, nx=False):
+        # the run's registration for the sweep is set beside it
+        if key.startswith("eval_tasks:"):
+            stored.update(key=key, value=json.loads(value), ex=ex)
+        return True
+
     monkeypatch.setattr(celery_tasks, "get_evaluation", lambda pid: two_packages())
+    monkeypatch.setattr(
+        celery_tasks, "get_evaluation_request", lambda pid: {"status": "Pending"}
+    )
+    monkeypatch.setattr(celery_tasks, "mark_processing", lambda pid: "Processing")
     monkeypatch.setattr(celery_tasks, "get_evaluation_inputs", lambda pid: {})
     monkeypatch.setattr(celery_tasks, "get_project_settings_by_pid", lambda *a: [])
     monkeypatch.setattr(celery_tasks, "group", lambda *a: _Workflow())
     monkeypatch.setattr(celery_tasks, "chain", lambda *a: a)
     fake_app = types.SimpleNamespace(
         backend=types.SimpleNamespace(
-            client=types.SimpleNamespace(
-                set=lambda key, value, ex: stored.update(
-                    key=key, value=json.loads(value), ex=ex
-                )
-            )
+            client=types.SimpleNamespace(set=keep_the_task_list)
         ),
         conf=types.SimpleNamespace(task_time_limit=24300),
     )
