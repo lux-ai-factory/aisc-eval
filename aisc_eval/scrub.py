@@ -18,7 +18,8 @@ REDACTED = "[redacted]"
 #: A known secret shorter than this is never searched for (it would match ordinary words).
 MIN_KNOWN_LENGTH = 8
 
-#: A key holding one of these words is a secret in a ledger copy (`Authorization` and `Cookie` as header fields).
+#: The strings under a key holding one of these words are values the worker scrubs from failure text (`Authorization`
+#: and `Cookie` as header fields). Broad on purpose: a value shorter than MIN_KNOWN_LENGTH is never searched for.
 LEDGER_SECRET_NAME = re.compile(
     r"key|token|secret|password|credential|authorization|cookie", re.IGNORECASE
 )
