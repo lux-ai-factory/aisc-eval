@@ -40,9 +40,34 @@ from aisc_eval.utils import env
 
 #: files a plugin creates are its own
 PLUGIN_UMASK = 0o077
-#: the uids a root worker runs plugin tests as, one per test at a time: above the image's own users
-#: (10001 plugin, 10002 install, 10003 egress proxy), with no passwd entry, so nothing else owns them
-RUN_UIDS = range(10100, 10200)
+#: the setting that names this worker's pool of run uids, "first-last": two worker containers (the run worker and
+#: the one that reads manifests) must never lease the same uid, since the kernel counts a uid's processes across
+#: containers and a shared volume would show one owner for two runs
+RUN_UIDS_SETTING = "PLUGIN_RUN_UIDS"
+DEFAULT_RUN_UIDS = range(10100, 10200)
+#: the image's own users (10001 plugin, 10002 install, 10003 egress proxy) and below: never a run user
+HIGHEST_IMAGE_UID = 10003
+
+
+def run_uid_pool(value: str | None) -> range:
+    """The pool a setting "first-last" names (inclusive), DEFAULT_RUN_UIDS when it is unset or empty. A pool that
+    is reversed, reaches the image's own users or is not a range is refused: the worker would not start."""
+    if not (value or "").strip():
+        return DEFAULT_RUN_UIDS
+    first, sep, last = value.partition("-")
+    try:
+        pool = range(int(first), int(last) + 1)
+    except ValueError:
+        pool = None
+    if not sep or pool is None or len(pool) == 0 or pool.start <= HIGHEST_IMAGE_UID:
+        raise ValueError(f"{RUN_UIDS_SETTING} must be first-last, both above {HIGHEST_IMAGE_UID} and first <= "
+                         f"last, not {value!r}")
+    return pool
+
+
+#: the uids a root worker runs plugin tests as, one per test at a time: with no passwd entry, so nothing else owns
+#: them
+RUN_UIDS = run_uid_pool(os.environ.get(RUN_UIDS_SETTING))
 #: one lock file per uid; a test holds its uid's lock while it runs (flock, so a holder that died
 #: frees it)
 RUN_USER_LOCKS = Path("/run/aisc-run-users")

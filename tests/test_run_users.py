@@ -34,6 +34,30 @@ def test_the_pool_is_a_hundred_uids_above_the_image_users():
     assert need("RUN_UIDS") == range(10100, 10200)
 
 
+def test_a_worker_takes_its_pool_from_its_setting():
+    """Two worker containers must never lease the same uid: the kernel counts a uid's processes across
+    containers, and a shared volume would show one owner for two runs. Each names its own pool."""
+    pool = need("run_uid_pool")
+    assert pool(None) == pool("") == range(10100, 10200)
+    assert pool("10200-10209") == range(10200, 10210)
+    assert pool(" 10200 - 10200 ") == range(10200, 10201)
+
+
+@pytest.mark.parametrize("value", ["10209-10200", "10000-10099", "10003-10010", "10200", "a-b", "10200-"])
+def test_a_pool_that_is_reversed_reaches_the_image_users_or_is_not_a_range_is_refused(value):
+    with pytest.raises(ValueError, match=plugin_process.RUN_UIDS_SETTING):
+        need("run_uid_pool")(value)
+
+
+def test_the_firewall_covers_the_pool_the_setting_names():
+    code = ("from aisc_eval import egress, plugin_process; "
+            "print(plugin_process.RUN_UIDS.start, plugin_process.RUN_UIDS.stop, "
+            "*{rule[rule.index('--uid-owner') + 1] for rule in egress.firewall_rules()})")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          env={**os.environ, "PLUGIN_RUN_UIDS": "10200-10209"})
+    assert done.stdout.split() == ["10200", "10210", "10200-10209"], done.stderr
+
+
 def test_two_leases_get_two_different_users(tmp_path, as_root):
     lease = need("lease_run_user")
     with (

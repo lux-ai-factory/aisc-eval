@@ -1,6 +1,6 @@
 #!/bin/sh
 # The eval worker's start. As root, before the worker: the folders the run users' locks and the egress
-# proxy's rules live in, the firewall that keeps every run user (uids 10100-10199) behind the proxy
+# proxy's rules live in, the firewall that keeps every run user (the pool PLUGIN_RUN_UIDS names, 10100-10199 by default) behind the proxy
 # (aisc_eval/egress.py), and the proxy itself, restarted if it ends. Without NET_ADMIN the firewall cannot be
 # set: the worker then refuses to start plugin tests and says why, and other commands (Flower) run as usual.
 set -u

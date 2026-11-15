@@ -82,6 +82,7 @@ Read from the environment (`aisc_eval/utils/env.py`, `aisc_eval/deployment.py`, 
 | `PLATFORM_URL` | the platform, for run passes and helper models | empty | `http://platform:8000` |
 | `PLATFORM_CONNECTIONS_TOKEN` | the worker's service token to the platform; never given to a plugin | empty | from the secrets |
 | `PLUGIN_USER`, `PLUGIN_INSTALL_USER` | the image's plugin user (kept apart from the install user) and the user a root worker installs plugins as; each test runs as a uid of its own (see Users) | `aisc-plugin`, `aisc-install` | defaults |
+| `PLUGIN_RUN_UIDS` | this worker's pool of run uids, `first-last`, above 10003; the run worker and the declarations worker each have their own, never overlapping (the kernel counts a uid's processes across containers) | `10100-10199` | `10100-10199` (run worker), `10200-10209` (declarations worker) |
 | `PLUGIN_EGRESS_ALLOWED_HOSTS` | hosts every plugin test may reach besides the platform and its helpers: `host`, `host:port` or `.domain` (the domain and every host under it, public addresses only), comma separated; set empty for none | `raw.githubusercontent.com` | `raw.githubusercontent.com` |
 
 A plugin does not get the worker's environment. It runs with an allowlist (`PLUGIN_ENV_NAMES` in
@@ -213,8 +214,8 @@ Please do not push your local changes, except if necessary. For instance, DEBUG 
 - **Task time limits**: 400 minutes soft, 405 hard (`aisc_eval/celery_app.py`), for long
   first runs that download a model.
 - **Users**: a root worker installs plugins as `aisc-install` (`PLUGIN_INSTALL_USER`), with an
-  environment and a uv cache of its own, and runs each test as a uid of its own, leased from 10100-10199
-  (at most 100 tests at once), which can run the installed venv but not change it, and cannot read the
+  environment and a uv cache of its own, and runs each test as a uid of its own, leased from `PLUGIN_RUN_UIDS`
+  (10100-10199 by default, at most 100 tests at once), which can run the installed venv but not change it, and cannot read the
   worker's environment, `/app` or another test's folders. A test's home and tmp are its own; its working
   folder and inputs are read-only to it; whatever it leaves running is killed before its uid is leased again
   (`aisc_eval/plugin_process.py`).
