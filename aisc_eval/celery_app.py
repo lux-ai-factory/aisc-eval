@@ -18,6 +18,11 @@ celery_app: Celery = Celery(
 
 logger.debug("=== CELERY APP CREATED ===")
 
+#: the queue a plugin's manifest read and its form hooks go to: a worker process of its own serves it, one task at a
+#: time, so a configure page never waits behind the runs; the run worker reads only the default queue
+PLUGIN_DECLARATIONS_QUEUE = "plugin-declarations"
+PLUGIN_DECLARATION_TASKS = ("aisc_eval.celery_tasks.read_manifest", "aisc_eval.celery_tasks.plugin_hook")
+
 # Configure Celery settings for 30-minute task execution with heartbeat
 celery_config = {
     "task_acks_late": True,  # Acknowledge task only after completion
@@ -36,6 +41,7 @@ celery_config = {
     "broker_use_ssl": env.MQ_USE_SSL,
     "results_extended": True,
     "task_track_started": True,
+    "task_routes": {name: {"queue": PLUGIN_DECLARATIONS_QUEUE} for name in PLUGIN_DECLARATION_TASKS},
 }
 
 # Only add SSL configuration in production

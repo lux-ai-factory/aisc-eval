@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     git \
     gh \
+    iptables \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -64,9 +65,18 @@ RUN groupadd --system --gid 10002 aisc-install \
         --create-home --home-dir /home/aisc-install --shell /usr/sbin/nologin aisc-install \
     && chmod 700 /home/aisc-install
 
+# The egress proxy runs as this one (aisc_eval/egress_proxy.py): neither root nor a run user, so the firewall that
+# keeps the run users (PLUGIN_RUN_UIDS, 10100-10199 by default, one per test, no passwd entry) behind it leaves it alone.
+RUN groupadd --system --gid 10003 aisc-egress \
+    && useradd --system --uid 10003 --gid aisc-egress --no-user-group \
+        --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin aisc-egress
+
 # Copy built application from builder
 COPY --from=builder /app /app
 RUN chmod 700 /app
+
+# sets the plugin firewall and starts the egress proxy, then runs the command
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 
 # Add virtual environment to PATH and set Python environment variables
 ENV VIRTUAL_ENV=/app/.venv \

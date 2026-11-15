@@ -13,6 +13,12 @@ measurements and the files the test writes to the backend's internal API (`/api/
 the measurements in the engine's schema of the project's database and the files in MinIO. The worker has no
 database and no object store settings of its own.
 
+The same image runs a second process, the compose service `aisc-eval-declarations-worker`. It serves only the
+queue `plugin-declarations`, one task at a time: reading a plugin's manifest and running its form hooks
+(`read_manifest`, `plugin_hook`), so a configure page never waits behind the runs. The run worker never reads that
+queue. Both run plugin code, so both are kept apart the same way (the plugin firewall, a first process that reaps,
+the same egress hosts, no database settings).
+
 What the test assesses is reached through the platform, never with its secrets in the worker or the plugin:
 
 - **What is assessed** (the system or a component of the AI card): the worker asks the platform for a run pass
@@ -75,14 +81,18 @@ Read from the environment (`aisc_eval/utils/env.py`, `aisc_eval/deployment.py`, 
 | `PACKAGE_REGISTRY_URL`, `PACKAGE_REGISTRY_INDEX`, `PACKAGE_REGISTRY_USER`, `PACKAGE_REGISTRY_PASSWORD` | package index tests are installed from | empty | `http://devpi:3141`, `root/public`, no login |
 | `PLATFORM_URL` | the platform, for run passes and helper models | empty | `http://platform:8000` |
 | `PLATFORM_CONNECTIONS_TOKEN` | the worker's service token to the platform; never given to a plugin | empty | from the secrets |
-| `PLUGIN_USER`, `PLUGIN_INSTALL_USER` | the users a root worker runs and installs plugins as | `aisc-plugin`, `aisc-install` | defaults |
+| `PLUGIN_USER`, `PLUGIN_INSTALL_USER` | the image's plugin user (kept apart from the install user) and the user a root worker installs plugins as; each test runs as a uid of its own (see Users) | `aisc-plugin`, `aisc-install` | defaults |
+| `PLUGIN_RUN_UIDS` | this worker's pool of run uids, `first-last`, above 10003; the run worker and the declarations worker each have their own, never overlapping (the kernel counts a uid's processes across containers) | `10100-10199` | `10100-10199` (run worker), `10200-10209` (declarations worker) |
+| `PLUGIN_EGRESS_ALLOWED_HOSTS` | hosts every plugin test may reach besides the platform and its helpers: `host`, `host:port` or `.domain` (the domain and every host under it, public addresses only), comma separated; set empty for none | `raw.githubusercontent.com` | `raw.githubusercontent.com` |
 
 A plugin does not get the worker's environment. It runs with an allowlist (`PLUGIN_ENV_NAMES` in
-`aisc_eval/celery_tasks.py`): `PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`, the CA bundle and proxy
-variables, `PLATFORM_URL`, `CONNECTIONS_ALLOWED_HOSTS`, `AISC_TARGET_BASE_URL` and `OPENAI_BASE_URL`; plus its
-project's secrets and its helper models' keys as `AISC_SECRET_*`, and its run pass as `PLATFORM_RUN_PASS`. When
+`aisc_eval/celery_tasks.py`): `PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`, the CA bundle, `PLATFORM_URL`,
+`CONNECTIONS_ALLOWED_HOSTS`, `AISC_TARGET_BASE_URL` and `OPENAI_BASE_URL`; plus its
+project's secrets and its helper models' keys as `AISC_SECRET_*`, its run pass as `PLATFORM_RUN_PASS`, and its
+test's proxy (`HTTP_PROXY`, `HTTPS_PROXY` and their lower-case forms, with the test's token; `NO_PROXY` empty). When
 no `API_KEY_OPENAI` is set it gets a placeholder, for plugins that build an OpenAI client even when they never
-call one. The broker URL, `INTERNAL_API_KEY`, `DJANGO_SECRET_KEY`, the package index login and
+call one, and `LITELLM_LOCAL_MODEL_COST_MAP=True`, so LiteLLM reads the price map it ships with instead of
+fetching it from GitHub at every run. The broker URL, `INTERNAL_API_KEY`, `DJANGO_SECRET_KEY`, the package index login and
 `PLATFORM_CONNECTIONS_TOKEN` stay with the worker. A plugin that needs another variable needs it added to that
 list.
 
@@ -109,7 +119,7 @@ We use `uv` as environment manager (Python 3.12). Install the dependencies with:
 uv sync --frozen --group dev
 ```
 
-The lock takes `aisc-plugin-interface` 0.4.0, `aisc-plugin-manager` 0.3.0+aisc.1 and `aisc-identity` 0.1.0
+The lock takes `aisc-plugin-interface` 0.5.0, `aisc-plugin-manager` 0.3.0+aisc.1 and `aisc-identity` 0.1.0
 from the wheels under `vendor/`, built from the aisc checkout by the root's `scripts/vendor-plugin-interface.sh`,
 which refreshes them when one of those libraries changes. To work on the interface or the plugin manager
 themselves, install them from the aisc repo in editable mode:
@@ -185,9 +195,14 @@ Please do not push your local changes, except if necessary. For instance, DEBUG 
 - **Deployment mode and run headers**: `aisc_eval/deployment.py`, `aisc_eval/run_context.py`, and
   `aisc_eval/service/api_client.py`, which builds the headers of each internal call at call time.
   Task signatures are as on master.
-- **Plugin installs**: plugins are installed online from the package index in `run_plugin` (no `--offline`),
-  and the index is always passed to `uv pip install` instead of being probed first. A local plugin is
-  installed from a copy of its folder.
+- **Plugin installs**: each run installs its plugin only from the hashes the engine recorded for it and sends
+  with the task (`pins`: the wheel's sha256 and the hashed lock of its dependencies), with `--require-hashes
+  --no-deps`, online from the package index (no `--offline`). A catalogue plugin without them, or whose lock
+  does not name its recorded wheel, is refused before anything is installed; a file whose hash is not the
+  recorded one is refused naming why. A local plugin is installed from its recorded lock of dependencies, when
+  there is one, and a copy of its folder; its folder's digest, git commit and dirty flag are sent with the
+  test's start. What the run's environment held (`uv pip freeze`) is kept as the run's file
+  `plugin-environment.txt`, failed or not; a plugin cannot write a file of that name.
 - **Plugin environment**: an allowlist instead of a copy of the worker's environment (see
   Configuration), with a placeholder `API_KEY_OPENAI` when none is set, for plugins that build an
   OpenAI client even when a local model is used.
@@ -204,12 +219,21 @@ Please do not push your local changes, except if necessary. For instance, DEBUG 
 - **Task time limits**: 400 minutes soft, 405 hard (`aisc_eval/celery_app.py`), for long
   first runs that download a model.
 - **Users**: a root worker installs plugins as `aisc-install` (`PLUGIN_INSTALL_USER`), with an
-  environment and a uv cache of its own, and runs them as `aisc-plugin` (`PLUGIN_USER`), which can
-  run the installed venv but not change it, and cannot read the worker's environment or `/app`
+  environment and a uv cache of its own, and runs each test as a uid of its own, leased from `PLUGIN_RUN_UIDS`
+  (10100-10199 by default, at most 100 tests at once), which can run the installed venv but not change it, and cannot read the
+  worker's environment, `/app` or another test's folders. A test's home and tmp are its own; its working
+  folder and inputs are read-only to it; whatever it leaves running is killed before its uid is leased again
   (`aisc_eval/plugin_process.py`).
+- **Network**: a plugin test reaches the network only through the egress proxy on the worker's loopback
+  (`aisc_eval/egress_proxy.py`, as `aisc-egress`): the image's entrypoint sets a firewall that lets the run
+  uids open one connection, to the proxy, and nothing else (IPv6 and DNS included), which takes `NET_ADMIN`.
+  The proxy admits the test's own hosts (the platform, its helpers' and LLM inputs' endpoints,
+  `PLUGIN_EGRESS_ALLOWED_HOSTS`), each checked on the address it connects to by the project's network rule
+  (`aisc_eval/egress.py`). A root worker without the firewall or the proxy refuses to start a test.
 - **Tests** under `tests/` for each of these, for example `test_deployment_mode.py`, `test_run_context.py`,
   `test_run_context_broker.py`, `test_run_ticket.py`, `test_run_pass_project.py`, `test_helper_resolution.py`,
-  `test_plugin_environment.py`, `test_local_model_runs.py`, `test_plugin_process.py`, `test_plugin_install.py`
+  `test_plugin_environment.py`, `test_local_model_runs.py`, `test_plugin_process.py`, `test_plugin_install.py`,
+  `test_run_users.py`, `test_egress.py`
   and `services/test_post_measures_fit.py`.
 
 ## Contributing

@@ -12,6 +12,7 @@ import pytest
 
 from aisc_eval import celery_tasks, plugin_process
 from aisc_eval.plugin_process import PluginUser
+from recorded_pins import recorded_pins
 
 INSTALLER = PluginUser(uid=10002, gid=10002, home="/home/aisc-install", switch=True)
 
@@ -146,7 +147,7 @@ def installs(monkeypatch):
 
 
 def test_the_cache_warming_install_runs_as_the_install_user(installs):
-    celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"])
+    celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0"))
     assert [argv[:3] for argv, _ in installs] == [
         ["uv", "venv", installs[0][0][2]],
         ["uv", "pip", "install"],
@@ -165,10 +166,12 @@ def test_a_runs_venv_is_made_and_filled_by_the_install_user(installs, monkeypatc
     monkeypatch.setattr(celery_tasks, "mark_plugin_failed", lambda *a: None)
     monkeypatch.setattr(celery_tasks, "_revoke_sibling_tasks", lambda *a: None)
     with pytest.raises(RuntimeError):
-        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
-    venv_cmd, install_cmd = (argv for argv, _ in installs)
+        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
+    venv_cmd, install_cmd, freeze_cmd = (argv for argv, _ in installs)
     assert venv_cmd[:2] == ["uv", "venv"] and "--allow-existing" in venv_cmd
     assert install_cmd[:3] == ["uv", "pip", "install"]
+    # the run's environment is read by the install user too, to be kept as a file of the run
+    assert freeze_cmd[:3] == ["uv", "pip", "freeze"]
     assert Path(venv_cmd[2]).name == "venv"
 
 
@@ -275,7 +278,7 @@ def test_a_failed_step_is_refused_with_its_message_scrubbed(monkeypatch, tmp_pat
 
 def test_both_tasks_build_the_venv_the_same_way(installs, monkeypatch):
     seen = _recorded_installs(monkeypatch)
-    celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"])
+    celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0"))
     warmed = list(seen)
     seen.clear()
     monkeypatch.setattr(
@@ -289,12 +292,14 @@ def test_both_tasks_build_the_venv_the_same_way(installs, monkeypatch):
     monkeypatch.setattr(celery_tasks, "mark_plugin_failed", lambda *a: None)
     monkeypatch.setattr(celery_tasks, "_revoke_sibling_tasks", lambda *a: None)
     with pytest.raises(RuntimeError):
-        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
+        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
 
     def shape(calls):
         return [(argv[:2], timeout) for argv, timeout in calls]
 
-    assert shape(warmed) == shape(seen) and len(seen) == 2
+    # the run then reads its environment, which the warm-up does not keep
+    assert shape(warmed) == shape(seen[:2]) and len(seen) == 3
+    assert seen[2][0][:3] == ["uv", "pip", "freeze"]
 
 
 class _LoaderThatLearns:
@@ -322,7 +327,7 @@ def test_a_version_published_after_the_worker_listed_the_index_is_found(
 ):
     loader = _LoaderThatLearns()
     monkeypatch.setattr(celery_tasks, "plugin_loader", loader)
-    celery_tasks.install_package.run("pkg", "1.1", "eval", ["ep"])
+    celery_tasks.install_package.run("pkg", "1.1", "eval", ["ep"], pins=recorded_pins("pkg", "1.1"))
     assert loader.listed == 1
     assert [argv[:3] for argv, _ in installs][-1] == ["uv", "pip", "install"]
 
@@ -330,6 +335,12 @@ def test_a_version_published_after_the_worker_listed_the_index_is_found(
 def test_a_version_the_index_does_not_have_is_still_refused(installs, monkeypatch):
     loader = _LoaderThatLearns()
     monkeypatch.setattr(celery_tasks, "plugin_loader", loader)
+    stops = []
+    monkeypatch.setattr(celery_tasks, "_stop_run", lambda *a: stops.append(a))
     with pytest.raises(KeyError, match="Version '9.9'"):
-        celery_tasks.install_package.run("pkg", "9.9", "eval", ["ep"])
+        celery_tasks.install_package.run("pkg", "9.9", "eval", ["ep"], pins=recorded_pins("pkg", "9.9"))
     assert loader.listed == 1
+    # the refusal fails the run's tests with its reason, as any failed install does
+    assert [(evaluation, tests, reason) for evaluation, tests, reason, _task in stops] == [
+        ("eval", ["ep"], "Version '9.9' of package 'pkg' not found.")
+    ]

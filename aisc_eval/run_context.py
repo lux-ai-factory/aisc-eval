@@ -3,6 +3,8 @@ the upstream task signatures stay as they are. The backend puts it
 on run_evaluation; every task published while a task runs inherits it; the api_client reads
 it for the X-AISC-Project, X-AISC-Evaluation and X-AISC-Run headers the door checks."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
@@ -27,6 +29,16 @@ def run_of(request: Any) -> Run | None:
 
 def current() -> Run | None:
     return _current.get()
+
+
+@contextmanager
+def acting_for(run: Run | None) -> Iterator[None]:
+    """Act as `run` outside one of its tasks (the sweep closing a run's tests), then go back to what was current."""
+    token = _current.set(run)
+    try:
+        yield
+    finally:
+        _current.reset(token)
 
 
 #: where _enter keeps the token of its set(), on the task's request, so _leave can reset to

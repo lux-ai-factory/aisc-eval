@@ -38,6 +38,9 @@ from celery import canvas
 from aisc_eval import celery_tasks, deployment, run_context
 from aisc_eval.utils import env
 
+from test_plugin_process import ONE_MEASURE_POSTED
+from recorded_pins import recorded_pins
+
 PLATFORM_PID = "3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b"
 ENGINE_PROJECT_PID = "afb49e3f-813d-8888-9919-ee179d1090e6"
 EVALUATION_PID = "afb49e3f-813d-4260-9919-ee179d1090e6"
@@ -92,6 +95,7 @@ class FakeBackend:
                             "name": "probe",
                             "package_name": "aisc-probe",
                             "version": "1.0.0",
+                            "pins": recorded_pins("aisc-probe", "1.0.0"),
                         }
                     ],
                 },
@@ -391,7 +395,7 @@ def test_configurator_finalize_and_post_measurements_send_the_project_and_the_ti
     assert posts, "no post_measurements dispatched"
     for leaf in posts:
         # a chained .s(): the previous task's result (the measures) comes first
-        celery_tasks.post_measurements.run([], *leaf.args, **leaf.kwargs)
+        celery_tasks.post_measurements.run(ONE_MEASURE_POSTED, *leaf.args, **leaf.kwargs)
     _assert_configurator_headers(backend.internal_calls(), "post_measurements")
 
 
@@ -507,5 +511,5 @@ def test_standalone_finalize_and_post_measurements_send_no_project_headers(
     posts = [leaf for leaf in leaves if leaf.task.endswith("post_measurements")]
     assert posts, "standalone: no post_measurements dispatched"
     for leaf in posts:
-        celery_tasks.post_measurements.run([], *leaf.args, **leaf.kwargs)
+        celery_tasks.post_measurements.run(ONE_MEASURE_POSTED, *leaf.args, **leaf.kwargs)
     _assert_standalone_headers(backend.internal_calls(), "post_measurements")

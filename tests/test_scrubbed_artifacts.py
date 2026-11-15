@@ -8,6 +8,7 @@ import pytest
 from aisc_eval import celery_tasks, scrub
 
 from test_plugin_process import (  # noqa: F401  (fixtures)
+    ONE_MEASURE,
     TARGET,
     _Answer,
     _resource,
@@ -15,6 +16,7 @@ from test_plugin_process import (  # noqa: F401  (fixtures)
     worker,
 )
 from test_scrubbed_failures import JUDGE, SECRET_SETTING, with_secret  # noqa: F401
+from recorded_pins import recorded_pins
 
 RUN_PASS = "the-pass-0123456789"
 CONFIG_KEY = "cfg-key-12345678"
@@ -22,13 +24,13 @@ CONFIG_KEY = "cfg-key-12345678"
 
 def run(worker, files, config=None, inputs=(), settings=SECRET_SETTING):
     def leave(output):
-        (output / "measures.json").write_text("[]")
+        (output / "measures.json").write_text(ONE_MEASURE)
         for name, content in files.items():
             (output / name).write_bytes(content)
 
     worker["leave"] = leave
     celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", config or {}, list(inputs), settings, "eval", "ep"
+        "pkg", "Plugin", "1.0", config or {}, list(inputs), settings, "eval", "ep", pins=recorded_pins("pkg", "1.0")
     )
     return worker["uploads"]
 

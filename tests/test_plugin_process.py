@@ -3,9 +3,10 @@ the kernel refuses the plugin the worker's /proc/<pid>/environ (DJANGO_SECRET_KE
 INTERNAL_API_KEY) and the worker's files. The worker then reads what the plugin left in its
 output folder as root, so that folder must not let the plugin point it at anything else."""
 
+import contextlib
+import json
 import os
 import signal
-import stat
 import subprocess
 import sys
 import time
@@ -13,8 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from aisc_eval import celery_tasks, plugin_process
+from aisc_eval import celery_tasks, egress, plugin_process
 from aisc_eval.plugin_process import PluginUser
+from recorded_pins import recorded_pins
 
 PLUGIN = PluginUser(uid=10001, gid=10001, home="/home/aisc-plugin", switch=True)
 
@@ -111,26 +113,6 @@ def test_a_worker_that_is_not_root_starts_the_plugin_without_switching(
     assert kwargs["extra_groups"] is None
     assert kwargs["umask"] == 0o077
     assert kwargs["env"]["HOME"] == "/home/dev"
-
-
-def test_the_run_folder_and_output_stay_roots_and_are_shared_with_the_plugin_group(
-    monkeypatch, tmp_path
-):
-    chowns = []
-    monkeypatch.setattr(
-        plugin_process.os,
-        "chown",
-        lambda path, uid, gid: chowns.append((path, uid, gid)),
-    )
-    output = tmp_path / "output"
-    output.mkdir()
-    plugin_process.prepare_workspace(tmp_path, output, PLUGIN)
-
-    # owner unchanged (-1): with the sticky bit the plugin can add files but not rename or
-    # replace config.json, input/, venv/ or output/ itself
-    assert chowns == [(tmp_path, -1, 10001), (output, -1, 10001)]
-    for folder in (tmp_path, output):
-        assert stat.S_IMODE(folder.stat().st_mode) == 0o1770
 
 
 def test_the_runtime_script_is_copied_into_the_run_folder(tmp_path):
@@ -297,6 +279,12 @@ class _Ok:
     stderr = ""
 
 
+#: what a plugin that ends well leaves: a test with no measure has no result and fails
+ONE_MEASURE = '[{"name": "score", "score": 1.0}]'
+#: the same measure as run_plugin hands it to post_measurements
+ONE_MEASURE_POSTED = json.loads(ONE_MEASURE)
+
+
 class _Loader:
     discovered_packages = {"pkg": {"1.0": {"source": "registry"}}}
 
@@ -305,7 +293,7 @@ class _Loader:
 
 
 @pytest.fixture
-def worker(monkeypatch):
+def worker(monkeypatch, tmp_path):
     """run_plugin with the backend, the installs and the plugin process faked."""
     seen = {"uploads": {}, "failed": [], "popen": [], "group_signals": []}
     monkeypatch.setattr(celery_tasks, "plugin_loader", _Loader())
@@ -331,12 +319,20 @@ def worker(monkeypatch):
             name, content
         ),
     )
-    monkeypatch.setattr(
-        plugin_process,
-        "plugin_user",
-        lambda: PluginUser(os.getuid(), os.getgid(), "/home/aisc-plugin", switch=True),
-    )
-    seen["leave"] = lambda output: (output / "measures.json").write_text("[]")
+    @contextlib.contextmanager
+    def lease(*args, **kwargs):
+        # the test's own user stands in for a leased one: its folders can be given to it for real
+        yield PluginUser(os.getuid(), os.getgid(), None, switch=True)
+
+    monkeypatch.setattr(plugin_process, "lease_run_user", lease)
+    monkeypatch.setattr(plugin_process, "end_processes_of", lambda user: None)
+    # what the worker writes is root's, which a test cannot give away
+    monkeypatch.setattr(plugin_process.os, "chown", lambda *a: None)
+    # each test's rule for the egress proxy, in a folder of this test's
+    policies = tmp_path / "egress"
+    policies.mkdir()
+    monkeypatch.setattr(egress, "POLICIES", policies)
+    seen["leave"] = lambda output: (output / "measures.json").write_text(ONE_MEASURE)
 
     def popen(argv, **kwargs):
         seen["popen"].append((argv, kwargs))
@@ -348,15 +344,16 @@ def worker(monkeypatch):
 
 
 def _run():
-    return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
+    return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
 
 
-def test_run_plugin_starts_the_plugin_as_the_plugin_user(worker):
-    assert _run() == []
+def test_run_plugin_starts_the_plugin_as_its_leased_user(worker):
+    assert _run() == json.loads(ONE_MEASURE)
     [(argv, kwargs)] = worker["popen"]
     assert kwargs["user"] == os.getuid()
     assert kwargs["extra_groups"] == []
-    assert kwargs["env"]["HOME"] == "/home/aisc-plugin"
+    # its home is its run's, beside the working folder
+    assert kwargs["env"]["HOME"] == str(Path(kwargs["cwd"]).parent / "home")
     # the runtime script is read from the run folder: the plugin user cannot read /app
     assert Path(argv[1]).parent == Path(kwargs["cwd"]) / "runtime"
 
@@ -368,7 +365,7 @@ def test_run_plugin_ends_what_the_plugin_left_running(worker):
 
 def test_run_plugin_uploads_its_own_log_and_the_plugins_files(worker):
     def leave(output):
-        (output / "measures.json").write_text("[]")
+        (output / "measures.json").write_text(ONE_MEASURE)
         (output / "chart.png").write_bytes(b"png")
 
     worker["leave"] = leave
@@ -384,7 +381,7 @@ def test_run_plugin_uploads_its_own_log_and_the_plugins_files(worker):
 )
 def test_a_plugin_file_named_like_the_workers_own_files_fails_the_run(worker, name):
     def leave(output):
-        (output / "measures.json").write_text("[]")
+        (output / "measures.json").write_text(ONE_MEASURE)
         (output / name).write_text('{"fake": 1}')
 
     worker["leave"] = leave
@@ -467,7 +464,7 @@ TARGET = f"target:{PROJECT}/system"
 
 def _run_with(inputs):
     return celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep"
+        "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep", pins=recorded_pins("pkg", "1.0")
     )
 
 
@@ -492,7 +489,8 @@ def test_a_run_with_a_target_mints_a_pass_for_exactly_that_ref(worker, platform)
     method, url, headers, body = platform["calls"][0]
     assert (method, url) == ("POST", "http://platform:8000/internal/run-passes")
     assert headers["X-AISC-Service-Token"] == "stack-token"
-    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT}
+    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT,
+                    "ttl_s": celery_tasks.celery_app.conf.task_time_limit + celery_tasks.RUN_PASS_MARGIN_S}
     [(_argv, kwargs)] = worker["popen"]
     assert kwargs["env"]["PLATFORM_RUN_PASS"] == "the-pass"
 
@@ -547,7 +545,7 @@ def test_a_failed_revoke_does_not_fail_the_run(worker, platform, monkeypatch):
         raise celery_tasks.run_pass.requests.ConnectionError("down")
 
     monkeypatch.setattr(celery_tasks.run_pass.requests, "delete", unreachable)
-    assert _run_with([_resource("target", TARGET)]) == []
+    assert _run_with([_resource("target", TARGET)]) == json.loads(ONE_MEASURE)
     assert worker["failed"] == []
 
 
@@ -584,7 +582,7 @@ def test_the_runs_calls_are_kept_also_when_the_plugin_fails(
 
 def test_a_trace_the_platform_cannot_give_does_not_change_the_run(worker, platform):
     platform["trace"] = celery_tasks.run_pass.requests.ConnectionError("down")
-    assert _run_with([_resource("target", TARGET)]) == []
+    assert _run_with([_resource("target", TARGET)]) == json.loads(ONE_MEASURE)
     assert worker["failed"] == [] and TRACE_FILE not in worker["uploads"]
     assert platform["calls"][-1][0] == "DELETE"
 

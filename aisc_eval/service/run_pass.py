@@ -38,10 +38,16 @@ def _platform_url() -> str:
     return (os.environ.get("PLATFORM_URL") or "").rstrip("/")
 
 
-def mint(refs: list[str], evaluation_plugin_uuid: str, project: str | None) -> str:
+def mint(
+    refs: list[str],
+    evaluation_plugin_uuid: str,
+    project: str | None,
+    ttl_s: int | None = None,
+) -> str:
     """A pass for exactly these refs, for one evaluation plugin's run of `project` (the platform pid of
     the evaluation's project: the platform refuses a ref of another project, and records which
-    connection served the run); RunPassRefused when the platform does not give one."""
+    connection served the run), lasting ttl_s seconds when given (else the platform's default);
+    RunPassRefused when the platform does not give one."""
     if not project:
         raise RunPassRefused("no run pass: the run carries no platform project")
     base = _platform_url()
@@ -51,13 +57,16 @@ def mint(refs: list[str], evaluation_plugin_uuid: str, project: str | None) -> s
             "no run pass: PLATFORM_URL and PLATFORM_CONNECTIONS_TOKEN must be set on the worker"
         )
     try:
+        body = {
+            "refs": refs,
+            "evaluation_plugin": evaluation_plugin_uuid,
+            "project": project,
+        }
+        if ttl_s is not None:
+            body["ttl_s"] = ttl_s
         resp = requests.post(
             f"{base}/internal/run-passes",
-            json={
-                "refs": refs,
-                "evaluation_plugin": evaluation_plugin_uuid,
-                "project": project,
-            },
+            json=body,
             headers={"X-AISC-Service-Token": token},
             timeout=30,
             allow_redirects=False,

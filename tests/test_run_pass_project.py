@@ -24,7 +24,8 @@ def test_the_pass_is_asked_for_the_runs_project(worker, platform):
     _run_with([_resource("target", TARGET)])
     method, url, _headers, body = platform["calls"][0]
     assert (method, url) == ("POST", "http://platform:8000/internal/run-passes")
-    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT}
+    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT,
+                    "ttl_s": celery_tasks.celery_app.conf.task_time_limit + celery_tasks.RUN_PASS_MARGIN_S}
 
 
 def test_a_run_with_no_project_gets_no_pass_and_never_starts(worker, platform):

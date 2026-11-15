@@ -29,13 +29,16 @@ def test_the_worker_never_logs_the_redis_password(monkeypatch):
     old_level = logger.level
     logger.addHandler(recorder)
     logger.setLevel(logging.DEBUG)
+    from aisc_eval import celery_app as celery_app_module
+
+    # the app every task module was made with; the reload below makes another, which must not outlive this test
+    the_app = celery_app_module.celery_app
     try:
         importlib.reload(env_module)
         assert FAKE_PASSWORD in env_module.REDIS_BACKEND_URL, "the test password is not in the backend URL"
-        from aisc_eval import celery_app as celery_app_module
-
         importlib.reload(celery_app_module)
     finally:
+        celery_app_module.celery_app = the_app
         logger.removeHandler(recorder)
         logger.setLevel(old_level)
         monkeypatch.delenv("REDIS_PASSWORD")

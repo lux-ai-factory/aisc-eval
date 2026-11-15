@@ -10,7 +10,8 @@ import pytest
 from aisc_eval import celery_tasks, plugin_process
 from aisc_eval.service import api_client
 
-from test_plugin_process import _Process, worker  # noqa: F401  (the fixture)
+from test_plugin_process import ONE_MEASURE, ONE_MEASURE_POSTED, _Process, worker  # noqa: F401  (the fixture)
+from recorded_pins import recorded_pins
 
 JUDGE = "judge-secret-value-1"
 SHAPED = "sk-proj-abcdefghijklmnopqrstu"
@@ -52,7 +53,7 @@ def with_secret(monkeypatch):
 
 
 def _plugin(
-    monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None, measures="[]"
+    monkeypatch, *, stdout=(), stderr="", returncode=0, leave=None, measures=ONE_MEASURE
 ):
     def popen(argv, **kwargs):
         kwargs["stderr"].write(stderr)
@@ -68,7 +69,7 @@ def _plugin(
 
 def _run(project_settings):
     return celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", {}, [], project_settings, "eval", "ep"
+        "pkg", "Plugin", "1.0", {}, [], project_settings, "eval", "ep", pins=recorded_pins("pkg", "1.0")
     )
 
 
@@ -137,7 +138,7 @@ def test_a_failed_install_is_reported_and_logged_with_its_key_redacted(
         lambda *a, **kw: _Failed("error: api_key=abcd1234efgh refused"),
     )
     with pytest.raises(RuntimeError):
-        celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"])
+        celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0"))
     assert worker["failed"] == [("eval", "ep", "error: api_key=[redacted] refused")]
     assert "abcd1234efgh" not in caplog.text
 
@@ -147,7 +148,11 @@ def test_the_api_client_sends_the_failure_text_scrubbed(monkeypatch):
 
     class _Answer:
         ok = True
+        status_code = 200
         text = ""
+
+        def raise_for_status(self):
+            pass
 
     def patch(url, json=None, headers=None, **kwargs):
         sent.append(json)
@@ -169,6 +174,7 @@ def test_the_progress_a_plugin_reports_is_stored_without_secrets(
 
     stored = []
     fake_app = types.SimpleNamespace(
+        conf=celery_tasks.celery_app.conf,
         backend=types.SimpleNamespace(
             store_result=lambda task_id, meta, state=None, **kw: stored.append(
                 json.dumps(meta, default=str)
@@ -276,7 +282,7 @@ def test_a_failing_post_is_re_raised_scrubbed_with_nothing_chained(
     monkeypatch.setattr(celery_tasks, "post_measures", refuse)
     caplog.set_level(logging.DEBUG)
     with pytest.raises(Exception) as raised:
-        celery_tasks.post_measurements.run([], "eval", "ep")
+        celery_tasks.post_measurements.run(ONE_MEASURE_POSTED, "eval", "ep")
     seen = _stored_by_celery(raised.value)
     assert "500 posting measures" in seen
     for secret in (JUDGE, "hunter22url"):
@@ -317,6 +323,7 @@ def test_a_secret_used_as_a_key_in_progress_is_stored_scrubbed(
 
     stored = []
     fake_app = types.SimpleNamespace(
+        conf=celery_tasks.celery_app.conf,
         backend=types.SimpleNamespace(
             store_result=lambda task_id, meta, state=None, **kw: stored.append(
                 json.dumps(meta, default=str)
