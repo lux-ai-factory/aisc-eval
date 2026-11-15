@@ -13,6 +13,12 @@ measurements and the files the test writes to the backend's internal API (`/api/
 the measurements in the engine's schema of the project's database and the files in MinIO. The worker has no
 database and no object store settings of its own.
 
+The same image runs a second process, the compose service `aisc-eval-declarations-worker`. It serves only the
+queue `plugin-declarations`, one task at a time: reading a plugin's manifest and running its form hooks
+(`read_manifest`, `plugin_hook`), so a configure page never waits behind the runs. The run worker never reads that
+queue. Both run plugin code, so both are kept apart the same way (the plugin firewall, a first process that reaps,
+the same egress hosts, no database settings).
+
 What the test assesses is reached through the platform, never with its secrets in the worker or the plugin:
 
 - **What is assessed** (the system or a component of the AI card): the worker asks the platform for a run pass
