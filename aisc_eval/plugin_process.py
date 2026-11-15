@@ -18,6 +18,7 @@ run's install. A run's environment is the install user's, so the plugin may run 
 
 import os
 import pwd
+import resource
 import shutil
 import signal
 import stat
@@ -218,16 +219,82 @@ def copy_runtime(workspace: Path) -> Path:
     return Path(shutil.copy(plugin_runtime.__file__, folder / "plugin_runtime.py"))
 
 
+#: the settings that cap a plugin's process, with their defaults (MB, or a count); see plugin_limits.
+#: Address space is reserved well above what is used: a StrongREJECT process (thread stacks, malloc arenas,
+#: an OpenBLAS pool per CPU) reserves about 4 GB to use 300 MB. Its scoring pool starts one process per CPU,
+#: about 70 processes and threads per run on a 20-CPU host, and every plugin running at once shares the count.
+#: The largest file leaves room for a local model a plugin downloads; the pilots' own files stay under 10 MB.
+LIMIT_SETTINGS = {
+    "PLUGIN_MAX_MEMORY_MB": 16384,
+    "PLUGIN_MAX_PROCESSES": 1024,
+    "PLUGIN_MAX_FILE_MB": 8192,
+    "PLUGIN_OUTPUT_MAX_MB": 1024,
+}
+#: seconds a plugin over its CPU time gets between the warning (SIGXCPU) and the kill
+CPU_GRACE_S = 60
+_MB = 2**20
+
+
+def _setting(name: str) -> int:
+    """A limit's whole-number setting, read when it is used so an operator's change needs no rebuild."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return LIMIT_SETTINGS[name]
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(f"{name} must be a whole number, not {raw!r}") from None
+    if value <= 0:
+        raise RuntimeError(f"{name} must be above 0, not {value}")
+    return value
+
+
+def plugin_limits(cpu_seconds: int) -> dict[int, tuple[int, int]]:
+    """The (soft, hard) resource limits a plugin runs under.
+
+    Memory is its address space, processes count every process and thread of its user, a file is the
+    largest one it may write, and CPU is the processor time it may use before SIGXCPU, then SIGKILL a
+    minute later. The worker's time limits still end the test by the clock.
+    """
+    memory = _setting("PLUGIN_MAX_MEMORY_MB") * _MB
+    processes = _setting("PLUGIN_MAX_PROCESSES")
+    file_size = _setting("PLUGIN_MAX_FILE_MB") * _MB
+    return {
+        resource.RLIMIT_AS: (memory, memory),
+        resource.RLIMIT_NPROC: (processes, processes),
+        resource.RLIMIT_FSIZE: (file_size, file_size),
+        resource.RLIMIT_CPU: (cpu_seconds, cpu_seconds + CPU_GRACE_S),
+    }
+
+
+def _apply_limits(limits: Mapping[int, tuple[int, int]]):
+    """What the plugin's process runs before the plugin: its limits, after the switch to its user, so
+    lowering them needs no privilege."""
+
+    def apply() -> None:
+        for limit, (soft, hard) in limits.items():
+            resource.setrlimit(limit, (soft, hard))
+
+    return apply
+
+
 def start(
     argv: list[str],
     workspace: Path,
     stderr: IO[str],
     plugin_env: dict[str, str],
     user: PluginUser,
+    limits: Mapping[int, tuple[int, int]] | None = None,
 ) -> subprocess.Popen[str]:
-    """Start the plugin; its stdout is the worker's to read for progress lines."""
+    """Start the plugin under its limits; its stdout is the worker's to read for progress lines.
+
+    The process count is a count of the user's processes: a plugin that runs as the worker itself
+    (a worker that is not root) would share it with the worker, so it is left out there.
+    """
     if user.switch and user.home:
         plugin_env = {**plugin_env, "HOME": user.home}
+    if limits and not user.switch:
+        limits = {k: v for k, v in limits.items() if k != resource.RLIMIT_NPROC}
     return subprocess.Popen(
         argv,
         cwd=str(workspace),
@@ -243,6 +310,7 @@ def start(
         extra_groups=[] if user.switch else None,
         # the plugin leads its own process group, which the worker ends with it
         start_new_session=True,
+        preexec_fn=_apply_limits(limits) if limits else None,
     )
 
 
@@ -278,12 +346,19 @@ def terminate(process: subprocess.Popen | None) -> None:
         pass
 
 
-def read_outputs(output_dir: Path, user: PluginUser) -> dict[str, bytes]:
+def read_outputs(
+    output_dir: Path, user: PluginUser, max_total_bytes: int | None = None
+) -> dict[str, bytes]:
     """The files the plugin left in output/, refusing anything but its own regular files.
 
     The worker reads them as root: a symlink, or a hard link to a file the plugin may not
     read, would otherwise hand the plugin /proc/1/environ or another run's data as an artifact.
+    Their total size is checked before any is read (PLUGIN_OUTPUT_MAX_MB by default): the worker
+    holds them in memory to upload them.
     """
+    if max_total_bytes is None:
+        max_total_bytes = _setting("PLUGIN_OUTPUT_MAX_MB") * _MB
+    opened: list[tuple[str, int]] = []
     outputs = {}
     folder = os.open(output_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -307,8 +382,18 @@ def read_outputs(output_dir: Path, user: PluginUser) -> dict[str, bytes]:
                 raise RuntimeError(
                     f"Plugin output {name} is not a regular file of the plugin's"
                 )
+            opened.append((name, fd))
+        total = sum(os.fstat(fd).st_size for _name, fd in opened)
+        if total > max_total_bytes:
+            raise RuntimeError(
+                f"The plugin's output files are larger than {max_total_bytes / _MB:g} MB in total"
+            )
+        while opened:
+            name, fd = opened.pop(0)
             with os.fdopen(fd, "rb") as file:
                 outputs[name] = file.read()
     finally:
+        for _name, fd in opened:
+            os.close(fd)
         os.close(folder)
     return outputs

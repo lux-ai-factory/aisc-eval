@@ -274,6 +274,26 @@ class StartRefused(RuntimeError):
     """The engine refused the test's start: another copy of it started first, or the test has already ended."""
 
 
+#: seconds a plugin's run pass outlives the test's hard time limit: the worker still reads the run's
+#: calls with it and revokes it once the plugin has ended
+RUN_PASS_MARGIN_S = 300
+#: cores a plugin's CPU time is counted for (PLUGIN_CPU_CORES): CPU time adds up over its threads, so a
+#: plugin busy on four cores uses four seconds of it per second of the clock
+PLUGIN_CPU_CORES = 4
+
+
+def plugin_cpu_seconds() -> int:
+    """The CPU time a plugin may use: its test's soft time limit on each core it may keep busy."""
+    raw = os.environ.get("PLUGIN_CPU_CORES", "").strip()
+    try:
+        cores = int(raw) if raw else PLUGIN_CPU_CORES
+    except ValueError:
+        raise RuntimeError(f"PLUGIN_CPU_CORES must be a whole number, not {raw!r}") from None
+    if cores <= 0:
+        raise RuntimeError(f"PLUGIN_CPU_CORES must be above 0, not {cores}")
+    return int(celery_app.conf.task_soft_time_limit) * cores
+
+
 def _run_tasks_key(evaluation_pid: uuid.UUID) -> str:
     return run_registry.tasks_key(evaluation_pid)
 
@@ -885,6 +905,7 @@ def _run_the_plugin(
             refs,
             str(evaluation_plugin_pid),
             project=(run_context.current() or {}).get("project"),
+            ttl_s=int(celery_app.conf.task_time_limit) + RUN_PASS_MARGIN_S,
         )
 
     # Step 3: Run plugin script with the isolated venv's Python
@@ -911,6 +932,7 @@ def _run_the_plugin(
             stderr_file,
             child_env,
             user,
+            limits=plugin_process.plugin_limits(plugin_cpu_seconds()),
         )
 
         if (stdout := process.stdout) is not None:

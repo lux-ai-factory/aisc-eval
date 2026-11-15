@@ -173,6 +173,7 @@ def test_the_progress_a_plugin_reports_is_stored_without_secrets(
 
     stored = []
     fake_app = types.SimpleNamespace(
+        conf=celery_tasks.celery_app.conf,
         backend=types.SimpleNamespace(
             store_result=lambda task_id, meta, state=None, **kw: stored.append(
                 json.dumps(meta, default=str)
@@ -321,6 +322,7 @@ def test_a_secret_used_as_a_key_in_progress_is_stored_scrubbed(
 
     stored = []
     fake_app = types.SimpleNamespace(
+        conf=celery_tasks.celery_app.conf,
         backend=types.SimpleNamespace(
             store_result=lambda task_id, meta, state=None, **kw: stored.append(
                 json.dumps(meta, default=str)

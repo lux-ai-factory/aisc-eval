@@ -499,7 +499,8 @@ def test_a_run_with_a_target_mints_a_pass_for_exactly_that_ref(worker, platform)
     method, url, headers, body = platform["calls"][0]
     assert (method, url) == ("POST", "http://platform:8000/internal/run-passes")
     assert headers["X-AISC-Service-Token"] == "stack-token"
-    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT}
+    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT,
+                    "ttl_s": celery_tasks.celery_app.conf.task_time_limit + celery_tasks.RUN_PASS_MARGIN_S}
     [(_argv, kwargs)] = worker["popen"]
     assert kwargs["env"]["PLATFORM_RUN_PASS"] == "the-pass"
 
