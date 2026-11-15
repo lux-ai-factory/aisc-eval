@@ -456,7 +456,14 @@ def build_venv(
         install_cmd.append(install_target)
     installed = run_install(install_cmd, installer, timeout=INSTALL_TIMEOUT)
     if installed.returncode != 0:
-        raise InstallFailed("install", scrub_text(installed.stderr or ""))
+        text = scrub_text(installed.stderr or "")
+        if pins is not None and "hash" in text.lower():
+            # --require-hashes refused a file whose hash the lock does not list
+            text = (
+                f"a file on the index for {package_name} {version} or one of its dependencies is not the one "
+                f"recorded: {text}"
+            )
+        raise InstallFailed("install", text)
     if pins is not None and plugin_info["source"] == "local":
         own = run_install(
             ["uv", "pip", "install", "--python", str(venv), "--no-deps", install_target],
@@ -466,6 +473,19 @@ def build_venv(
         if own.returncode != 0:
             raise InstallFailed("install", scrub_text(own.stderr or ""))
     return Venv(venv, made, installed)
+
+
+def freeze(venv: Venv, installer: PluginUser) -> str:
+    """What the venv holds, one `name==version` per line (`uv pip freeze`, as the install user): the run's
+    environment, kept as a file of the run. InstallFailed when it cannot be read."""
+    frozen = run_install(
+        ["uv", "pip", "freeze", "--python", str(venv.path)],
+        installer,
+        timeout=INSTALL_TIMEOUT,
+    )
+    if frozen.returncode != 0:
+        raise InstallFailed("freeze", scrub_text(frozen.stderr or ""))
+    return frozen.stdout or ""
 
 
 def copy_runtime(workspace: Path, user: PluginUser | None = None) -> Path:

@@ -16,6 +16,7 @@ import pytest
 
 from aisc_eval import celery_tasks, egress, plugin_process
 from aisc_eval.plugin_process import PluginUser
+from recorded_pins import recorded_pins
 
 PLUGIN = PluginUser(uid=10001, gid=10001, home="/home/aisc-plugin", switch=True)
 
@@ -343,7 +344,7 @@ def worker(monkeypatch, tmp_path):
 
 
 def _run():
-    return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
+    return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
 
 
 def test_run_plugin_starts_the_plugin_as_its_leased_user(worker):
@@ -463,7 +464,7 @@ TARGET = f"target:{PROJECT}/system"
 
 def _run_with(inputs):
     return celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep"
+        "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep", pins=recorded_pins("pkg", "1.0")
     )
 
 

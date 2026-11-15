@@ -195,9 +195,14 @@ Please do not push your local changes, except if necessary. For instance, DEBUG 
 - **Deployment mode and run headers**: `aisc_eval/deployment.py`, `aisc_eval/run_context.py`, and
   `aisc_eval/service/api_client.py`, which builds the headers of each internal call at call time.
   Task signatures are as on master.
-- **Plugin installs**: plugins are installed online from the package index in `run_plugin` (no `--offline`),
-  and the index is always passed to `uv pip install` instead of being probed first. A local plugin is
-  installed from a copy of its folder.
+- **Plugin installs**: each run installs its plugin only from the hashes the engine recorded for it and sends
+  with the task (`pins`: the wheel's sha256 and the hashed lock of its dependencies), with `--require-hashes
+  --no-deps`, online from the package index (no `--offline`). A catalogue plugin without them, or whose lock
+  does not name its recorded wheel, is refused before anything is installed; a file whose hash is not the
+  recorded one is refused naming why. A local plugin is installed from its recorded lock of dependencies, when
+  there is one, and a copy of its folder; its folder's digest, git commit and dirty flag are sent with the
+  test's start. What the run's environment held (`uv pip freeze`) is kept as the run's file
+  `plugin-environment.txt`, failed or not; a plugin cannot write a file of that name.
 - **Plugin environment**: an allowlist instead of a copy of the worker's environment (see
   Configuration), with a placeholder `API_KEY_OPENAI` when none is set, for plugins that build an
   OpenAI client even when a local model is used.

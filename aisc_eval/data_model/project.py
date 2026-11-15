@@ -59,6 +59,8 @@ class Plugin(BaseModel):
     version: str
     plugin_config: PluginConfig | None = None
     evaluation_inputs: list[InputFileDefinition] = []
+    #: what the run installs the plugin from, recorded by the engine: {"wheel_sha256", "dependency_lock"}
+    pins: dict | None = None
 
 
 class Project(BaseModel):

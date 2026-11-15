@@ -11,6 +11,7 @@ from aisc_eval import celery_tasks, plugin_process
 from aisc_eval.service import api_client
 
 from test_plugin_process import ONE_MEASURE, ONE_MEASURE_POSTED, _Process, worker  # noqa: F401  (the fixture)
+from recorded_pins import recorded_pins
 
 JUDGE = "judge-secret-value-1"
 SHAPED = "sk-proj-abcdefghijklmnopqrstu"
@@ -68,7 +69,7 @@ def _plugin(
 
 def _run(project_settings):
     return celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", {}, [], project_settings, "eval", "ep"
+        "pkg", "Plugin", "1.0", {}, [], project_settings, "eval", "ep", pins=recorded_pins("pkg", "1.0")
     )
 
 
@@ -137,7 +138,7 @@ def test_a_failed_install_is_reported_and_logged_with_its_key_redacted(
         lambda *a, **kw: _Failed("error: api_key=abcd1234efgh refused"),
     )
     with pytest.raises(RuntimeError):
-        celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"])
+        celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0"))
     assert worker["failed"] == [("eval", "ep", "error: api_key=[redacted] refused")]
     assert "abcd1234efgh" not in caplog.text
 

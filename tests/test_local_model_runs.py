@@ -15,6 +15,7 @@ import requests
 
 from aisc_eval import celery_tasks
 from test_plugin_process import ONE_MEASURE, PROJECT, TARGET, _resource, platform, worker  # noqa: F401  (fixtures)
+from recorded_pins import recorded_pins
 
 MODEL_BYTES = b"an onnx graph"
 MARKER = {
@@ -88,7 +89,7 @@ def run(worker, platform, monkeypatch):  # noqa: F811
 
     def go(inputs):
         celery_tasks.run_plugin.run(
-            "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep"
+            "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep", pins=recorded_pins("pkg", "1.0")
         )
         return seen
 

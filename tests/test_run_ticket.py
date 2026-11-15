@@ -39,6 +39,7 @@ from aisc_eval import celery_tasks, deployment, run_context
 from aisc_eval.utils import env
 
 from test_plugin_process import ONE_MEASURE_POSTED
+from recorded_pins import recorded_pins
 
 PLATFORM_PID = "3f2b8c1e-0d4a-4e7b-9a55-1c2d3e4f5a6b"
 ENGINE_PROJECT_PID = "afb49e3f-813d-8888-9919-ee179d1090e6"
@@ -94,6 +95,7 @@ class FakeBackend:
                             "name": "probe",
                             "package_name": "aisc-probe",
                             "version": "1.0.0",
+                            "pins": recorded_pins("aisc-probe", "1.0.0"),
                         }
                     ],
                 },

@@ -8,6 +8,7 @@ import pytest
 
 from aisc_eval import celery_tasks
 from aisc_eval.data_model.evaluation import Evaluation
+from recorded_pins import recorded_pins
 
 EVALUATION = uuid.UUID("11111111-1111-1111-1111-111111111111")
 PROJECT = "22222222-2222-2222-2222-222222222222"
@@ -137,7 +138,7 @@ def _deliver():
         [],
         [],
         EVALUATION,
-        uuid.UUID(EVALUATION_PLUGIN),
+        uuid.UUID(EVALUATION_PLUGIN), pins=recorded_pins("aisc-plugin-strongreject-mijke", "0.1.3")
     )
 
 

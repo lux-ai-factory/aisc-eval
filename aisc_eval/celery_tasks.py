@@ -272,6 +272,11 @@ NO_ISOLATION = (
 )
 NO_PROXY_RUNNING = "the egress proxy is not running on this worker, so the test did not start"
 NO_MEASURES = "The plugin finished without any measure."
+NO_RECORDED_HASH = (
+    "this test has no recorded hash: open its page once so its declarations are read, then run it again"
+)
+#: the file of a run that lists what its plugin's environment held (uv pip freeze)
+ENVIRONMENT_FILE = "plugin-environment.txt"
 
 
 class NotInIndex(KeyError):
@@ -284,6 +289,35 @@ class NotInIndex(KeyError):
 
 class StartRefused(RuntimeError):
     """The engine refused the test's start: another copy of it started first, or the test has already ended."""
+
+
+def run_pins(
+    package_name: str, version: str, plugin_info: dict, pins: dict | None
+) -> plugin_process.Pins | None:
+    """What a run installs its plugin from, as the engine recorded it: a catalogue plugin only from its
+    recorded wheel hash and hashed lock, refused without them or with a lock that names another wheel; a
+    local plugin from its recorded lock of dependencies when there is one (its own code comes from its
+    folder), else as before."""
+    wheel_sha256 = (pins or {}).get("wheel_sha256") or None
+    lock = (pins or {}).get("dependency_lock") or ""
+    if plugin_info.get("source") == "local":
+        return plugin_process.Pins(None, lock) if lock else None
+    if not wheel_sha256 or not lock:
+        raise RuntimeError(NO_RECORDED_HASH)
+    if wheel_sha256.lower() not in plugin_process.locked_hashes(lock, package_name, version):
+        raise RuntimeError(
+            f"the recorded lock of {package_name} {version} does not name its recorded wheel "
+            f"(sha256 {wheel_sha256[:12]}...), so the test did not start"
+        )
+    return plugin_process.Pins(wheel_sha256.lower(), lock)
+
+
+def local_code(plugin_info: dict) -> dict | None:
+    """The code a local plugin runs, as the listing read its folder: {"digest", "git_commit", "git_dirty"};
+    None for a catalogue plugin, whose code is its wheel."""
+    if plugin_info.get("source") != "local":
+        return None
+    return {name: plugin_info.get(name) for name in ("digest", "git_commit", "git_dirty")}
 
 
 #: seconds a plugin's run pass outlives the test's hard time limit: the worker still reads the run's
@@ -383,12 +417,14 @@ def install_package(
     version: str,
     evaluation_pid: uuid.UUID,
     evaluation_plugin_pids: list[uuid.UUID],
+    pins: dict | None = None,
 ):
-    """Install a package once using uv run to cache dependencies."""
+    """Install a package once using uv run to cache dependencies, from its recorded hashes (run_pins)."""
     logger.info(f"Caching package {package_name}=={version}")
 
     try:
         plugin_info = _versions_of(package_name, version)[version]
+        recorded = run_pins(package_name, version, plugin_info, pins)
         with tempfile.TemporaryDirectory(delete=True) as cache_tmp:
             plugin_process.build_venv(
                 package_name,
@@ -397,6 +433,7 @@ def install_package(
                 Path(cache_tmp),
                 plugin_process.install_user(),
                 plugin_loader.devpi_client.simple_index_url,
+                pins=recorded,
             )
 
         logger.info(
@@ -475,6 +512,8 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
             plugins_by_pkg[pkg_key] = {
                 "package_name": evaluation_plugin.package_name,
                 "version": evaluation_plugin.version,
+                # one package version, one recorded wheel and lock: any of its plugins' pins
+                "pins": evaluation_plugin.pins,
                 "plugins": [],
             }
         plugins_by_pkg[pkg_key]["plugins"].append(evaluation_plugin)
@@ -495,6 +534,7 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
             pkg_info["version"],
             evaluation_pid,
             [ep.pid for ep in pkg_info["plugins"]],
+            pins=pkg_info["pins"],
         )
         install_sig.freeze()
         install_task_ids.append(str(install_sig.id))
@@ -522,6 +562,7 @@ def _start_evaluation(evaluation_pid: uuid.UUID) -> dict:
                 ),
                 evaluation_pid,
                 evaluation_plugin.pid,
+                pins=evaluation_plugin.pins,
             )
 
             # freeze to get a stable task id before dispatching
@@ -603,7 +644,10 @@ def run_plugin(
     project_settings: list[dict],
     evaluation_pid: uuid.UUID,
     evaluation_plugin_pid: uuid.UUID,
+    pins: dict | None = None,
 ) -> list[dict]:
+    """One test: its plugin installed from the hashes the engine recorded (`pins`, {"wheel_sha256",
+    "dependency_lock"}), run, and its results reported."""
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
         plugin_loader.list_packages()
@@ -620,6 +664,7 @@ def run_plugin(
             input_components,
             project_settings,
             str(self.request.id),
+            pins,
         )
     # the engine refused the start: another copy of this test runs it, or it has already ended
     return []
@@ -707,9 +752,13 @@ class RunReporter:
             self._calls_read = True
         return self._calls
 
-    def started(self) -> None:
+    def started(self, code: dict | None = None) -> None:
+        """The test starts; `code` is a local plugin's code identity, kept with the test."""
         try:
-            mark_plugin_started(self.evaluation_pid, self.test_pid)
+            if code is None:
+                mark_plugin_started(self.evaluation_pid, self.test_pid)
+            else:
+                mark_plugin_started(self.evaluation_pid, self.test_pid, code)
         except requests.HTTPError as exc:
             if _status_of(exc) == 409:
                 raise StartRefused(
@@ -811,11 +860,14 @@ def _run_the_plugin(
     input_components: list[dict],
     project_settings: list[dict],
     task_id: str,
+    pins: dict | None = None,
 ) -> list[dict]:
     """What is specific to one run of a plugin: its inputs, configuration, environment, pass, process and
     outputs. Every failure raises, and test_run reports it."""
     evaluation_pid, evaluation_plugin_pid = reporter.evaluation_pid, reporter.test_pid
     plugin_info = _versions_of(package_name, version)[version]
+    # before anything is fetched or written: a catalogue plugin runs only from its recorded hashes
+    recorded = run_pins(package_name, version, plugin_info, pins)
     folders, user = reporter.folders, reporter.user
     work, input_dir, output_dir = folders.work, folders.input, folders.output
 
@@ -936,16 +988,20 @@ def _run_the_plugin(
 
     # Steps 1 and 2: the venv, made and filled by the install user: the plugin may run it but not change it
     logger.debug(f"Installing {package_name}=={version} into an isolated venv")
+    installer = plugin_process.install_user()
     venv = plugin_process.build_venv(
         package_name,
         version,
         plugin_info,
         folders.root,
-        plugin_process.install_user(),
+        installer,
         plugin_loader.devpi_client.simple_index_url,
+        pins=recorded,
     )
     venv_python = venv.python
     venv_result, install_result = venv.made, venv.installed
+    # what the run ran in, kept as a file of the run (the ledger records its sha256 with the upload)
+    environment = plugin_process.freeze(venv, installer).encode()
 
     # A pass to the platform for exactly the targets and connections this run names, all of the
     # run's own project: the platform pid the backend put in the run's aisc_run header
@@ -962,7 +1018,7 @@ def _run_the_plugin(
     # Step 3: Run plugin script with the isolated venv's Python
     logger.debug(f"Running plugin with: {venv_python} {runtime_script}")
     start_time = time.perf_counter()
-    reporter.started()
+    reporter.started(local_code(plugin_info))
 
     stdout_lines: list[str] = []
     stderr_path = folders.root / "stderr.tmp"
@@ -1054,18 +1110,18 @@ def _run_the_plugin(
     log_content = scrub_text(log_content, known)
 
     if returncode != 0:
-        # the whole log is the run's file, failed or not; the run's error is the plugin's own reason
-        try:
-            upload_artifact(
-                evaluation_pid,
-                evaluation_plugin_pid,
-                "plugin_execution.log",
-                log_content.encode(),
-            )
-        except Exception as exc:
-            logger.warning(
-                f"The failed run's log was not kept as a file ({exc.__class__.__name__})"
-            )
+        # the whole log is the run's file, failed or not, and so is its environment; the run's error is the
+        # plugin's own reason
+        for name, content in (
+            ("plugin_execution.log", log_content.encode()),
+            (ENVIRONMENT_FILE, environment),
+        ):
+            try:
+                upload_artifact(evaluation_pid, evaluation_plugin_pid, name, content)
+            except Exception as exc:
+                logger.warning(
+                    f"The failed run's {name} was not kept as a file ({exc.__class__.__name__})"
+                )
         # the run is stopped once, with this message, by test_run
         raise RuntimeError(
             f"Plugin failed: {plugin_reason(scrub_text(stderr_content, known), returncode)}"
@@ -1081,8 +1137,9 @@ def _run_the_plugin(
             )
     measures = json.loads(outputs.pop("measures.json", b"[]"))
 
-    # the log is the worker's, kept out of output/ where the plugin could plant a link
+    # the log and the environment are the worker's, kept out of output/ where the plugin could plant a link
     outputs["plugin_execution.log"] = log_content.encode()
+    outputs[ENVIRONMENT_FILE] = environment
     # every file without the values the run handed its plugin, in its name and its bytes
     for name, content in outputs.items():
         upload_artifact(
@@ -1300,7 +1357,7 @@ def plugin_reason(stderr_text: str, returncode: int) -> str:
 #: the run's calls to the system under test, as the platform recorded them, kept with the run's files
 CALLS_FILE = "system-under-test-calls.jsonl"
 #: the names of the files the worker itself keeps with a run, which no plugin output may take
-_WORKERS_FILES = {CALLS_FILE.casefold(), "plugin_execution.log"}
+_WORKERS_FILES = {CALLS_FILE.casefold(), "plugin_execution.log", ENVIRONMENT_FILE.casefold()}
 
 
 #: the code of a call the platform refused because it had stopped the run, in the run's recorded calls

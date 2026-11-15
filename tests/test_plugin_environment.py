@@ -6,6 +6,7 @@ other runs' queued tasks, lift their run tickets and call the backend as another
 from aisc_eval import celery_tasks
 
 from test_plugin_process import worker  # noqa: F401  (the fixture)
+from recorded_pins import recorded_pins
 
 WORKER_ENV = {
     "PATH": "/usr/bin",
@@ -121,7 +122,7 @@ def test_no_model_key_name_is_passed_through():
 
 def test_a_run_hands_its_plugin_no_openai_key_of_the_worker(worker, monkeypatch):  # noqa: F811
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-worker-0123456789")
-    celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
+    celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
     [(_argv, kwargs)] = worker["popen"]
     assert "OPENAI_API_KEY" not in kwargs["env"]
     assert "sk-openai-worker-0123456789" not in kwargs["env"].values()

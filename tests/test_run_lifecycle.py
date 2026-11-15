@@ -38,6 +38,7 @@ from test_run_stop import (  # noqa: F401  (fixtures)
     own_marks,
     stopped,
 )
+from recorded_pins import recorded_pins
 
 ONE_MEASURE = '[{"name": "score", "score": 1.0}]'
 
@@ -58,14 +59,14 @@ def _ends(call):
 
 
 def test_a_version_the_index_does_not_list_fails_the_test_and_stops_the_run(broker):
-    ended = _ends(lambda: celery_tasks.run_plugin.run("pkg", "Plugin", "9.9", {}, [], [], EVALUATION, FAILING))
+    ended = _ends(lambda: celery_tasks.run_plugin.run("pkg", "Plugin", "9.9", {}, [], [], EVALUATION, FAILING, pins=recorded_pins("pkg", "9.9")))
     assert isinstance(ended, LookupError)
     assert own_marks(broker) == ["Version '9.9' of package 'pkg' not found."]
     assert stopped(broker) == [PENDING, RUNNING]
 
 
 def test_an_install_of_a_version_the_index_does_not_list_stops_the_run(broker):
-    ended = _ends(lambda: celery_tasks.install_package.run("pkg", "9.9", EVALUATION, [FAILING]))
+    ended = _ends(lambda: celery_tasks.install_package.run("pkg", "9.9", EVALUATION, [FAILING], pins=recorded_pins("pkg", "9.9")))
     assert isinstance(ended, LookupError)
     assert broker["failed"][:1] == [(EVALUATION, FAILING, "Version '9.9' of package 'pkg' not found.")]
     assert stopped(broker) == [PENDING, RUNNING]
@@ -123,7 +124,7 @@ def test_the_runs_other_tasks_are_revoked_with_the_stop_signal(broker, monkeypat
     sent = []
     monkeypatch.setattr(celery_tasks.celery_app.control, "revoke", lambda tid, **kw: sent.append(kw))
     monkeypatch.setattr(plugin_process.subprocess, "Popen", lambda argv, **kw: _Process(returncode=1))
-    _ends(lambda: celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], EVALUATION, FAILING))
+    _ends(lambda: celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], EVALUATION, FAILING, pins=recorded_pins("pkg", "1.0")))
     assert sent
     assert all(kw == {"terminate": True, "signal": "SIGUSR1"} for kw in sent), sent
 

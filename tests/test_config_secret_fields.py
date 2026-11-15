@@ -12,6 +12,7 @@ import pytest
 from aisc_eval import celery_tasks, plugin_process, plugin_runtime
 
 from test_plugin_process import ONE_MEASURE, _Process, worker  # noqa: F401  (the fixture)
+from recorded_pins import recorded_pins
 
 CRED = "cred-0123456789abcdef"
 VARIABLE = "AISC_SECRET_CONFIG_MODEL_CREDENTIAL"
@@ -64,7 +65,7 @@ def _plugin(monkeypatch, seen, *, stderr="", returncode=0):
 
 def _run(plugin_config, project_settings):
     return celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", plugin_config, [], project_settings, "eval", "ep"
+        "pkg", "Plugin", "1.0", plugin_config, [], project_settings, "eval", "ep", pins=recorded_pins("pkg", "1.0")
     )
 
 

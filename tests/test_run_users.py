@@ -15,6 +15,7 @@ import pytest
 from aisc_eval import celery_tasks, plugin_process
 from aisc_eval.plugin_process import PluginUser
 from test_plugin_process import _run, worker  # noqa: F401  (fixtures)
+from recorded_pins import recorded_pins
 
 
 def need(name):
@@ -223,7 +224,7 @@ def test_the_lease_is_released_when_the_plugin_fails(leases, monkeypatch):
 
     monkeypatch.setattr(plugin_process.subprocess, "Popen", fail)
     with contextlib.suppress(Exception):
-        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
+        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
     assert leases["taken"], "the run took no lease"
     assert leases["given_back"] == leases["taken"]
 

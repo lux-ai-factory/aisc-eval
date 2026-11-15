@@ -162,10 +162,16 @@ def mark_plugin_failed(
 
 
 def mark_plugin_started(
-    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID
+    evaluation_pid: uuid.UUID,
+    evaluation_plugin_pid: uuid.UUID,
+    code: dict | None = None,
 ) -> None:
+    """The test started; `code`, for a local plugin, is the code it runs: {"digest", "git_commit", "git_dirty"}."""
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/timestamp"
-    _send("patch", url, json={"field": "started_at"})
+    body = {"field": "started_at"}
+    if code is not None:
+        body["code"] = code
+    _send("patch", url, json=body)
 
 
 def mark_plugin_finished(
