@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from aisc_eval import celery_tasks, plugin_process
+from aisc_eval import celery_tasks, egress, plugin_process
 from aisc_eval.plugin_process import PluginUser
 
 PLUGIN = PluginUser(uid=10001, gid=10001, home="/home/aisc-plugin", switch=True)
@@ -292,7 +292,7 @@ class _Loader:
 
 
 @pytest.fixture
-def worker(monkeypatch):
+def worker(monkeypatch, tmp_path):
     """run_plugin with the backend, the installs and the plugin process faked."""
     seen = {"uploads": {}, "failed": [], "popen": [], "group_signals": []}
     monkeypatch.setattr(celery_tasks, "plugin_loader", _Loader())
@@ -327,6 +327,10 @@ def worker(monkeypatch):
     monkeypatch.setattr(plugin_process, "end_processes_of", lambda user: None)
     # what the worker writes is root's, which a test cannot give away
     monkeypatch.setattr(plugin_process.os, "chown", lambda *a: None)
+    # each test's rule for the egress proxy, in a folder of this test's
+    policies = tmp_path / "egress"
+    policies.mkdir()
+    monkeypatch.setattr(egress, "POLICIES", policies)
     seen["leave"] = lambda output: (output / "measures.json").write_text(ONE_MEASURE)
 
     def popen(argv, **kwargs):

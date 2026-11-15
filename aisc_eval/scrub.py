@@ -94,13 +94,16 @@ def known_secrets(
     worker_env: Mapping[str, str],
     plugin_config,
     run_pass: str | None,
+    also: Iterable[str] = (),
 ) -> list[str]:
-    """The secret values a run hands its plugin, 8 characters or more, longest first."""
+    """The secret values a run hands its plugin (`also`: any other, such as its proxy token), 8 characters or
+    more, longest first."""
     from aisc_eval.celery_tasks import (
         OPENAI_PLACEHOLDER,
     )  # the worker's module; imported late, it imports this
 
     values = list(secret_env.values())
+    values.extend(also)
     if run_pass:
         values.append(run_pass)
     values.extend(

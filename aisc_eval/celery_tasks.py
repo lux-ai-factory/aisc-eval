@@ -2,6 +2,7 @@ import hashlib
 import re
 import json
 import os
+import secrets
 import subprocess
 import tempfile
 import traceback as tracebacks
@@ -15,7 +16,7 @@ from pathlib import Path
 import requests
 from celery import group, chain
 
-from aisc_eval import plugin_process, run_registry
+from aisc_eval import egress, plugin_process, run_registry
 from aisc_eval import run_context  # also registers the run header handlers
 from aisc_eval.scrub import REDACTED, known_secrets, scrub_text, without_known_bytes
 from aisc_eval.celery_app import celery_app
@@ -259,6 +260,11 @@ UNFINISHED = ("Pending", "Running")
 #: its own failure handler ends its plugin and its pass (the signal the backend's Stop sends too)
 STOP_SIGNAL = "SIGUSR1"
 RUN_STATE_UNREADABLE = "The run's state could not be read, so the test did not start."
+NO_ISOLATION = (
+    "plugin network isolation is not in force on this worker (its firewall is not set: does the container have"
+    " NET_ADMIN?), so the test did not start"
+)
+NO_PROXY_RUNNING = "the egress proxy is not running on this worker, so the test did not start"
 NO_MEASURES = "The plugin finished without any measure."
 
 
@@ -681,6 +687,8 @@ class RunReporter:
         #: the user the test runs as, and its folders, once leased (test_run)
         self.user: plugin_process.PluginUser | None = None
         self.folders: plugin_process.RunFolders | None = None
+        #: the token its plugin names itself with to the egress proxy, once its rule is registered
+        self.egress_token: str | None = None
         self.minted: str | None = None
         self._calls: bytes | None = None
         self._calls_read = False
@@ -748,6 +756,7 @@ def test_run(
         if not _may_start(evaluation_pid, test_pid, eval_data):
             yield None
         else:
+            _check_isolation()
             reporter.user = lease.enter_context(plugin_process.lease_run_user())
             reporter.folders = plugin_process.make_run_folders(
                 reporter.workspace, reporter.user
@@ -767,11 +776,24 @@ def test_run(
             )
             run_pass.revoke(reporter.minted, run_context.current())
         try:
+            if reporter.egress_token:
+                egress.unregister(reporter.egress_token)
             if reporter.user is not None:
                 plugin_process.end_processes_of(reporter.user)
             workspace.cleanup()
         finally:
             lease.close()
+
+
+def _check_isolation() -> None:
+    """A root worker starts plugins only behind its firewall and proxy (egress); one started by hand, not root,
+    has neither and runs them as the developer."""
+    if os.geteuid() != 0:
+        return
+    if not egress.in_force():
+        raise RuntimeError(NO_ISOLATION)
+    if not egress.proxy_answers():
+        raise RuntimeError(NO_PROXY_RUNNING)
 
 
 def _run_the_plugin(
@@ -797,6 +819,10 @@ def _run_the_plugin(
         raise RuntimeError(LOCAL_MODEL_UNKNOWN)
 
     input_mapping = {}
+    #: what the plugin may reach besides the platform: its helpers' and LLM inputs' endpoints, under the rule
+    #: the helpers came with
+    endpoints: list[str] = []
+    helper_rules: list[dict] = []
     llm_secret_settings = []
     helper_secret_env: dict[str, str] = {}
     local_model: dict | None = None
@@ -826,6 +852,8 @@ def _run_the_plugin(
             )
             # its address under the project's network rule, now, before anything is built
             check_endpoint(resolved)
+            endpoints.append(resolved["endpoint_url"])
+            helper_rules.append(resolved)
             if resolved.get("api_key"):
                 helper_secret_env[_secret_env_name(secret_key)] = resolved[
                     "api_key"
@@ -842,6 +870,8 @@ def _run_the_plugin(
         elif component_type in {"datashape", "llm", "resource"}:
             payload = dict(component.get("json_value") or {})
             if component_type == "llm":
+                if component.get("endpoint_url"):
+                    endpoints.append(component["endpoint_url"])
                 run_model = (component.get("value") or {}).get("model")
                 if run_model:
                     payload["model"] = run_model
@@ -934,12 +964,26 @@ def _run_the_plugin(
     stderr_content = ""
     secret_env = build_secret_environment(project_settings + llm_secret_settings)
     secret_env.update(helper_secret_env)
+    # the plugin's way out: the proxy admits what this test may reach, named by a token of its own
+    proxy_token = reporter.egress_token = secrets.token_urlsafe(32)
+    egress.register(
+        proxy_token,
+        egress.run_egress(
+            os.environ.get("PLATFORM_URL"),
+            endpoints,
+            helper_rules,
+            egress.operator_hosts(),
+        ),
+    )
     known = reporter.known = known_secrets(
-        secret_env, os.environ, plugin_config, minted
+        secret_env, os.environ, plugin_config, minted, also=[proxy_token]
     )
     # the worker's only (0600): the run folder can be passed through by every plugin user
     with open(stderr_path, "w+", opener=_private) as stderr_file:
-        child_env = plugin_environment(os.environ, secret_env, minted)
+        child_env = {
+            **plugin_environment(os.environ, secret_env, minted),
+            **egress.proxy_env(proxy_token),
+        }
         process = reporter.process = plugin_process.start(
             [str(venv_python), str(runtime_script)],
             work,
