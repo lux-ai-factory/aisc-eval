@@ -139,6 +139,8 @@ PLUGIN_ENV_PROXIES = frozenset({"http_proxy", "https_proxy", "no_proxy", "all_pr
 #: LangBiTe builds an OpenAI client at init even with a local model and no judge; the client
 #: checks the key only on a real request, so a non-empty placeholder lets it start
 OPENAI_PLACEHOLDER = "sk-local-model-no-openai-call"
+#: LiteLLM reads the price map it ships with instead of fetching a 4 MB copy from GitHub at every run
+LITELLM_PRICE_MAP = {"LITELLM_LOCAL_MODEL_COST_MAP": "True"}
 
 
 def plugin_environment(
@@ -160,6 +162,7 @@ def plugin_environment(
         env["PLATFORM_RUN_PASS"] = run_pass
     if not env.get("API_KEY_OPENAI"):
         env["API_KEY_OPENAI"] = OPENAI_PLACEHOLDER
+    env.update(LITELLM_PRICE_MAP)
     return env
 
 

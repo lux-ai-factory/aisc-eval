@@ -125,3 +125,9 @@ def test_a_run_hands_its_plugin_no_openai_key_of_the_worker(worker, monkeypatch)
     [(_argv, kwargs)] = worker["popen"]
     assert "OPENAI_API_KEY" not in kwargs["env"]
     assert "sk-openai-worker-0123456789" not in kwargs["env"].values()
+
+
+def test_a_plugin_uses_litellms_bundled_price_map():
+    """LiteLLM would otherwise fetch its 4 MB price map from GitHub at every run, through the egress proxy."""
+    env = celery_tasks.plugin_environment(WORKER_ENV, {})
+    assert env["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"

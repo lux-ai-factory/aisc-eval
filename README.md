@@ -84,7 +84,8 @@ A plugin does not get the worker's environment. It runs with an allowlist (`PLUG
 project's secrets and its helper models' keys as `AISC_SECRET_*`, its run pass as `PLATFORM_RUN_PASS`, and its
 test's proxy (`HTTP_PROXY`, `HTTPS_PROXY` and their lower-case forms, with the test's token; `NO_PROXY` empty). When
 no `API_KEY_OPENAI` is set it gets a placeholder, for plugins that build an OpenAI client even when they never
-call one. The broker URL, `INTERNAL_API_KEY`, `DJANGO_SECRET_KEY`, the package index login and
+call one, and `LITELLM_LOCAL_MODEL_COST_MAP=True`, so LiteLLM reads the price map it ships with instead of
+fetching it from GitHub at every run. The broker URL, `INTERNAL_API_KEY`, `DJANGO_SECRET_KEY`, the package index login and
 `PLATFORM_CONNECTIONS_TOKEN` stay with the worker. A plugin that needs another variable needs it added to that
 list.
 
