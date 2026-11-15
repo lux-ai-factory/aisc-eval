@@ -127,9 +127,11 @@ def test_refused_measures_say_why(backend):
         api_client.post_measures(EVALUATION, PLUGIN_RUN, [Measure(name="m", score=1.0)])
 
 
-def test_a_refused_failure_mark_is_only_logged(backend):
+def test_a_refused_failure_mark_raises(backend):
+    """Only logged, it would leave the test Running and its run Pending with no reason."""
     backend["answer"] = _Answer(500)
-    api_client.mark_plugin_failed(EVALUATION, PLUGIN_RUN, "x")
+    with pytest.raises(requests.HTTPError):
+        api_client.mark_plugin_failed(EVALUATION, PLUGIN_RUN, "x")
 
 
 def test_a_refusal_chains_nothing_that_names_the_backends_address(backend):

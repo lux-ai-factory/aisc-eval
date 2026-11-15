@@ -20,16 +20,26 @@ TIMEOUT = (5, 60)
 #: the seconds waited before each new try of a call that could not reach the backend (a restart, a dropped
 #: network); after the last one the call gives up and raises, so the failure path and the sweep take over
 RETRY_WAITS = (1, 2, 4, 8, 16)
+#: the answers a proxy gives while the backend restarts: a mark that a test or a run failed is tried again on them
+#: as on no answer (it can be sent twice: the engine keeps the first reason)
+BACKEND_RESTARTING = (502, 503, 504)
 
 
-def _with_retries(call: Callable[[], requests.Response]) -> requests.Response:
-    """`call`, tried again after each of RETRY_WAITS while the backend cannot be reached. An answer, even a
-    refusal, is returned as it is: the backend has said no, and asking again would change nothing."""
+def _with_retries(
+    call: Callable[[], requests.Response], retry_statuses: tuple[int, ...] = ()
+) -> requests.Response:
+    """`call`, tried again after each of RETRY_WAITS while the backend cannot be reached, or answers one of
+    `retry_statuses`. Any other answer, even a refusal, is returned as it is: the backend has said no, and asking
+    again would change nothing."""
     for wait in RETRY_WAITS:
         try:
-            return call()
+            resp = call()
         except requests.ConnectionError:
             sleep(wait)
+            continue
+        if not retry_statuses or resp.status_code not in retry_statuses:
+            return resp
+        sleep(wait)
     return call()
 
 
@@ -69,10 +79,13 @@ def _refusal(resp: requests.Response) -> requests.HTTPError:
     return requests.HTTPError(text, response=resp)
 
 
-def _send(method: str, url: str, **kwargs: Any) -> requests.Response:
+def _send(
+    method: str, url: str, retry_statuses: tuple[int, ...] = (), **kwargs: Any
+) -> requests.Response:
     """One call to the backend with the internal headers, given up after TIMEOUT; a refusal raises."""
     resp = _with_retries(
-        lambda: getattr(requests, method)(url, headers=headers(), timeout=TIMEOUT, **kwargs)
+        lambda: getattr(requests, method)(url, headers=headers(), timeout=TIMEOUT, **kwargs),
+        retry_statuses,
     )
     try:
         resp.raise_for_status()
@@ -124,7 +137,8 @@ def mark_failed(evaluation_pid: uuid.UUID) -> None:
             f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed",
             headers=headers(),
             timeout=TIMEOUT,
-        )
+        ),
+        BACKEND_RESTARTING,
     )
     if not resp.ok:
         logger.warning(
@@ -135,20 +149,16 @@ def mark_failed(evaluation_pid: uuid.UUID) -> None:
 def mark_plugin_failed(
     evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_message: str
 ) -> None:
+    """Mark a test failed with its reason. A refusal raises: logged only, it would leave the test Running and its
+    run Pending with no reason; raised, the caller says so and the sweep closes the test later."""
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/fail"
     # a last guard for any caller: key shapes and secret assignments never leave the worker
-    resp = _with_retries(
-        lambda: requests.patch(
-            url,
-            json={"error_message": scrub_text(error_message)},
-            headers=headers(),
-            timeout=TIMEOUT,
-        )
+    _send(
+        "patch",
+        url,
+        retry_statuses=BACKEND_RESTARTING,
+        json={"error_message": scrub_text(error_message)},
     )
-    if not resp.ok:
-        logger.warning(
-            f"Failed to mark plugin {evaluation_plugin_pid} as failed: {resp.text}"
-        )
 
 
 def mark_plugin_started(

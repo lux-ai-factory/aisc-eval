@@ -2,7 +2,8 @@
 
 A call that cannot reach the backend (a restart, a dropped network) is tried again after 1, 2, 4, 8 and 16 seconds,
 then gives up and raises, so the failure path and the sweep take over. A refusal (the backend answered and said no)
-is not retried. The worker can ask for
+is not retried, except the gateway answers a proxy gives while the backend restarts. Marking a test failed is never
+silent: a refused mark raises instead of leaving the test Running and its run Pending. The worker can ask for
 Processing and learns the run's actual status. A test is never failed without a reason.
 """
 
@@ -99,6 +100,22 @@ def test_the_failure_marks_retry_too(calls):
     except requests.ConnectionError:
         pass
     assert calls.sleeps == [1, 1]
+
+
+def test_a_refused_fail_mark_is_not_only_logged(calls):
+    calls.patch = [refused(500)]
+    with pytest.raises(requests.HTTPError):
+        api_client.mark_plugin_failed("e1", "ep", "boom")
+
+
+@pytest.mark.parametrize("status", [502, 503])
+def test_a_fail_mark_refused_while_the_backend_restarts_is_tried_again(calls, status):
+    calls.patch = [refused(status), ok("ok")]
+    try:
+        api_client.mark_plugin_failed("e1", "ep", "boom")
+    except requests.HTTPError:
+        pass
+    assert len(calls.urls) == 2, "the test stays Running: its failure was sent once and refused"
 
 
 def test_processing_is_asked_with_the_runs_status(calls):

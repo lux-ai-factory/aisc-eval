@@ -147,7 +147,11 @@ def test_the_api_client_sends_the_failure_text_scrubbed(monkeypatch):
 
     class _Answer:
         ok = True
+        status_code = 200
         text = ""
+
+        def raise_for_status(self):
+            pass
 
     def patch(url, json=None, headers=None, **kwargs):
         sent.append(json)
