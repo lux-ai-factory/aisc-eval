@@ -40,6 +40,8 @@ EGRESS_USER = "aisc-egress"
 #: the operator's extra hosts every plugin test may reach (a dataset or model download): host, host:port,
 #: or .domain for the domain and every host under it (on a public address only)
 OPERATOR_HOSTS_SETTING = "PLUGIN_EGRESS_ALLOWED_HOSTS"
+#: the extra hosts when the operator sets none: where StrongREJECT reads its datasets (a read-only host)
+DEFAULT_OPERATOR_HOSTS = "raw.githubusercontent.com"
 
 
 class Refused(Exception):
@@ -111,8 +113,9 @@ def run_egress(
 
 
 def operator_hosts() -> list[str]:
-    """PLUGIN_EGRESS_ALLOWED_HOSTS, comma separated, lower case."""
-    raw = os.environ.get(OPERATOR_HOSTS_SETTING) or ""
+    """PLUGIN_EGRESS_ALLOWED_HOSTS, comma separated, lower case; DEFAULT_OPERATOR_HOSTS when it is not set
+    (set empty, it narrows the list to none)."""
+    raw = os.environ.get(OPERATOR_HOSTS_SETTING, DEFAULT_OPERATOR_HOSTS)
     return [h.strip().lower() for h in raw.split(",") if h.strip()]
 
 

@@ -488,6 +488,18 @@ def test_the_operators_hosts_come_from_the_workers_setting(monkeypatch):
     assert e.operator_hosts() == ["raw.githubusercontent.com", ".hf.co"]
 
 
+def test_without_the_setting_plugins_may_reach_the_dataset_host(monkeypatch):
+    e = egress()
+    monkeypatch.delenv("PLUGIN_EGRESS_ALLOWED_HOSTS", raising=False)
+    assert e.operator_hosts() == ["raw.githubusercontent.com"]
+
+
+def test_an_operator_may_narrow_the_extra_hosts_to_none(monkeypatch):
+    e = egress()
+    monkeypatch.setenv("PLUGIN_EGRESS_ALLOWED_HOSTS", "")
+    assert e.operator_hosts() == []
+
+
 def test_setting_the_firewall_adds_only_the_rules_that_are_missing():
     e = egress()
     first = e.firewall_rules()[0]

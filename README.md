@@ -76,7 +76,7 @@ Read from the environment (`aisc_eval/utils/env.py`, `aisc_eval/deployment.py`, 
 | `PLATFORM_URL` | the platform, for run passes and helper models | empty | `http://platform:8000` |
 | `PLATFORM_CONNECTIONS_TOKEN` | the worker's service token to the platform; never given to a plugin | empty | from the secrets |
 | `PLUGIN_USER`, `PLUGIN_INSTALL_USER` | the image's plugin user (kept apart from the install user) and the user a root worker installs plugins as; each test runs as a uid of its own (see Users) | `aisc-plugin`, `aisc-install` | defaults |
-| `PLUGIN_EGRESS_ALLOWED_HOSTS` | hosts every plugin test may reach besides the platform and its helpers: `host`, `host:port` or `.domain` (the domain and every host under it, public addresses only), comma separated | empty | empty |
+| `PLUGIN_EGRESS_ALLOWED_HOSTS` | hosts every plugin test may reach besides the platform and its helpers: `host`, `host:port` or `.domain` (the domain and every host under it, public addresses only), comma separated; set empty for none | `raw.githubusercontent.com` | `raw.githubusercontent.com` |
 
 A plugin does not get the worker's environment. It runs with an allowlist (`PLUGIN_ENV_NAMES` in
 `aisc_eval/celery_tasks.py`): `PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`, the CA bundle, `PLATFORM_URL`,
