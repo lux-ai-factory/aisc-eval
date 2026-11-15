@@ -1,5 +1,7 @@
 import hashlib
 import uuid
+from collections.abc import Callable
+from time import sleep
 from typing import Any
 
 import requests
@@ -15,6 +17,20 @@ logger = get_logger()
 
 #: (connect, read) seconds a call to the backend may take before the worker gives up on it
 TIMEOUT = (5, 60)
+#: the seconds waited before each new try of a call that could not reach the backend (a restart, a dropped
+#: network); after the last one the call gives up and raises, so the failure path and the sweep take over
+RETRY_WAITS = (1, 2, 4, 8, 16)
+
+
+def _with_retries(call: Callable[[], requests.Response]) -> requests.Response:
+    """`call`, tried again after each of RETRY_WAITS while the backend cannot be reached. An answer, even a
+    refusal, is returned as it is: the backend has said no, and asking again would change nothing."""
+    for wait in RETRY_WAITS:
+        try:
+            return call()
+        except requests.ConnectionError:
+            sleep(wait)
+    return call()
 
 
 def headers(run: dict[str, str] | None = None) -> dict[str, str | None]:
@@ -55,7 +71,9 @@ def _refusal(resp: requests.Response) -> requests.HTTPError:
 
 def _send(method: str, url: str, **kwargs: Any) -> requests.Response:
     """One call to the backend with the internal headers, given up after TIMEOUT; a refusal raises."""
-    resp = getattr(requests, method)(url, headers=headers(), timeout=TIMEOUT, **kwargs)
+    resp = _with_retries(
+        lambda: getattr(requests, method)(url, headers=headers(), timeout=TIMEOUT, **kwargs)
+    )
     try:
         resp.raise_for_status()
     except requests.HTTPError:
@@ -69,11 +87,13 @@ def _send(method: str, url: str, **kwargs: Any) -> requests.Response:
 def get_project_settings_by_pid(
     project_pid: uuid.UUID, project_config_selections: list[dict]
 ) -> list[dict]:
-    resp = requests.post(
-        f"{API_URL_PREFIX}/projects/settings/{project_pid}/by-pid",
-        json={"project_config_selections": project_config_selections},
-        headers=headers(),
-        timeout=TIMEOUT,
+    resp = _with_retries(
+        lambda: requests.post(
+            f"{API_URL_PREFIX}/projects/settings/{project_pid}/by-pid",
+            json={"project_config_selections": project_config_selections},
+            headers=headers(),
+            timeout=TIMEOUT,
+        )
     )
     resp.raise_for_status()
     return resp.json()
@@ -90,11 +110,21 @@ def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
     return _send("put", f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done")
 
 
+def mark_processing(evaluation_pid: uuid.UUID) -> str:
+    """Ask for the run to be shown Processing; the backend answers the run's status, which stays as it is
+    when the run is no longer Pending (a run a person stopped stays Failed)."""
+    return _send(
+        "put", f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Processing"
+    ).json()
+
+
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
-    resp = requests.put(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed",
-        headers=headers(),
-        timeout=TIMEOUT,
+    resp = _with_retries(
+        lambda: requests.put(
+            f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed",
+            headers=headers(),
+            timeout=TIMEOUT,
+        )
     )
     if not resp.ok:
         logger.warning(
@@ -103,15 +133,17 @@ def mark_failed(evaluation_pid: uuid.UUID) -> None:
 
 
 def mark_plugin_failed(
-    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_message: str = ""
+    evaluation_pid: uuid.UUID, evaluation_plugin_pid: uuid.UUID, error_message: str
 ) -> None:
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/plugins/{evaluation_plugin_pid}/fail"
     # a last guard for any caller: key shapes and secret assignments never leave the worker
-    resp = requests.patch(
-        url,
-        json={"error_message": scrub_text(error_message)},
-        headers=headers(),
-        timeout=TIMEOUT,
+    resp = _with_retries(
+        lambda: requests.patch(
+            url,
+            json={"error_message": scrub_text(error_message)},
+            headers=headers(),
+            timeout=TIMEOUT,
+        )
     )
     if not resp.ok:
         logger.warning(
@@ -152,10 +184,12 @@ def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
 
 
 def get_evaluation_inputs(evaluation_pid: uuid.UUID) -> dict[str, Any]:
-    resp = requests.get(
-        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs",
-        headers=headers(),
-        timeout=TIMEOUT,
+    resp = _with_retries(
+        lambda: requests.get(
+            f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs",
+            headers=headers(),
+            timeout=TIMEOUT,
+        )
     )
     resp.raise_for_status()
     return resp.json()
