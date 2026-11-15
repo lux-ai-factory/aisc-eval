@@ -596,6 +596,16 @@ class RunReporter:
         self.known: list[str] = []
         self.process: subprocess.Popen | None = None
         self.minted: str | None = None
+        self._calls: bytes | None = None
+        self._calls_read = False
+
+    def calls(self) -> bytes | None:
+        """The run's calls to the system under test, as the platform recorded them, read once with the run's
+        pass; None when no pass was minted or the platform cannot give them."""
+        if self.minted and not self._calls_read:
+            self._calls = run_pass.trace(self.minted)
+            self._calls_read = True
+        return self._calls
 
     def started(self) -> None:
         try:
@@ -658,7 +668,7 @@ def test_run(
     finally:
         if reporter.minted:
             _keep_the_runs_calls(
-                evaluation_pid, test_pid, reporter.minted, reporter.known
+                evaluation_pid, test_pid, reporter.calls(), reporter.known
             )
             run_pass.revoke(reporter.minted, run_context.current())
         workspace.cleanup()
@@ -933,6 +943,11 @@ def _run_the_plugin(
             without_known_bytes(content, known),
         )
 
+    # a plugin can end well after the platform stopped its run's calls (it counts each refused call as one
+    # more failed question): its results are partial, so the test fails with the platform's reason
+    stopped = platform_stop_reason(reporter.calls())
+    if stopped:
+        raise RuntimeError(stopped)
     # a plugin that ended well but measured nothing has no result: the test is not Done
     if not measures:
         raise RuntimeError(NO_MEASURES)
@@ -979,10 +994,29 @@ CALLS_FILE = "system-under-test-calls.jsonl"
 _WORKERS_FILES = {CALLS_FILE.casefold(), "plugin_execution.log"}
 
 
-def _keep_the_runs_calls(evaluation_pid, evaluation_plugin_pid, minted, known) -> None:
+#: the code of a call the platform refused because it had stopped the run, in the run's recorded calls
+RUN_STOPPED_CODE = "run_stopped"
+PLATFORM_STOPPED = "The platform stopped this run's calls to the system under test."
+
+
+def platform_stop_reason(calls: bytes | None) -> str | None:
+    """The reason the platform gave for stopping the run, read from the run's recorded calls: the detail of
+    the first call it refused as stopped. None when it never stopped the run."""
+    for line in (calls or b"").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        error = row.get("error") if isinstance(row, dict) else None
+        if isinstance(error, dict) and error.get("code") == RUN_STOPPED_CODE:
+            detail = error.get("detail")
+            return detail if isinstance(detail, str) and detail.strip() else PLATFORM_STOPPED
+    return None
+
+
+def _keep_the_runs_calls(evaluation_pid, evaluation_plugin_pid, calls, known) -> None:
     """Upload the run's recorded calls as one of its files, whether the plugin succeeded or failed. Never
     fails the run: the platform's trace still holds every call."""
-    calls = run_pass.trace(minted)
     if calls is None:
         return
     try:

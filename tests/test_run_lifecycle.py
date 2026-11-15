@@ -2,11 +2,17 @@
 
 A test runs inside one state machine (celery_tasks.test_run): a version the index does not list, an install that
 fails, a run whose state cannot be read, a plugin that ends well but leaves no measure, a start the engine refuses,
-and a measure post the engine already has each end the test in one known way. The run's other tasks are stopped
-with the signal Celery turns into the soft time limit, so their own failure handlers run.
+a measure post the engine already has, and a run the platform stopped because its calls kept failing each end the
+test in one known way. The run's other tasks are stopped with the signal Celery turns into the soft time limit, so
+their own failure handlers run.
+
+The platform stopping a run is the case of a night when the Wi-Fi dropped: the system under test became
+unreachable, three calls in a row failed, the platform refused the run's next calls, and the plugin, which treats a
+refused call as one more failed question, ended normally with partial results. Such a test is not Done.
 """
 
 import inspect
+import json
 import types
 
 import pytest
@@ -141,3 +147,35 @@ def test_measures_already_recorded_are_not_a_failure(broker, monkeypatch):
 def test_run_plugin_runs_inside_the_state_machine():
     assert callable(getattr(celery_tasks, "test_run", None)), "celery_tasks has no test_run state machine"
     assert "with test_run(" in inspect.getsource(celery_tasks.run_plugin)
+
+
+# ── A run the platform stopped is not Done ───────────────────────────────────
+
+PLATFORM_STOP = "the platform stopped this run: 3 calls in a row failed; the last: timeout"
+
+
+def _trace_of_a_dropped_network():
+    rows = [{"seq": 1, "outcome": "answered", "error": None}]
+    rows += [{"seq": n, "outcome": "failed", "error": {"code": "timeout", "detail": "no answer"}} for n in (2, 3, 4)]
+    rows += [{"seq": 5, "outcome": "not_sent", "error": {"code": "run_stopped", "detail": PLATFORM_STOP}}]
+    lines = [json.dumps(r) for r in rows] + [json.dumps({"seal": {"calls": 5, "digest": "d"}})]
+    return ("\n".join(lines) + "\n").encode()
+
+
+def test_a_test_the_platform_stopped_is_failed_with_the_platforms_reason(worker, platform, monkeypatch):
+    finished = []
+    monkeypatch.setattr(celery_tasks, "mark_plugin_finished", lambda *a: finished.append(a))
+    worker["leave"] = lambda output: (output / "measures.json").write_text(ONE_MEASURE)
+    platform["trace"].content = _trace_of_a_dropped_network()
+    _ends(lambda: _run_with([_resource("target", TARGET)]))
+    assert finished == [], "a test the platform stopped was reported finished, so it shows Done"
+    assert [reason for _e, _t, reason in worker["failed"]] == [PLATFORM_STOP]
+
+
+def test_a_test_the_platform_stopped_still_keeps_its_calls_and_log(worker, platform):
+    worker["leave"] = lambda output: (output / "measures.json").write_text(ONE_MEASURE)
+    platform["trace"].content = _trace_of_a_dropped_network()
+    _ends(lambda: _run_with([_resource("target", TARGET)]))
+    assert worker["uploads"][celery_tasks.CALLS_FILE] == platform["trace"].content
+    assert "plugin_execution.log" in worker["uploads"]
+    assert worker["failed"], "the test was not failed"
