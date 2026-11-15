@@ -1,7 +1,9 @@
+import fcntl
 import hashlib
 import re
 import json
 import os
+import shutil
 import secrets
 import subprocess
 import tempfile
@@ -43,7 +45,8 @@ from aisc_eval.service import run_pass
 from aisc_eval.service.helpers import check_endpoint, resolve_helper
 from aisc_eval.utils.logging import get_logger
 
-from aisc_plugin_manager.loader import Loader
+from aisc_plugin_manager.loader import Loader, local_version
+import aisc_plugin_interface.manifest as plugin_manifest
 from aisc_plugin_interface import TaskProgress, Measure
 from aisc_eval.utils import env
 from aisc_eval.utils.encryption import decrypt_value
@@ -1120,6 +1123,162 @@ def _versions_of(package_name: str, version: str) -> dict:
     if version not in known[package_name]:
         raise NotInIndex(f"Version '{version}' of package '{package_name}' not found.")
     return known[package_name]
+
+
+# ── what the engine shows of a plugin, read here so the engine never imports plugin code ─────────────────
+
+#: seconds a plugin may take to describe itself (import its module, build its form)
+MANIFEST_TIMEOUT_S = 120
+#: seconds a form hook may take (a person waits on the form for it)
+HOOK_TIMEOUT_S = 30
+#: the largest answer a manifest or a hook may give
+ANSWER_MAX_BYTES = 2**20
+#: where each plugin version's environment is kept for its manifest and form hooks, by the hash of its wheel
+#: or of its local folder: root's, each environment the install user's, readable and runnable by run users
+PLUGIN_ENVS = Path("/var/cache/aisc-plugin-envs")
+#: the manifest command, copied next to each call: run users cannot read the worker's own files
+MANIFEST_SCRIPT = "plugin_manifest.py"
+NO_WHEEL_HASH = (
+    "{package} {version} has no wheel hash, recorded or on the index: a catalogue plugin is installed only "
+    "from a wheel whose hash is known"
+)
+
+
+def _listed(package_name: str, version: str) -> dict:
+    """The listing's entry of one version, listed afresh (a version published since is found); a local
+    plugin stored under its declared version is found too."""
+    versions = plugin_loader.list_packages(refresh=True).get(package_name) or {}
+    found = versions.get(version) or versions.get(local_version(version))
+    if found is None:
+        raise NotInIndex(f"Version '{version}' of package '{package_name}' not found.")
+    return found
+
+
+def _expected_hash(package_name: str, version: str, info: dict, recorded: str | None) -> str | None:
+    """The wheel hash a catalogue plugin must be installed from: the one recorded, else the index's. A
+    local plugin has none (it is installed from its folder)."""
+    if info.get("source") == "local":
+        return None
+    expected = recorded or plugin_loader.devpi_client.wheel_sha256(package_name, version)
+    if not expected:
+        raise RuntimeError(NO_WHEEL_HASH.format(package=package_name, version=version))
+    return expected.lower()
+
+
+def _envs_root() -> Path:
+    """PLUGIN_ENVS, or a folder under the temporary one for a worker that is not root."""
+    root = PLUGIN_ENVS if os.geteuid() == 0 else Path(tempfile.gettempdir()) / "aisc-plugin-envs"
+    root.mkdir(mode=0o711, parents=True, exist_ok=True)
+    return root
+
+
+@contextmanager
+def _plugin_env(
+    package_name: str, version: str, info: dict, expected: str | None
+) -> Iterator[tuple[Path, str]]:
+    """(venv python, dependency lock) of the plugin's environment for its manifest and form hooks, built
+    once per wheel hash or local folder digest from the hashed lock, and kept. A local folder whose digest
+    cannot be read gets an environment of its own, removed after the call."""
+    key = expected or (info.get("digest") if info.get("source") == "local" else None)
+    with ExitStack() as stack:
+        if key is None:
+            folder = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        else:
+            root = _envs_root()
+            folder = root / key
+            held = stack.enter_context(open(root / f"{key}.lock", "a"))
+            fcntl.flock(held, fcntl.LOCK_EX)
+        ready = folder / "ready"
+        if not ready.is_file():
+            if folder.exists() and key is not None:
+                shutil.rmtree(folder)
+            folder.mkdir(mode=0o711, exist_ok=True)
+            os.chmod(folder, 0o711)
+            installer = plugin_process.install_user()
+            index_url = plugin_loader.devpi_client.simple_index_url
+            lock = plugin_process.lock_dependencies(
+                package_name, version, info, expected, folder, installer, index_url
+            )
+            plugin_process.build_venv(
+                package_name,
+                version,
+                info,
+                folder,
+                installer,
+                index_url,
+                pins=plugin_process.Pins(expected, lock),
+            )
+            ready.write_text("")
+        yield folder / "venv" / "bin" / "python", (
+            folder / plugin_process.LOCK_FILE
+        ).read_text()
+
+
+def _sandboxed(venv_python: Path, argv: list[str], stdin: bytes, timeout_s: int) -> bytes:
+    """The manifest command run as a leased run user, in folders of its own, with no network (no proxy
+    token: the firewall lets a run user reach only the proxy), no pass and none of the worker's secrets."""
+    _check_isolation()
+    with ExitStack() as stack:
+        workspace = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        user = stack.enter_context(plugin_process.lease_run_user())
+        stack.callback(plugin_process.end_processes_of, user)
+        folders = plugin_process.make_run_folders(workspace, user)
+        script = folders.work / MANIFEST_SCRIPT
+        plugin_process.write_for_run(
+            script, Path(plugin_manifest.__file__).read_bytes(), user
+        )
+        return plugin_process.run_for_answer(
+            [str(venv_python), str(script), *argv],
+            folders.work,
+            plugin_environment(os.environ, {}),
+            user,
+            stdin,
+            timeout_s,
+            ANSWER_MAX_BYTES,
+            limits=plugin_process.plugin_limits(timeout_s),
+        )
+
+
+def _json_answer(answer: bytes, what: str):
+    try:
+        return json.loads(answer)
+    except ValueError:
+        raise plugin_process.NoAnswer(f"the plugin's {what} is not JSON") from None
+
+
+@celery_app.task
+def read_manifest(package_name: str, version: str, wheel_sha256: str | None = None) -> dict:
+    """What the engine stores of a plugin version: {"wheel_sha256", "dependency_lock", "manifest", "code"}.
+    The plugin is installed from a hashed lock that must name the recorded wheel (or the index's, when none
+    is recorded; a catalogue plugin with neither is refused before anything is installed), then describes
+    itself as a run user with no network. "code" is a local folder's digest and git state, None otherwise."""
+    info = _listed(package_name, version)
+    expected = _expected_hash(package_name, version, info, wheel_sha256)
+    with _plugin_env(package_name, version, info, expected) as (python, lock):
+        answer = _sandboxed(python, ["describe", info["module_name"]], b"", MANIFEST_TIMEOUT_S)
+    manifest = _json_answer(answer, "manifest")
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("plugins"), dict):
+        raise plugin_process.NoAnswer("the plugin's manifest names no plugin class")
+    code = None
+    if info.get("source") == "local":
+        code = {name: info.get(name) for name in ("digest", "git_commit", "git_dirty")}
+    return {"wheel_sha256": expected, "dependency_lock": lock, "manifest": manifest, "code": code}
+
+
+@celery_app.task
+def plugin_hook(
+    package_name: str, version: str, plugin_name: str, hook: str, args: dict, pins: dict
+):
+    """One form hook of one plugin class (aisc_plugin_interface.manifest.HOOKS only), run as a run user with
+    no network, in the environment of the wheel recorded for it (pins["wheel_sha256"])."""
+    if hook not in plugin_manifest.HOOKS:
+        raise ValueError(f"{hook} is not a form hook")
+    info = _listed(package_name, version)
+    expected = _expected_hash(package_name, version, info, (pins or {}).get("wheel_sha256"))
+    asked = json.dumps({"module": info["module_name"], "plugin": plugin_name, "hook": hook, "args": args})
+    with _plugin_env(package_name, version, info, expected) as (python, _lock):
+        answer = _sandboxed(python, ["hook"], asked.encode(), HOOK_TIMEOUT_S)
+    return _json_answer(answer, f"answer to {hook}")
 
 
 #: how much of a failed plugin's reason a run's error keeps (the whole log is the run's file)

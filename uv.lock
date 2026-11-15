@@ -118,7 +118,7 @@ dependencies = [
     { name = "rich" },
 ]
 wheels = [
-    { filename = "aisc_plugin_interface-0.4.0-py3-none-any.whl", hash = "sha256:e626dcad531c70679727177884fa00d3729439cd04b85fb6d6445266c866db6f" },
+    { filename = "aisc_plugin_interface-0.4.0-py3-none-any.whl", hash = "sha256:23f73cfa1eb01e1e849a3aa5abce6ec74472d3da4aebaa3f6a7bff31a69ac603" },
 ]
 
 [package.metadata]
@@ -137,7 +137,7 @@ dependencies = [
     { name = "packaging" },
 ]
 wheels = [
-    { filename = "aisc_plugin_manager-0.3.0+aisc.1-py3-none-any.whl", hash = "sha256:8f1a06fd51bddf2db9d8b04874045237e88ce3d088ea53cdbc9e8e0b99a3c103" },
+    { filename = "aisc_plugin_manager-0.3.0+aisc.1-py3-none-any.whl", hash = "sha256:857593047abf759002b0bbdf1302b0ad8e75a6729cddae6c1a00a30c9d0f2a70" },
 ]
 
 [package.metadata]

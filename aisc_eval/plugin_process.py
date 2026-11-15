@@ -22,11 +22,13 @@ import contextlib
 import fcntl
 import os
 import pwd
+import re
 import resource
 import shutil
 import signal
 import stat
 import subprocess
+import threading
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -266,6 +268,101 @@ class InstallFailed(RuntimeError):
 
 
 @dataclass(frozen=True)
+class Pins:
+    """What a plugin's environment is installed from: the hash of its wheel (None for a local plugin, which is
+    installed from its folder) and the hashed lock of everything it needs."""
+
+    wheel_sha256: str | None
+    lock: str
+
+
+#: the hashed lock of a plugin's dependencies, next to its venv
+LOCK_FILE = "requirements.lock"
+
+
+def _canonical(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def locked_hashes(lock: str, package_name: str, version: str) -> list[str]:
+    """The sha256 hashes a lock lists for one package at one version (a wheel's and its sdist's)."""
+    hashes: list[str] = []
+    current = False
+    for line in lock.splitlines():
+        text = line.strip().rstrip("\\").strip()
+        if not text or text.startswith("#"):
+            continue
+        if not line[:1].isspace():
+            name, _sep, pinned = text.split(";")[0].partition("==")
+            current = (
+                _canonical(name.split("[")[0].strip()) == _canonical(package_name)
+                and pinned.strip() == version
+            )
+        elif current and text.startswith("--hash=sha256:"):
+            hashes.append(text.split(":", 1)[1].strip().lower())
+    return hashes
+
+
+def lock_dependencies(
+    package_name: str,
+    version: str,
+    plugin_info: Mapping[str, Any],
+    wheel_sha256: str | None,
+    folder: Path,
+    installer: PluginUser,
+    index_url: str | None,
+) -> str:
+    """The hashed lock of what the plugin needs, compiled by the install user (uv pip compile
+    --generate-hashes): a catalogue plugin with itself, whose wheel must be the one recorded (wheel_sha256),
+    a local plugin its dependencies only (its own code is installed from its folder). InstallFailed when the
+    lock cannot be compiled, or names another wheel than the one recorded."""
+    local = plugin_info["source"] == "local"
+    if not local and not wheel_sha256:
+        raise InstallFailed(
+            "lock",
+            f"no wheel hash is recorded for {package_name} {version}: a catalogue plugin is installed only from "
+            "the wheel recorded for it",
+        )
+    work = folder / "lock"
+    prepare_install_folder(work, installer)
+    if local:
+        source = stage_local_source(
+            plugin_info["pkg_root"].resolve(), work / "source", installer
+        )
+        requirements = source / "pyproject.toml"
+    else:
+        requirements = work / "requirements.in"
+        requirements.write_text(f"{package_name}=={version}\n")
+        os.chmod(requirements, 0o644)
+    out = work / LOCK_FILE
+    argv = [
+        "uv",
+        "pip",
+        "compile",
+        "--generate-hashes",
+        "--python-version",
+        "3.12",
+        "--quiet",
+    ]
+    if index_url:
+        argv.extend(["--extra-index-url", index_url])
+    argv.extend([str(requirements), "-o", str(out)])
+    compiled = run_install(argv, installer, timeout=INSTALL_TIMEOUT)
+    if compiled.returncode != 0:
+        raise InstallFailed("lock", scrub_text(compiled.stderr or ""))
+    lock = out.read_text()
+    if not local and wheel_sha256.lower() not in locked_hashes(
+        lock, package_name, version
+    ):
+        raise InstallFailed(
+            "lock",
+            f"the index's wheel of {package_name} {version} is not the one recorded "
+            f"(sha256 {wheel_sha256[:12]}...)",
+        )
+    return lock
+
+
+@dataclass(frozen=True)
 class Venv:
     path: Path
     #: the two steps, whose output goes to the run's log
@@ -284,9 +381,12 @@ def build_venv(
     folder: Path,
     installer: PluginUser,
     index_url: str | None,
+    pins: Pins | None = None,
 ) -> Venv:
     """The plugin installed in folder/venv by the install user: a local plugin from its copy in
     folder/source, a catalogue one from the index (index_url, when there is one, besides PyPI).
+    With pins, only what the lock names is installed, each package checked against its hash, and nothing
+    it does not name (a local plugin's own code then comes from its folder, without dependencies).
     InstallFailed when a step fails."""
     if plugin_info["source"] == "local":
         install_target = str(
@@ -318,12 +418,28 @@ def build_venv(
     # (its root lists the whole PyPI mirror) and dropped it on a timeout, so a catalogue plugin was
     # "not found"; when it is down, uv says so.
     install_cmd = ["uv", "pip", "install", "--python", str(venv)]
+    if pins is not None:
+        lock = folder / LOCK_FILE
+        lock.write_text(pins.lock)
+        os.chmod(lock, 0o644)
+        install_cmd.extend(["--require-hashes", "--no-deps"])
     if index_url:
         install_cmd.extend(["--extra-index-url", index_url])
-    install_cmd.append(install_target)
+    if pins is not None:
+        install_cmd.extend(["-r", str(lock)])
+    else:
+        install_cmd.append(install_target)
     installed = run_install(install_cmd, installer, timeout=INSTALL_TIMEOUT)
     if installed.returncode != 0:
         raise InstallFailed("install", scrub_text(installed.stderr or ""))
+    if pins is not None and plugin_info["source"] == "local":
+        own = run_install(
+            ["uv", "pip", "install", "--python", str(venv), "--no-deps", install_target],
+            installer,
+            timeout=INSTALL_TIMEOUT,
+        )
+        if own.returncode != 0:
+            raise InstallFailed("install", scrub_text(own.stderr or ""))
     return Venv(venv, made, installed)
 
 
@@ -402,6 +518,37 @@ def _apply_limits(limits: Mapping[int, tuple[int, int]]):
     return apply
 
 
+def _user_env(
+    plugin_env: dict[str, str], workspace: Path, user: PluginUser
+) -> dict[str, str]:
+    """A leased user (no home of its own in the image) gets the home, tmp and name of its run: the
+    workspace is the run's work folder (make_run_folders), with home/ and tmp/ beside it. A leased uid
+    has no passwd entry, and a tool that asks who it is (getpass, git, a model cache under ~) reads
+    these."""
+    if user.switch and user.home:
+        return {**plugin_env, "HOME": user.home}
+    if user.switch:
+        name = f"aisc-run-{user.uid}"
+        return {
+            **plugin_env,
+            "HOME": str(workspace.parent / "home"),
+            "TMPDIR": str(workspace.parent / "tmp"),
+            "USER": name,
+            "LOGNAME": name,
+        }
+    return plugin_env
+
+
+def _user_limits(
+    limits: Mapping[int, tuple[int, int]] | None, user: PluginUser
+) -> Mapping[int, tuple[int, int]] | None:
+    """The process count is a count of the user's processes: a plugin that runs as the worker itself (a
+    worker that is not root) would share it with the worker, so it is left out there."""
+    if limits and not user.switch:
+        return {k: v for k, v in limits.items() if k != resource.RLIMIT_NPROC}
+    return limits
+
+
 def start(
     argv: list[str],
     workspace: Path,
@@ -410,33 +557,15 @@ def start(
     user: PluginUser,
     limits: Mapping[int, tuple[int, int]] | None = None,
 ) -> subprocess.Popen[str]:
-    """Start the plugin under its limits; its stdout is the worker's to read for progress lines.
-
-    A leased user (no home of its own in the image) gets the home, tmp and name of its run: the
-    workspace is the run's work folder (make_run_folders), with home/ and tmp/ beside it. A leased uid
-    has no passwd entry, and a tool that asks who it is (getpass, git, a model cache under ~) reads
-    these. The process count is a count of the user's processes: a plugin that runs as the worker
-    itself (a worker that is not root) would share it with the worker, so it is left out there.
-    """
-    if user.switch and user.home:
-        plugin_env = {**plugin_env, "HOME": user.home}
-    elif user.switch:
-        name = f"aisc-run-{user.uid}"
-        plugin_env = {
-            **plugin_env,
-            "HOME": str(workspace.parent / "home"),
-            "TMPDIR": str(workspace.parent / "tmp"),
-            "USER": name,
-            "LOGNAME": name,
-        }
-    if limits and not user.switch:
-        limits = {k: v for k, v in limits.items() if k != resource.RLIMIT_NPROC}
+    """Start the plugin under its limits, with its run's home (_user_env); its stdout is the worker's to read
+    for progress lines."""
+    limits = _user_limits(limits, user)
     return subprocess.Popen(
         argv,
         cwd=str(workspace),
         stdout=subprocess.PIPE,
         stderr=stderr,
-        env=plugin_env,
+        env=_user_env(plugin_env, workspace, user),
         text=True,
         bufsize=1,
         umask=PLUGIN_UMASK,
@@ -448,6 +577,86 @@ def start(
         start_new_session=True,
         preexec_fn=_apply_limits(limits) if limits else None,
     )
+
+
+class NoAnswer(RuntimeError):
+    """A plugin command (its manifest, a form hook) ended without a usable answer; the text says why."""
+
+
+#: what of a failed command's stderr is kept for its reason
+_REASON_BYTES = 64 * 1024
+
+
+def _drain(stream: IO[bytes], into: bytearray, cap: int) -> None:
+    """Read the stream to its end, keeping at most cap + 1 bytes (one more says it was over)."""
+    while chunk := stream.read(65536):
+        room = cap + 1 - len(into)
+        if room > 0:
+            into.extend(chunk[:room])
+
+
+def _feed(stream: IO[bytes], data: bytes) -> None:
+    try:
+        stream.write(data)
+    except (BrokenPipeError, OSError):
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            stream.close()
+
+
+def run_for_answer(
+    argv: list[str],
+    workspace: Path,
+    plugin_env: dict[str, str],
+    user: PluginUser,
+    stdin: bytes,
+    timeout_s: float,
+    max_bytes: int,
+    limits: Mapping[int, tuple[int, int]] | None = None,
+) -> bytes:
+    """Run a short plugin command (read its manifest, run a form hook) as the user, under its limits, and give
+    back its stdout. NoAnswer when it does not end within timeout_s (it and everything it started are killed),
+    when its stdout is over max_bytes, or when it fails (with the last line of its stderr, scrubbed)."""
+    limits = _user_limits(limits, user)
+    process = subprocess.Popen(
+        argv,
+        cwd=str(workspace),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=_user_env(plugin_env, workspace, user),
+        umask=PLUGIN_UMASK,
+        user=user.uid if user.switch else None,
+        group=user.gid if user.switch else None,
+        extra_groups=[] if user.switch else None,
+        start_new_session=True,
+        preexec_fn=_apply_limits(limits) if limits else None,
+    )
+    out, err = bytearray(), bytearray()
+    threads = [
+        threading.Thread(target=_feed, args=(process.stdin, stdin), daemon=True),
+        threading.Thread(target=_drain, args=(process.stdout, out, max_bytes), daemon=True),
+        threading.Thread(target=_drain, args=(process.stderr, err, _REASON_BYTES), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        returncode = process.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        _signal_group(process, signal.SIGKILL)
+        process.wait()
+        raise NoAnswer(f"it did not answer within {timeout_s:g} seconds") from None
+    finally:
+        _signal_group(process, signal.SIGKILL)
+        for thread in threads:
+            thread.join(timeout=5)
+    if len(out) > max_bytes:
+        raise NoAnswer(f"its answer is larger than {max_bytes / _MB:g} MiB")
+    if returncode != 0:
+        lines = scrub_text(err.decode("utf-8", "replace")).strip().splitlines()
+        raise NoAnswer(lines[-1][:500] if lines else f"it ended with code {returncode}")
+    return bytes(out)
 
 
 def _signal_group(process: subprocess.Popen, sig: signal.Signals) -> None:
