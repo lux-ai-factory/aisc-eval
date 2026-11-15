@@ -9,7 +9,7 @@ import traceback as tracebacks
 import time
 import uuid
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import requests
@@ -678,6 +678,9 @@ class RunReporter:
         self.workspace = workspace
         self.known: list[str] = []
         self.process: subprocess.Popen | None = None
+        #: the user the test runs as, and its folders, once leased (test_run)
+        self.user: plugin_process.PluginUser | None = None
+        self.folders: plugin_process.RunFolders | None = None
         self.minted: str | None = None
         self._calls: bytes | None = None
         self._calls_read = False
@@ -726,9 +729,11 @@ def test_run(
     state cannot be read fails the test without starting it. A start the engine refuses ends this copy quietly:
     the test is another copy's, or has ended. Every other failure is reported once, with its reason, and raised
     without any value the run handed its plugin. Whatever happens, the run's calls are kept and its pass revoked
-    when one was minted, and the workspace is removed."""
+    when one was minted, and the workspace is removed. The test runs as a user of its own, leased here and given
+    back last, once its plugin and everything it left running have ended and its folders are gone."""
     workspace = tempfile.TemporaryDirectory(delete=True)
     reporter = RunReporter(evaluation_pid, test_pid, task_id, Path(workspace.name))
+    lease = ExitStack()
     try:
         unreadable = None
         try:
@@ -740,7 +745,14 @@ def test_run(
                 f"Run {evaluation_pid} could not be read ({unreadable}): test {test_pid} not started"
             )
             raise RuntimeError(RUN_STATE_UNREADABLE)
-        yield reporter if _may_start(evaluation_pid, test_pid, eval_data) else None
+        if not _may_start(evaluation_pid, test_pid, eval_data):
+            yield None
+        else:
+            reporter.user = lease.enter_context(plugin_process.lease_run_user())
+            reporter.folders = plugin_process.make_run_folders(
+                reporter.workspace, reporter.user
+            )
+            yield reporter
     except StartRefused as refused:
         logger.warning(f"{refused}: this copy ends without touching the test")
     except Exception as exc:
@@ -754,7 +766,12 @@ def test_run(
                 evaluation_pid, test_pid, reporter.calls(), reporter.known
             )
             run_pass.revoke(reporter.minted, run_context.current())
-        workspace.cleanup()
+        try:
+            if reporter.user is not None:
+                plugin_process.end_processes_of(reporter.user)
+            workspace.cleanup()
+        finally:
+            lease.close()
 
 
 def _run_the_plugin(
@@ -771,13 +788,8 @@ def _run_the_plugin(
     outputs. Every failure raises, and test_run reports it."""
     evaluation_pid, evaluation_plugin_pid = reporter.evaluation_pid, reporter.test_pid
     plugin_info = _versions_of(package_name, version)[version]
-    workspace_path = reporter.workspace
-
-    # Setup internal workspace structure
-    input_dir = workspace_path / "input"
-    output_dir = workspace_path / "output"
-    input_dir.mkdir()
-    output_dir.mkdir()
+    folders, user = reporter.folders, reporter.user
+    work, input_dir, output_dir = folders.work, folders.input, folders.output
 
     # the backend could not load the plugin to say whether its model file is the local target:
     # running anyway could store a local run as if it were an AI card run
@@ -848,7 +860,7 @@ def _run_the_plugin(
         else:
             raise ValueError(f"Unsupported component type: {component_type}")
 
-        (input_dir / relative_path).write_bytes(file_content)
+        plugin_process.write_for_run(input_dir / relative_path, file_content, user)
         input_mapping[name] = relative_path
 
     # A run on a local model file says so, here for the plugin and on its input for the results:
@@ -856,7 +868,9 @@ def _run_the_plugin(
     if local_model is not None:
         if run_pass.refs_of(input_components):
             raise ValueError(BOTH_KINDS)
-        (input_dir / "target.json").write_text(json.dumps(local_model["marker"]))
+        plugin_process.write_for_run(
+            input_dir / "target.json", json.dumps(local_model["marker"]).encode(), user
+        )
         not_stored = None
         try:
             store_input_value(
@@ -878,10 +892,11 @@ def _run_the_plugin(
         "config_secret_fields": config_secret_fields(project_settings),
     }
 
-    config_path = workspace_path / "config.json"
-    config_path.write_text(json.dumps(config_data, indent=2))
+    plugin_process.write_for_run(
+        work / "config.json", json.dumps(config_data, indent=2).encode(), user
+    )
 
-    runtime_script = plugin_process.copy_runtime(workspace_path)
+    runtime_script = plugin_process.copy_runtime(work, user)
 
     # Steps 1 and 2: the venv, made and filled by the install user: the plugin may run it but not change it
     logger.debug(f"Installing {package_name}=={version} into an isolated venv")
@@ -889,7 +904,7 @@ def _run_the_plugin(
         package_name,
         version,
         plugin_info,
-        workspace_path,
+        folders.root,
         plugin_process.install_user(),
         plugin_loader.devpi_client.simple_index_url,
     )
@@ -914,7 +929,7 @@ def _run_the_plugin(
     reporter.started()
 
     stdout_lines: list[str] = []
-    stderr_path = workspace_path / "stderr.tmp"
+    stderr_path = folders.root / "stderr.tmp"
     returncode: int | None = None
     stderr_content = ""
     secret_env = build_secret_environment(project_settings + llm_secret_settings)
@@ -922,13 +937,12 @@ def _run_the_plugin(
     known = reporter.known = known_secrets(
         secret_env, os.environ, plugin_config, minted
     )
-    user = plugin_process.plugin_user()
-    plugin_process.prepare_workspace(workspace_path, output_dir, user)
-    with open(stderr_path, "w+") as stderr_file:
+    # the worker's only (0600): the run folder can be passed through by every plugin user
+    with open(stderr_path, "w+", opener=_private) as stderr_file:
         child_env = plugin_environment(os.environ, secret_env, minted)
         process = reporter.process = plugin_process.start(
             [str(venv_python), str(runtime_script)],
-            workspace_path,
+            work,
             stderr_file,
             child_env,
             user,
@@ -1040,6 +1054,10 @@ def _run_the_plugin(
     reporter.finished()
     # what the chain hands post_measurements (and the result backend keeps): no value the plugin was given
     return _without_known(measures, known)
+
+
+def _private(path: str, flags: int) -> int:
+    return os.open(path, flags, 0o600)
 
 
 def _versions_of(package_name: str, version: str) -> dict:

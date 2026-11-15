@@ -3,10 +3,10 @@ the kernel refuses the plugin the worker's /proc/<pid>/environ (DJANGO_SECRET_KE
 INTERNAL_API_KEY) and the worker's files. The worker then reads what the plugin left in its
 output folder as root, so that folder must not let the plugin point it at anything else."""
 
+import contextlib
 import json
 import os
 import signal
-import stat
 import subprocess
 import sys
 import time
@@ -112,26 +112,6 @@ def test_a_worker_that_is_not_root_starts_the_plugin_without_switching(
     assert kwargs["extra_groups"] is None
     assert kwargs["umask"] == 0o077
     assert kwargs["env"]["HOME"] == "/home/dev"
-
-
-def test_the_run_folder_and_output_stay_roots_and_are_shared_with_the_plugin_group(
-    monkeypatch, tmp_path
-):
-    chowns = []
-    monkeypatch.setattr(
-        plugin_process.os,
-        "chown",
-        lambda path, uid, gid: chowns.append((path, uid, gid)),
-    )
-    output = tmp_path / "output"
-    output.mkdir()
-    plugin_process.prepare_workspace(tmp_path, output, PLUGIN)
-
-    # owner unchanged (-1): with the sticky bit the plugin can add files but not rename or
-    # replace config.json, input/, venv/ or output/ itself
-    assert chowns == [(tmp_path, -1, 10001), (output, -1, 10001)]
-    for folder in (tmp_path, output):
-        assert stat.S_IMODE(folder.stat().st_mode) == 0o1770
 
 
 def test_the_runtime_script_is_copied_into_the_run_folder(tmp_path):
@@ -338,11 +318,15 @@ def worker(monkeypatch):
             name, content
         ),
     )
-    monkeypatch.setattr(
-        plugin_process,
-        "plugin_user",
-        lambda: PluginUser(os.getuid(), os.getgid(), "/home/aisc-plugin", switch=True),
-    )
+    @contextlib.contextmanager
+    def lease(*args, **kwargs):
+        # the test's own user stands in for a leased one: its folders can be given to it for real
+        yield PluginUser(os.getuid(), os.getgid(), None, switch=True)
+
+    monkeypatch.setattr(plugin_process, "lease_run_user", lease)
+    monkeypatch.setattr(plugin_process, "end_processes_of", lambda user: None)
+    # what the worker writes is root's, which a test cannot give away
+    monkeypatch.setattr(plugin_process.os, "chown", lambda *a: None)
     seen["leave"] = lambda output: (output / "measures.json").write_text(ONE_MEASURE)
 
     def popen(argv, **kwargs):
@@ -358,12 +342,13 @@ def _run():
     return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep")
 
 
-def test_run_plugin_starts_the_plugin_as_the_plugin_user(worker):
+def test_run_plugin_starts_the_plugin_as_its_leased_user(worker):
     assert _run() == json.loads(ONE_MEASURE)
     [(argv, kwargs)] = worker["popen"]
     assert kwargs["user"] == os.getuid()
     assert kwargs["extra_groups"] == []
-    assert kwargs["env"]["HOME"] == "/home/aisc-plugin"
+    # its home is its run's, beside the working folder
+    assert kwargs["env"]["HOME"] == str(Path(kwargs["cwd"]).parent / "home")
     # the runtime script is read from the run folder: the plugin user cannot read /app
     assert Path(argv[1]).parent == Path(kwargs["cwd"]) / "runtime"
 
