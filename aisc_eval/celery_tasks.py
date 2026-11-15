@@ -1130,6 +1130,11 @@ def _status_of(exc: BaseException) -> int | None:
 
 @celery_app.task
 def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
+    _finalize(evaluation_id)
+
+
+def _finalize(evaluation_id: uuid.UUID) -> None:
+    """Close a run whose tests have all ended: Failed when one of them failed, Done otherwise."""
     logger.debug(f"Finalizing evaluation {evaluation_id}")
     try:
         # check if any plugins failed before marking as completed
