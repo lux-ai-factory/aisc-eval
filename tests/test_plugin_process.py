@@ -315,7 +315,7 @@ def worker(monkeypatch, tmp_path):
     monkeypatch.setattr(
         celery_tasks,
         "upload_artifact",
-        lambda evaluation, plugin, name, content: seen["uploads"].__setitem__(
+        lambda evaluation, plugin, name, content, **marks: seen["uploads"].__setitem__(
             name, content
         ),
     )

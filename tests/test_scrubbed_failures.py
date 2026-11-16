@@ -208,7 +208,7 @@ def _everything_raised(exc):
 def test_an_exception_that_is_not_the_workers_own_is_raised_with_its_secrets_redacted(
     worker, with_secret, monkeypatch, caplog
 ):
-    def refuse(evaluation, plugin, name, content):
+    def refuse(evaluation, plugin, name, content, **marks):
         raise ConnectionError(f"upload refused for {JUDGE} with {SHAPED}")
 
     monkeypatch.setattr(celery_tasks, "upload_artifact", refuse)

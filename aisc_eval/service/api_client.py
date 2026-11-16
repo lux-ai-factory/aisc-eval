@@ -291,9 +291,14 @@ def upload_artifact(
     evaluation_plugin_uuid: uuid.UUID,
     name: str,
     content: bytes,
+    holds_conversation: bool = False,
 ) -> requests.Response:
+    """Upload one of the run's files. `holds_conversation`: it holds the run's conversation with the system under
+    test, so the engine shows it to the project's owners and editors only."""
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/artifacts"
 
     files = {"file": (name, content)}
     data = {"evaluation_plugin_uuid": str(evaluation_plugin_uuid)}
+    if holds_conversation:
+        data["holds_conversation"] = "true"
     return _send("post", url, files=files, data=data)

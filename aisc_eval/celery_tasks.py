@@ -1117,7 +1117,8 @@ def _run_the_plugin(
             (ENVIRONMENT_FILE, environment),
         ):
             try:
-                upload_artifact(evaluation_pid, evaluation_plugin_pid, name, content)
+                upload_artifact(evaluation_pid, evaluation_plugin_pid, name, content,
+                                holds_conversation=name in _CONVERSATION_FILES)
             except Exception as exc:
                 logger.warning(
                     f"The failed run's {name} was not kept as a file ({exc.__class__.__name__})"
@@ -1147,6 +1148,7 @@ def _run_the_plugin(
             evaluation_plugin_pid,
             _without_known(name, known),
             without_known_bytes(content, known),
+            holds_conversation=name in _CONVERSATION_FILES,
         )
 
     # a plugin can end well after the platform stopped its run's calls (it counts each refused call as one
@@ -1358,6 +1360,9 @@ def plugin_reason(stderr_text: str, returncode: int) -> str:
 CALLS_FILE = "system-under-test-calls.jsonl"
 #: the names of the files the worker itself keeps with a run, which no plugin output may take
 _WORKERS_FILES = {CALLS_FILE.casefold(), "plugin_execution.log", ENVIRONMENT_FILE.casefold()}
+#: the worker's files that hold the run's conversation with the system under test (its calls, and the plugin's
+#: output, which may print prompts and answers): uploaded marked, so only owners and editors open them
+_CONVERSATION_FILES = {CALLS_FILE, "plugin_execution.log"}
 
 
 #: the code of a call the platform refused because it had stopped the run, in the run's recorded calls
@@ -1391,6 +1396,7 @@ def _keep_the_runs_calls(evaluation_pid, evaluation_plugin_pid, calls, known) ->
             evaluation_plugin_pid,
             CALLS_FILE,
             without_known_bytes(calls, known),
+            holds_conversation=True,
         )
     except Exception as exc:
         logger.warning(
