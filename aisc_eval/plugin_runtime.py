@@ -104,11 +104,12 @@ def main():
             if not file_path.is_absolute():
                 file_path = working_dir / "input" / file_path
 
-            if file_path.exists():
-                print(f"📥 Loading input '{name}' from {path}")
-                plugin.set_input_content(name, file_path.read_bytes())
-            else:
+            if not file_path.exists():
                 print(f"⚠️  Input file not found: {file_path}", file=sys.stderr)
+                continue
+
+            print(f"📥 Loading input '{name}' from {path}")
+            plugin.set_input_content(name, file_path.read_bytes())
 
         print("🚀 Running evaluation...")
         plugin_config = config.get("plugin_config", {})

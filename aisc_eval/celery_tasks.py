@@ -15,7 +15,7 @@ from pathlib import Path
 from celery import group, chain
 
 from aisc_eval import plugin_runtime
-from aisc_eval.celery_app import celery_app
+from aisc_eval.celery_app import celery_app, StopAwareTask
 from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.service.api_client import (
     mark_completed,
@@ -27,8 +27,8 @@ from aisc_eval.service.api_client import (
     get_evaluation,
     get_evaluation_request,
     get_evaluation_plugins_status,
-    get_dataset_file_content,
-    get_model_file_content,
+    download_dataset_file,
+    download_model_file,
     upload_artifact,
     get_project_settings_by_pid,
     get_evaluation_inputs,
@@ -185,9 +185,13 @@ def install_package(self, package_name: str, version: str, evaluation_pid: uuid.
         logger.info(f"Successfully cached {package_name}=={version} and all dependencies")
     except Exception as e:
         logger.error(f"Failed to cache {package_name}=={version}: {e}", exc_info=True)
-        if evaluation_pid and evaluation_plugin_pids:
+        if evaluation_plugin_pids:
             for pid in evaluation_plugin_pids:
                 mark_plugin_failed(evaluation_pid, pid, str(e))
+        if evaluation_pid:
+            # Mark the eval failed here too: the link_error errback may not fire
+            # for chord/chain members, which would leave the eval Pending forever.
+            mark_failed(evaluation_pid)
         raise
 
 
@@ -224,6 +228,8 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
             evaluation_pid,
             [ep.pid for ep in pkg_info["plugins"]],
         )
+        # errback: chord body is skipped on task error, so this must mark the eval failed or it stays Pending forever.
+        install_sig.link_error(handle_error.s(evaluation_pid))
 
         plugin_chain_list = []
         for evaluation_plugin in pkg_info["plugins"]:
@@ -245,12 +251,15 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
                 evaluation_pid,
                 evaluation_plugin.pid,
             )
+            # errback: mark evaluation failed if run_plugin ever errors
+            run_plugin_sig.link_error(handle_error.s(evaluation_pid))
 
             # freeze to get a stable task id before dispatching
             run_plugin_sig.freeze()
             plugin_task_ids.append(str(run_plugin_sig.id))
 
             post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
+            post_measurements_sig.link_error(handle_error.s(evaluation_pid))
             plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
 
         package_chains.append(chain(install_sig, group(plugin_chain_list)))
@@ -267,7 +276,7 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     return {"evaluation_pid": evaluation_pid, "plugin_task_ids": plugin_task_ids}
 
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, base=StopAwareTask)
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
                input_components: list[dict], project_settings: list[dict],
                evaluation_pid: uuid.UUID,
@@ -307,36 +316,43 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
         input_mapping = {}
         llm_secret_settings = []
-        for component in input_components:
-            component_type = component["component_type"]
-            name = component["name"]
-            if component_type == "dataset":
-                file_content = get_dataset_file_content(component["data"])
-                relative_path = component["data"]
-            elif component_type == "model":
-                file_content = get_model_file_content(component["data"])
-                relative_path = component["data"]
-            elif component_type in {"datashape", "llm", "resource"}:
-                payload = dict(component.get("json_value") or {})
-                if component_type == "llm":
-                    run_model = (component.get("value") or {}).get("model")
-                    if run_model:
-                        payload["model"] = run_model
-                    if component.get("secret_key") and component.get("secret_encrypted_value"):
-                        llm_secret_settings.append({
-                            "category": "secrets",
-                            "key": component["secret_key"],
-                            "encrypted_value": component["secret_encrypted_value"],
-                        })
-                file_content = json.dumps(payload).encode("utf-8")
-                relative_path = f"{name}.json"
-            else:
-                raise ValueError(
-                    f"Unsupported component type: {component_type}"
-                )
+        try:
+            for component in input_components:
+                component_type = component["component_type"]
+                name = component["name"]
+                if component_type == "dataset":
+                    relative_path = component["data"]
+                    download_dataset_file(relative_path, input_dir / relative_path)
+                elif component_type == "model":
+                    relative_path = component["data"]
+                    download_model_file(relative_path, input_dir / relative_path)
+                elif component_type in {"datashape", "llm", "resource"}:
+                    payload = dict(component.get("json_value") or {})
+                    if component_type == "llm":
+                        run_model = (component.get("value") or {}).get("model")
+                        if run_model:
+                            payload["model"] = run_model
+                        if component.get("secret_key") and component.get("secret_encrypted_value"):
+                            llm_secret_settings.append({
+                                "category": "secrets",
+                                "key": component["secret_key"],
+                                "encrypted_value": component["secret_encrypted_value"],
+                            })
+                    file_content = json.dumps(payload).encode("utf-8")
+                    relative_path = f"{name}.json"
+                    (input_dir / relative_path).write_bytes(file_content)
+                else:
+                    raise ValueError(
+                        f"Unsupported component type: {component_type}"
+                    )
 
-            (input_dir / relative_path).write_bytes(file_content)
-            input_mapping[name] = relative_path
+                input_mapping[name] = relative_path
+        except Exception as exc:
+            _fail_plugin_and_revoke(
+                evaluation_pid, evaluation_plugin_pid,
+                str(exc) or exc.__class__.__name__, str(self.request.id)
+            )
+            raise
 
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
@@ -461,7 +477,10 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
 
             mark_plugin_finished(evaluation_pid, evaluation_plugin_pid)
             return measures
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
+            # SystemExit = revoked with terminate=True: kill the plugin's
+            # subprocess before the base task converts the abort to a
+            # serializable failure, otherwise it keeps running orphaned.
             _terminate_process(process)
             _fail_plugin_and_revoke(
                 evaluation_pid, evaluation_plugin_pid, str(exc) or exc.__class__.__name__, str(self.request.id)
