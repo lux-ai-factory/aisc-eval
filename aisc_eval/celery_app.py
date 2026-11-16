@@ -1,6 +1,9 @@
+import inspect
 import os
 
+from aisc_identity import logs
 from celery import Celery
+from celery.signals import task_postrun, task_prerun
 
 from aisc_eval.utils import env
 from aisc_eval.utils.logging import get_logger
@@ -58,3 +61,19 @@ if env.MQ_USE_SSL:
 celery_app.conf.update(celery_config)
 
 logger.debug("=== CELERY CONFIGURATION COMPLETED ===")
+
+
+@task_prerun.connect
+def _name_the_run_in_log_lines(task=None, args=(), kwargs=None, **_) -> None:
+    """Every line a task logs names the run (evaluation pid) it serves, when its arguments name one."""
+    try:
+        arguments = inspect.signature(task.run).bind_partial(*(args or ()), **(kwargs or {})).arguments
+    except (TypeError, ValueError, AttributeError):
+        arguments = {}
+    pid = arguments.get("evaluation_pid")
+    logs.evaluation_pid.set(str(pid) if pid is not None else None)
+
+
+@task_postrun.connect
+def _clear_the_run_in_log_lines(**_) -> None:
+    logs.evaluation_pid.set(None)

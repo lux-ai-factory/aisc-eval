@@ -10,14 +10,22 @@ formatters:
     (): aisc_eval.utils.logging.ColoredFormatter
     format: "%(asctime)s: [%(colored_levelname)-17s]: %(message)s"
     datefmt: "%Y-%m-%dT%H:%M:%S%z"
+  json:
+    (): aisc_identity.logs.JsonFormatter
+    service: eval
+filters:
+  ids:
+    (): aisc_identity.logs.KeepIds
 handlers:
   stdout:
     class: logging.StreamHandler
     level: DEBUG
-    formatter: colored
+    formatter: json
     stream: ext://sys.stdout
   queue_handler:
     class: logging.handlers.QueueHandler
+    filters:
+      - ids
     handlers:
       - stdout
     respect_handler_level: true
