@@ -1,8 +1,8 @@
 # ---- Node, for the promptfoo CLI plugins run (promptfoo's engines ask for Node >= 22.22.0) ----
-FROM node:22.22.0-bookworm-slim AS node
+FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS node
 
 # ---- Base ----
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS base
+FROM ghcr.io/astral-sh/uv:0.9.30-python3.12-bookworm-slim@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 AS base
 
 # Install system dependencies for production
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,8 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --upgrade-package aisc-plugin-manager \
-        --no-dev
+    uv sync --frozen --no-dev
 
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs && \
