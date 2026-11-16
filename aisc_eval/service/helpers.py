@@ -11,7 +11,7 @@ import os
 import re
 from urllib.parse import quote
 
-import requests
+from aisc_service_client import ServiceClient, ServiceError
 
 from aisc_eval.utils.logging import get_logger
 
@@ -76,15 +76,13 @@ def resolve_helper(ref: str, run_project: str | None) -> dict:
     if not base or not token:
         raise HelperUnavailable(DID_NOT_ANSWER)
     try:
-        resp = requests.get(
-            f"{base}/internal/projects/{quote(project, safe='')}/helpers/{quote(name, safe='')}/resolve",
+        resp = ServiceClient(base, timeout=30, service="the platform").get(
+            f"/internal/projects/{quote(project, safe='')}/helpers/{quote(name, safe='')}/resolve",
             # the platform refuses a helper of another project than the run's
             headers={"X-AISC-Service-Token": token, "X-AISC-Project": str(run_project)},
-            timeout=30,
-            allow_redirects=False,
         )
-    except requests.RequestException as exc:
-        logger.warning(f"Could not resolve a helper ({exc.__class__.__name__})")
+    except ServiceError as exc:
+        logger.warning(f"Could not resolve a helper ({exc.cause})")
         raise HelperUnavailable(DID_NOT_ANSWER) from None
     if resp.status_code in (404, 409):
         try:

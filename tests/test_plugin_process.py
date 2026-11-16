@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 
+import http_fake
 import pytest
 
 from aisc_eval import celery_tasks, egress, plugin_process
@@ -449,9 +450,7 @@ def platform(monkeypatch):
             raise seen["trace"]
         return seen["trace"]
 
-    monkeypatch.setattr(celery_tasks.run_pass.requests, "post", post)
-    monkeypatch.setattr(celery_tasks.run_pass.requests, "delete", delete)
-    monkeypatch.setattr(celery_tasks.run_pass.requests, "get", get)
+    http_fake.route(monkeypatch, post=post, delete=delete, get=get)
     token = run_context._current.set(
         {"project": PROJECT, "evaluation": "eval", "ticket": "t"}
     )
@@ -542,9 +541,9 @@ def test_the_pass_is_revoked_also_when_the_plugin_fails(worker, platform, monkey
 
 def test_a_failed_revoke_does_not_fail_the_run(worker, platform, monkeypatch):
     def unreachable(*args, **kwargs):
-        raise celery_tasks.run_pass.requests.ConnectionError("down")
+        raise http_fake.unreachable("down")
 
-    monkeypatch.setattr(celery_tasks.run_pass.requests, "delete", unreachable)
+    http_fake.route(monkeypatch, delete=unreachable)
     assert _run_with([_resource("target", TARGET)]) == json.loads(ONE_MEASURE)
     assert worker["failed"] == []
 
@@ -581,7 +580,7 @@ def test_the_runs_calls_are_kept_also_when_the_plugin_fails(
 
 
 def test_a_trace_the_platform_cannot_give_does_not_change_the_run(worker, platform):
-    platform["trace"] = celery_tasks.run_pass.requests.ConnectionError("down")
+    platform["trace"] = http_fake.unreachable("down")
     assert _run_with([_resource("target", TARGET)]) == json.loads(ONE_MEASURE)
     assert worker["failed"] == [] and TRACE_FILE not in worker["uploads"]
     assert platform["calls"][-1][0] == "DELETE"

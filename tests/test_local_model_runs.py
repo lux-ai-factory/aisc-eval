@@ -10,6 +10,7 @@ can record which connection served the run.
 import hashlib
 import json
 
+import http_fake
 import pytest
 import requests
 
@@ -214,24 +215,29 @@ def test_a_card_run_mints_its_pass_for_its_evaluation_plugin(run):
 
 
 def test_the_marker_is_stored_through_the_backends_internal_api(monkeypatch):
+    from aisc_service_client import ServiceRefused
+
     from aisc_eval.service import api_client
 
     calls = []
 
     class Answer:
-        def raise_for_status(self):
-            calls.append("checked")
+        status_code = 200
 
     def patch(url, json=None, headers=None, **kwargs):
         calls.append((url, json))
-        return Answer()
+        return answer
 
-    monkeypatch.setattr(api_client.requests, "patch", patch)
+    answer = Answer()
+    http_fake.route(monkeypatch, patch=patch)
     api_client.store_input_value("eval", "input-1", MARKER)
     assert calls == [
         (
             f"{api_client.API_URL_PREFIX}/evaluations/eval/inputs/input-1/value",
             {"value": MARKER},
         ),
-        "checked",
     ]
+    # the answer is checked: a refusal raises
+    answer.status_code = 500
+    with pytest.raises(ServiceRefused):
+        api_client.store_input_value("eval", "input-1", MARKER)

@@ -16,7 +16,7 @@ import json
 import types
 
 import pytest
-import requests
+from aisc_service_client import ServiceRefused
 
 from aisc_eval import celery_tasks, plugin_process
 
@@ -97,7 +97,7 @@ def test_a_test_the_engine_refuses_to_start_never_starts_its_plugin(worker, monk
     worker["leave"] = lambda output: (output / "measures.json").write_text(ONE_MEASURE)
 
     def refused(*a):
-        raise requests.HTTPError("409", response=types.SimpleNamespace(status_code=409))
+        raise ServiceRefused(409, response=types.SimpleNamespace(status_code=409))
 
     monkeypatch.setattr(celery_tasks, "mark_plugin_started", refused)
     ended = _ends(_run)
@@ -112,7 +112,7 @@ def test_a_refused_start_still_revokes_its_pass(worker, monkeypatch):
     monkeypatch.setattr(celery_tasks.run_pass, "revoke", lambda run_pass, run=None: revoked_passes.append(run_pass))
 
     def refused(*a):
-        raise requests.HTTPError("409", response=types.SimpleNamespace(status_code=409))
+        raise ServiceRefused(409, response=types.SimpleNamespace(status_code=409))
 
     monkeypatch.setattr(celery_tasks, "mark_plugin_started", refused)
     _ends(lambda: _run_with([_resource("target", TARGET)]))
@@ -138,7 +138,7 @@ def test_a_skipped_test_posts_no_measures(broker, monkeypatch):
 
 def test_measures_already_recorded_are_not_a_failure(broker, monkeypatch):
     def already(*a):
-        raise requests.HTTPError("409", response=types.SimpleNamespace(status_code=409))
+        raise ServiceRefused(409, response=types.SimpleNamespace(status_code=409))
 
     monkeypatch.setattr(celery_tasks, "post_measures", already)
     _ends(lambda: celery_tasks.post_measurements.run([{"name": "score", "score": 1.0}], EVALUATION, FAILING))

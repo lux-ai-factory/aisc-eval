@@ -31,6 +31,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import http_fake
 import pytest
 import requests
 from celery import canvas
@@ -137,14 +138,15 @@ class FakeBackend:
 @pytest.fixture
 def backend(monkeypatch):
     fake = FakeBackend()
-    for verb in ("get", "post", "put", "patch", "delete"):
-        monkeypatch.setattr(
-            requests,
-            verb,
-            (lambda method: (lambda url, *a, **kw: fake.handle(method, url, **kw)))(
+    http_fake.route(
+        monkeypatch,
+        **{
+            verb: (lambda method: (lambda url, *a, **kw: fake.handle(method, url, **kw)))(
                 verb.upper()
-            ),
-        )
+            )
+            for verb in ("get", "post", "put", "patch", "delete")
+        },
+    )
     return fake
 
 

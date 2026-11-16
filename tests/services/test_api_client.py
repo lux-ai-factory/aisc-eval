@@ -1,8 +1,13 @@
+import sys
 import uuid
+from pathlib import Path
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import http_fake  # noqa: E402
 
 from aisc_eval.service.api_client import get_evaluation, mark_failed
 
@@ -21,12 +26,12 @@ def mock_evaluation_data() -> dict[str, Any]:
     }
 
 
-def test_get_evaluation(mock_evaluation_data: dict[str, Any]) -> None:
+def test_get_evaluation(mock_evaluation_data: dict[str, Any], monkeypatch) -> None:
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = mock_evaluation_data
-    with patch("requests.get", return_value=mock_response):
-        evaluation = get_evaluation(TEST_UUIDS["evaluation"])
+    http_fake.route(monkeypatch, get=Mock(return_value=mock_response))
+    evaluation = get_evaluation(TEST_UUIDS["evaluation"])
 
     assert evaluation.pid == TEST_UUIDS["evaluation"]
     assert evaluation.project.pid == TEST_UUIDS["project"]
@@ -34,11 +39,12 @@ def test_get_evaluation(mock_evaluation_data: dict[str, Any]) -> None:
     assert evaluation.evaluation_plugins == []
 
 
-def test_mark_failed_sends_one_status_update_in_the_query_string() -> None:
+def test_mark_failed_sends_one_status_update_in_the_query_string(monkeypatch) -> None:
     mock_response = Mock()
-    mock_response.ok = True
-    with patch("requests.put", return_value=mock_response) as put:
-        mark_failed(TEST_UUIDS["evaluation"])
+    mock_response.status_code = 200
+    put = Mock(return_value=mock_response)
+    http_fake.route(monkeypatch, put=put)
+    mark_failed(TEST_UUIDS["evaluation"])
 
     put.assert_called_once()
     assert put.call_args.args[0].endswith(

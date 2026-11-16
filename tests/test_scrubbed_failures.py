@@ -5,6 +5,7 @@ The run is faked as test_plugin_process.py fakes it."""
 import importlib
 from pathlib import Path
 
+import http_fake
 import pytest
 
 from aisc_eval import celery_tasks, plugin_process
@@ -158,7 +159,7 @@ def test_the_api_client_sends_the_failure_text_scrubbed(monkeypatch):
         sent.append(json)
         return _Answer()
 
-    monkeypatch.setattr(api_client.requests, "patch", patch)
+    http_fake.route(monkeypatch, patch=patch)
     api_client.mark_plugin_failed("e", "p", "x Bearer abcDEF0123456789ghi")
     assert sent == [{"error_message": "x [redacted]"}]
 

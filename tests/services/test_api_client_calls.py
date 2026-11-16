@@ -2,13 +2,18 @@
 names the answer's status (and the backend's reason, when it gives one), never the backend's address. Marking
 a test failed is the exception: it is the last report of a failure, so a refusal of it is only logged."""
 
+import sys
 import uuid
+from pathlib import Path
 
 import pytest
-import requests
 from aisc_plugin_interface.models.measure import Measure
+from aisc_service_client import ServiceRefused
 
 from aisc_eval.service import api_client
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import http_fake  # noqa: E402
 
 EVALUATION = uuid.UUID("afb49e3f-813d-4260-9919-ee179d1090e6")
 PLUGIN_RUN = uuid.UUID("f29a97fb-b0b7-476e-a07e-da60741fc6e9")
@@ -26,24 +31,20 @@ class _Answer:
     def json(self):
         return self._body
 
-    def raise_for_status(self):
-        if not self.ok:
-            raise requests.HTTPError(
-                f"{self.status_code} for url: {api_client.API_URL_PREFIX}/x"
-            )
-
 
 @pytest.fixture
 def backend(monkeypatch):
-    """requests' verbs, recording the keyword arguments of each call; answers with seen['answer']."""
+    """The client's verbs, recording the keyword arguments of each call; answers with seen['answer']."""
     seen = {"calls": [], "answer": _Answer()}
+    verbs = {}
     for verb in ("get", "put", "patch", "post"):
 
         def call(url, _verb=verb, **kwargs):
             seen["calls"].append((_verb, url, kwargs))
             return seen["answer"]
 
-        monkeypatch.setattr(api_client.requests, verb, call)
+        verbs[verb] = call
+    http_fake.route(monkeypatch, **verbs)
     return seen
 
 
@@ -83,13 +84,13 @@ CALLS = {
 def test_every_call_gives_up_in_time(backend, name):
     CALLS[name]()
     [(_verb, _url, kwargs)] = backend["calls"]
-    assert kwargs["timeout"] == api_client.TIMEOUT
+    assert kwargs["timeout"] == http_fake.timeout_of(api_client.TIMEOUT)
 
 
 def test_posting_measures_gives_up_in_time(backend):
     backend["answer"] = _Answer(201)
     api_client.post_measures(EVALUATION, PLUGIN_RUN, [Measure(name="m", score=1.0)])
-    assert backend["calls"][0][2]["timeout"] == api_client.TIMEOUT
+    assert backend["calls"][0][2]["timeout"] == http_fake.timeout_of(api_client.TIMEOUT)
 
 
 @pytest.mark.parametrize(
@@ -105,7 +106,7 @@ def test_a_refused_report_is_an_error_with_its_status_and_not_the_backends_addre
     backend, name
 ):
     backend["answer"] = _Answer(503, {"detail": "the engine is restarting"})
-    with pytest.raises(requests.HTTPError) as refused:
+    with pytest.raises(ServiceRefused) as refused:
         CALLS[name]()
     assert (
         str(refused.value) == "the backend answered HTTP 503: the engine is restarting"
@@ -116,26 +117,26 @@ def test_a_refused_report_is_an_error_with_its_status_and_not_the_backends_addre
 
 def test_a_refused_read_does_not_name_the_backends_address(backend):
     backend["answer"] = _Answer(404, ["not", "a", "detail"])
-    with pytest.raises(requests.HTTPError) as refused:
+    with pytest.raises(ServiceRefused) as refused:
         api_client.get_dataset_file_content("d.csv")
     assert str(refused.value) == "the backend answered HTTP 404"
 
 
 def test_refused_measures_say_why(backend):
     backend["answer"] = _Answer(400, {"detail": "name too long"})
-    with pytest.raises(requests.HTTPError, match="HTTP 400: name too long"):
+    with pytest.raises(ServiceRefused, match="HTTP 400: name too long"):
         api_client.post_measures(EVALUATION, PLUGIN_RUN, [Measure(name="m", score=1.0)])
 
 
 def test_a_refused_failure_mark_raises(backend):
     """Only logged, it would leave the test Running and its run Pending with no reason."""
     backend["answer"] = _Answer(500)
-    with pytest.raises(requests.HTTPError):
+    with pytest.raises(ServiceRefused):
         api_client.mark_plugin_failed(EVALUATION, PLUGIN_RUN, "x")
 
 
 def test_a_refusal_chains_nothing_that_names_the_backends_address(backend):
     backend["answer"] = _Answer(500)
-    with pytest.raises(requests.HTTPError) as refused:
+    with pytest.raises(ServiceRefused) as refused:
         api_client.mark_completed(EVALUATION)
     assert refused.value.__context__ is None and refused.value.__cause__ is None
