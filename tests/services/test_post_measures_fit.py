@@ -6,6 +6,7 @@ they are."""
 import uuid
 from unittest.mock import Mock, patch
 
+import httpx
 from aisc_plugin_interface.models.measure import Measure
 
 from aisc_eval.service.api_client import post_measures
@@ -15,9 +16,11 @@ PLUGIN_RUN = uuid.UUID("f29a97fb-b0b7-476e-a07e-da60741fc6e9")
 
 
 def posted(measures):
-    with patch(
-        "requests.post", return_value=Mock(status_code=201, headers={}, text="")
-    ) as post:
+    post = Mock(return_value=Mock(status_code=201, headers={}, text=""))
+    # every call of the service client: the one POST of the measures
+    with patch.object(
+        httpx.Client, "request", lambda self, method, url, **kw: post(url, **kw)
+    ):
         post_measures(EVALUATION, PLUGIN_RUN, measures)
     return post.call_args.kwargs["json"][str(PLUGIN_RUN)]
 

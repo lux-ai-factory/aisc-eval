@@ -4,8 +4,8 @@ from collections.abc import Callable
 from time import sleep
 from typing import Any
 
-import requests
 from aisc_plugin_interface import Measure
+from aisc_service_client import Response, ServiceClient, ServiceUnreachable
 
 from aisc_eval import deployment, run_context
 from aisc_eval.scrub import scrub_text
@@ -25,16 +25,21 @@ RETRY_WAITS = (1, 2, 4, 8, 16)
 BACKEND_RESTARTING = (502, 503, 504)
 
 
+def _backend() -> ServiceClient:
+    """The backend, called with full URLs (API_URL_PREFIX); TIMEOUT on every call."""
+    return ServiceClient(API_URL_PREFIX, timeout=TIMEOUT, service="the backend")
+
+
 def _with_retries(
-    call: Callable[[], requests.Response], retry_statuses: tuple[int, ...] = ()
-) -> requests.Response:
+    call: Callable[[], Response], retry_statuses: tuple[int, ...] = ()
+) -> Response:
     """`call`, tried again after each of RETRY_WAITS while the backend cannot be reached, or answers one of
     `retry_statuses`. Any other answer, even a refusal, is returned as it is: the backend has said no, and asking
     again would change nothing."""
     for wait in RETRY_WAITS:
         try:
             resp = call()
-        except requests.ConnectionError:
+        except ServiceUnreachable:
             sleep(wait)
             continue
         if not retry_statuses or resp.status_code not in retry_statuses:
@@ -67,49 +72,31 @@ def headers(run: dict[str, str] | None = None) -> dict[str, str | None]:
     return found
 
 
-def _refusal(resp: requests.Response) -> requests.HTTPError:
-    """The error for a refused call: its status and the backend's reason, never its address."""
-    text = f"the backend answered HTTP {resp.status_code}"
-    try:
-        detail = resp.json().get("detail")
-    except (ValueError, AttributeError):
-        detail = None
-    if isinstance(detail, str) and detail:
-        text += f": {detail[:300]}"
-    return requests.HTTPError(text, response=resp)
-
-
 def _send(
     method: str, url: str, retry_statuses: tuple[int, ...] = (), **kwargs: Any
-) -> requests.Response:
-    """One call to the backend with the internal headers, given up after TIMEOUT; a refusal raises."""
+) -> Response:
+    """One call to the backend with the internal headers, given up after TIMEOUT; a refusal raises
+    ServiceRefused with its status and the backend's reason, never its address."""
+    backend = _backend()
     resp = _with_retries(
-        lambda: getattr(requests, method)(url, headers=headers(), timeout=TIMEOUT, **kwargs),
+        lambda: backend.request(method.upper(), url, headers=headers(), **kwargs),
         retry_statuses,
     )
-    try:
-        resp.raise_for_status()
-    except requests.HTTPError:
-        pass
-    else:
-        return resp
-    # raised outside the except: requests' own error names the URL, the backend's address, and is not chained
-    raise _refusal(resp)
+    return backend.checked(resp)
 
 
 def get_project_settings_by_pid(
     project_pid: uuid.UUID, project_config_selections: list[dict]
 ) -> list[dict]:
+    backend = _backend()
     resp = _with_retries(
-        lambda: requests.post(
+        lambda: backend.post(
             f"{API_URL_PREFIX}/projects/settings/{project_pid}/by-pid",
             json={"project_config_selections": project_config_selections},
             headers=headers(),
-            timeout=TIMEOUT,
         )
     )
-    resp.raise_for_status()
-    return resp.json()
+    return backend.checked(resp).json()
 
 
 def get_evaluation_plugins_status(evaluation_pid: uuid.UUID) -> dict:
@@ -119,7 +106,7 @@ def get_evaluation_plugins_status(evaluation_pid: uuid.UUID) -> dict:
     ).json()
 
 
-def mark_completed(evaluation_pid: uuid.UUID) -> requests.Response:
+def mark_completed(evaluation_pid: uuid.UUID) -> Response:
     return _send("put", f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Done")
 
 
@@ -133,14 +120,13 @@ def mark_processing(evaluation_pid: uuid.UUID) -> str:
 
 def mark_failed(evaluation_pid: uuid.UUID) -> None:
     resp = _with_retries(
-        lambda: requests.put(
+        lambda: _backend().put(
             f"{API_URL_PREFIX}/evaluations/{evaluation_pid}?status=Failed",
             headers=headers(),
-            timeout=TIMEOUT,
         ),
         BACKEND_RESTARTING,
     )
-    if not resp.ok:
+    if resp.status_code >= 400:
         logger.warning(
             f"Failed to mark evaluation {evaluation_pid} as failed: {resp.text}"
         )
@@ -182,15 +168,11 @@ def mark_plugin_finished(
 
 
 def get_dataset_file_content(file_name: str) -> bytes:
-    return _send(
-        "get", f"{API_URL_PREFIX}/files/dataset/{file_name}", stream=True
-    ).content
+    return _send("get", f"{API_URL_PREFIX}/files/dataset/{file_name}").content
 
 
 def get_model_file_content(file_name: str) -> bytes:
-    return _send(
-        "get", f"{API_URL_PREFIX}/files/model/{file_name}", stream=True
-    ).content
+    return _send("get", f"{API_URL_PREFIX}/files/model/{file_name}").content
 
 
 def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
@@ -200,15 +182,14 @@ def get_evaluation_request(evaluation_pid: uuid.UUID) -> dict[str, Any]:
 
 
 def get_evaluation_inputs(evaluation_pid: uuid.UUID) -> dict[str, Any]:
+    backend = _backend()
     resp = _with_retries(
-        lambda: requests.get(
+        lambda: backend.get(
             f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/inputs",
             headers=headers(),
-            timeout=TIMEOUT,
         )
     )
-    resp.raise_for_status()
-    return resp.json()
+    return backend.checked(resp).json()
 
 
 def store_input_value(
@@ -258,7 +239,7 @@ def fit_measure(measure: dict[str, Any]) -> dict[str, Any]:
 
 def post_measures(
     evaluation_pid: uuid.UUID, evaluation_plugin_uuid: uuid.UUID, metrics: list[Measure]
-) -> requests.Response:
+) -> Response:
     logger.debug(
         f"post_metrics called with {len(metrics)} metrics for evaluation {evaluation_pid}"
     )
@@ -292,7 +273,7 @@ def upload_artifact(
     name: str,
     content: bytes,
     holds_conversation: bool = False,
-) -> requests.Response:
+) -> Response:
     """Upload one of the run's files. `holds_conversation`: it holds the run's conversation with the system under
     test, so the engine shows it to the project's owners and editors only."""
     url = f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/artifacts"

@@ -4,6 +4,8 @@ shows them to the project's owners and editors only. Any other file goes unmarke
 own name rule)."""
 import uuid
 
+import http_fake
+
 from aisc_eval import celery_tasks
 from aisc_eval.service import api_client
 
@@ -23,8 +25,7 @@ class _Ok:
 
 def _sent_forms(monkeypatch):
     sent = []
-    monkeypatch.setattr(api_client.requests, "post",
-                        lambda url, data=None, files=None, **k: sent.append(data or {}) or _Ok())
+    http_fake.route(monkeypatch, post=lambda url, data=None, files=None, **k: sent.append(data or {}) or _Ok())
     return sent
 
 

@@ -6,11 +6,10 @@ import json
 import logging
 import socket
 
+import http_fake
 import pytest
-import requests
 
 from aisc_eval import celery_tasks, plugin_process
-from aisc_eval.service import helpers
 from aisc_plugin_interface import BaseEvaluationPlugin, HelperModel, helper_model
 from test_plugin_process import ONE_MEASURE, PROJECT, _Answer, platform, worker  # noqa: F401  (fixtures)
 from recorded_pins import recorded_pins
@@ -66,7 +65,7 @@ def run(worker, platform, monkeypatch):  # noqa: F811
         seen["urls"].append((url, dict(headers or {})))
         return seen["resolve"]
 
-    monkeypatch.setattr(helpers.requests, "get", get)
+    http_fake.route(monkeypatch, get=get)
     monkeypatch.setattr(celery_tasks, "decrypt_value", lambda value: KEY)
     real_install = plugin_process.run_install
     monkeypatch.setattr(
@@ -169,9 +168,9 @@ def test_any_other_answer_says_the_platform_did_not_answer(run, status):
 
 def test_an_unreachable_platform_says_so_without_its_address(run, monkeypatch):
     def down(*_args, **_kwargs):
-        raise requests.ConnectionError("http://platform:8000 refused")
+        raise http_fake.unreachable("http://platform:8000 refused")
 
-    monkeypatch.setattr(helpers.requests, "get", down)
+    http_fake.route(monkeypatch, get=down)
     with pytest.raises(RuntimeError, match="the platform did not answer") as raised:
         run["go"]([_helper_input()])
     assert "platform:8000" not in str(raised.value)

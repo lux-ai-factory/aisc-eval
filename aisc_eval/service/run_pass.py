@@ -9,7 +9,7 @@ PLATFORM_RUN_PASS, and the worker revokes it when the plugin has ended (it also 
 import os
 from collections.abc import Iterable
 
-import requests
+from aisc_service_client import ServiceClient, ServiceError
 
 from aisc_eval.utils.logging import get_logger
 
@@ -38,6 +38,10 @@ def _platform_url() -> str:
     return (os.environ.get("PLATFORM_URL") or "").rstrip("/")
 
 
+def _platform(timeout: float) -> ServiceClient:
+    return ServiceClient(_platform_url(), timeout=timeout, service="the platform")
+
+
 def mint(
     refs: list[str],
     evaluation_plugin_uuid: str,
@@ -64,16 +68,14 @@ def mint(
         }
         if ttl_s is not None:
             body["ttl_s"] = ttl_s
-        resp = requests.post(
-            f"{base}/internal/run-passes",
+        resp = _platform(30).post(
+            "/internal/run-passes",
             json=body,
             headers={"X-AISC-Service-Token": token},
-            timeout=30,
-            allow_redirects=False,
         )
-    except requests.RequestException as exc:
+    except ServiceError as exc:
         raise RunPassRefused(
-            f"no run pass: the platform could not be reached ({exc.__class__.__name__})"
+            f"no run pass: the platform could not be reached ({exc.cause})"
         ) from None
     if resp.status_code != 201:
         raise RunPassRefused(
@@ -93,15 +95,13 @@ def trace(run_pass: str) -> bytes | None:
     seal), read with the run's pass before it is revoked. None when the platform cannot give them; the
     platform keeps them anyway, so a failure here is only logged."""
     try:
-        resp = requests.get(
-            f"{_platform_url()}/internal/run-passes/trace",
+        resp = _platform(60).get(
+            "/internal/run-passes/trace",
             headers={"X-AISC-Run-Pass": run_pass},
-            timeout=60,
-            allow_redirects=False,
         )
-    except requests.RequestException as exc:
+    except ServiceError as exc:
         logger.warning(
-            f"Could not read the run's calls from the platform ({exc.__class__.__name__}); they stay in its trace"
+            f"Could not read the run's calls from the platform ({exc.cause}); they stay in its trace"
         )
         return None
     if resp.status_code != 200:
@@ -124,17 +124,12 @@ def revoke(run_pass: str, run: dict | None = None) -> None:
         if (run or {}).get(key):
             headers[header] = str(run[key])
     try:
-        resp = requests.delete(
-            f"{_platform_url()}/internal/run-passes",
-            headers=headers,
-            timeout=30,
-            allow_redirects=False,
-        )
+        resp = _platform(30).delete("/internal/run-passes", headers=headers)
         if not 200 <= resp.status_code < 300:
             logger.warning(
                 f"The platform did not revoke a run pass ({resp.status_code}); it expires on its own"
             )
-    except requests.RequestException as exc:
+    except ServiceError as exc:
         logger.warning(
-            f"Could not revoke a run pass ({exc.__class__.__name__}); it expires on its own"
+            f"Could not revoke a run pass ({exc.cause}); it expires on its own"
         )

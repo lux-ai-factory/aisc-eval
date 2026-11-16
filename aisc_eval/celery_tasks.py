@@ -15,7 +15,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
-import requests
+from aisc_service_client import ServiceRefused
 from celery import group, chain
 
 from aisc_eval import egress, plugin_process, run_registry
@@ -759,7 +759,7 @@ class RunReporter:
                 mark_plugin_started(self.evaluation_pid, self.test_pid)
             else:
                 mark_plugin_started(self.evaluation_pid, self.test_pid, code)
-        except requests.HTTPError as exc:
+        except ServiceRefused as exc:
             if _status_of(exc) == 409:
                 raise StartRefused(
                     f"the engine refused the start of test {self.test_pid}"
@@ -1418,7 +1418,7 @@ def post_measurements(
         measurements = [Measure(**m) for m in measurements_dict]
         post_measures(evaluation_pid, evaluation_plugin_uuid, measurements)
     except Exception as e:
-        if isinstance(e, requests.HTTPError) and _status_of(e) == 409:
+        if isinstance(e, ServiceRefused) and _status_of(e) == 409:
             # a second delivery of this post: the engine already has the test's measures
             logger.warning(
                 f"Measures of test {evaluation_plugin_uuid} were already recorded: not posted again"

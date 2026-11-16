@@ -9,8 +9,9 @@ Processing and learns the run's actual status. A test is never failed without a 
 
 import inspect
 
+import http_fake
 import pytest
-import requests
+from aisc_service_client import ServiceRefused, ServiceUnreachable
 
 from aisc_eval.service import api_client
 
@@ -24,10 +25,6 @@ class _Answer:
 
     def json(self):
         return self.text
-
-    def raise_for_status(self):
-        if not self.ok:
-            raise requests.HTTPError(f"{self.status_code}", response=self)
 
 
 def ok(text="ok"):
@@ -61,50 +58,49 @@ def calls(monkeypatch):
 
         return call
 
-    for name in ("put", "patch", "get", "post"):
-        monkeypatch.setattr(api_client.requests, name, method(name))
+    http_fake.route(monkeypatch, **{name: method(name) for name in ("put", "patch", "get", "post")})
     monkeypatch.setattr(api_client, "sleep", seen.sleeps.append, raising=False)
     return seen
 
 
 def test_a_callback_retries_when_the_backend_cannot_be_reached(calls):
-    calls.put = [requests.ConnectionError("refused"), requests.ConnectionError("refused"), ok("Done")]
+    calls.put = [http_fake.unreachable("refused"), http_fake.unreachable("refused"), ok("Done")]
     try:
         api_client.mark_completed("e1")
-    except requests.ConnectionError:
+    except ServiceUnreachable:
         pass
     assert calls.sleeps == [1, 2]
 
 
 def test_a_callback_gives_up_after_its_last_wait(calls):
     waits = getattr(api_client, "RETRY_WAITS", (1, 2, 4, 8, 16))
-    calls.put = [requests.ConnectionError("refused")] * (len(waits) + 1)
-    with pytest.raises(requests.ConnectionError):
+    calls.put = [http_fake.unreachable("refused")] * (len(waits) + 1)
+    with pytest.raises(ServiceUnreachable):
         api_client.mark_completed("e1")
     assert calls.sleeps == list(waits)
 
 
 def test_a_refusal_is_not_retried(calls):
     calls.put = [refused(500)]
-    with pytest.raises(requests.HTTPError):
+    with pytest.raises(ServiceRefused):
         api_client.mark_completed("e1")
     assert calls.sleeps == []
 
 
 def test_the_failure_marks_retry_too(calls):
-    calls.put = [requests.ConnectionError("x"), ok("Failed")]
-    calls.patch = [requests.ConnectionError("x"), ok("ok")]
+    calls.put = [http_fake.unreachable("x"), ok("Failed")]
+    calls.patch = [http_fake.unreachable("x"), ok("ok")]
     try:
         api_client.mark_failed("e1")
         api_client.mark_plugin_failed("e1", "ep", "boom")
-    except requests.ConnectionError:
+    except ServiceUnreachable:
         pass
     assert calls.sleeps == [1, 1]
 
 
 def test_a_refused_fail_mark_is_not_only_logged(calls):
     calls.patch = [refused(500)]
-    with pytest.raises(requests.HTTPError):
+    with pytest.raises(ServiceRefused):
         api_client.mark_plugin_failed("e1", "ep", "boom")
 
 
@@ -113,7 +109,7 @@ def test_a_fail_mark_refused_while_the_backend_restarts_is_tried_again(calls, st
     calls.patch = [refused(status), ok("ok")]
     try:
         api_client.mark_plugin_failed("e1", "ep", "boom")
-    except requests.HTTPError:
+    except ServiceRefused:
         pass
     assert len(calls.urls) == 2, "the test stays Running: its failure was sent once and refused"
 
