@@ -31,8 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --upgrade-package aisc-plugin-manager \
-        --no-dev
+    uv sync --frozen --no-dev
 
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs && \
