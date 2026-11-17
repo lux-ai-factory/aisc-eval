@@ -353,6 +353,23 @@ class Pins:
 
 #: the hashed lock of a plugin's dependencies, next to its venv
 LOCK_FILE = "requirements.lock"
+#: a catalogue plugin and its dependencies are resolved and installed from wheels only, so no build code runs at
+#: install time (building is the publisher's job); a local plugin, the operator's own code, keeps source builds
+WHEELS_ONLY = ["--only-binary", ":all:"]
+
+
+def _wheels_only(plugin_info: Mapping[str, Any]) -> list[str]:
+    return [] if plugin_info["source"] == "local" else list(WHEELS_ONLY)
+
+
+def _failure(step: str, stderr: str | None, plugin_info: Mapping[str, Any]) -> "InstallFailed":
+    """A failed step's scrubbed message; for a catalogue plugin refused a source build, said plainly first (uv's
+    own message names the package that has no wheel)."""
+    text = scrub_text(stderr or "")
+    if plugin_info["source"] != "local" and "building from source is disabled" in text:
+        text = ("a catalogue plugin installs from wheels only, and a package it needs has no wheel on the index "
+                f"(the publisher must provide one): {text}")
+    return InstallFailed(step, text)
 
 
 def _canonical(name: str) -> str:
@@ -418,13 +435,14 @@ def lock_dependencies(
         "--python-version",
         "3.12",
         "--quiet",
+        *_wheels_only(plugin_info),
     ]
     if index_url:
         argv.extend(["--extra-index-url", index_url])
     argv.extend([str(requirements), "-o", str(out)])
     compiled = run_install(argv, installer, timeout=INSTALL_TIMEOUT)
     if compiled.returncode != 0:
-        raise InstallFailed("lock", scrub_text(compiled.stderr or ""))
+        raise _failure("lock", compiled.stderr, plugin_info)
     lock = out.read_text()
     if not local and wheel_sha256.lower() not in locked_hashes(
         lock, package_name, version
@@ -493,7 +511,7 @@ def build_venv(
     # under the index for an offline resolver. The index is always passed: a probe of it was slow
     # (its root lists the whole PyPI mirror) and dropped it on a timeout, so a catalogue plugin was
     # "not found"; when it is down, uv says so.
-    install_cmd = ["uv", "pip", "install", "--python", str(venv)]
+    install_cmd = ["uv", "pip", "install", "--python", str(venv), *_wheels_only(plugin_info)]
     if pins is not None:
         lock = folder / LOCK_FILE
         lock.write_text(pins.lock)
@@ -507,7 +525,7 @@ def build_venv(
         install_cmd.append(install_target)
     installed = run_install(install_cmd, installer, timeout=INSTALL_TIMEOUT)
     if installed.returncode != 0:
-        text = scrub_text(installed.stderr or "")
+        text = str(_failure("install", installed.stderr, plugin_info))
         if pins is not None and "hash" in text.lower():
             # --require-hashes refused a file whose hash the lock does not list
             text = (

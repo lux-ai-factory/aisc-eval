@@ -256,6 +256,9 @@ def test_a_venv_is_made_then_filled_from_the_index(monkeypatch, tmp_path):
         "install",
         "--python",
         str(tmp_path / "venv"),
+        # a catalogue plugin installs from wheels only
+        "--only-binary",
+        ":all:",
         "--extra-index-url",
         "http://devpi/simple",
         "pkg==1.0",

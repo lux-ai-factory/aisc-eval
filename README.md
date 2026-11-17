@@ -197,7 +197,9 @@ Please do not push your local changes, except if necessary. For instance, DEBUG 
   Task signatures are as on master.
 - **Plugin installs**: each run installs its plugin only from the hashes the engine recorded for it and sends
   with the task (`pins`: the wheel's sha256 and the hashed lock of its dependencies), with `--require-hashes
-  --no-deps`, online from the package index (no `--offline`). A catalogue plugin without them, or whose lock
+  --no-deps`, online from the package index (no `--offline`). A catalogue plugin and its dependencies are locked and
+  installed from wheels only (`--only-binary :all:`), so no build code runs at install time; a dependency with no
+  wheel fails the install with a message naming it. A local plugin keeps source builds. A catalogue plugin without them, or whose lock
   does not name its recorded wheel, is refused before anything is installed; a file whose hash is not the
   recorded one is refused naming why. A local plugin is installed from its recorded lock of dependencies, when
   there is one, and a copy of its folder; its folder's digest, git commit and dirty flag are sent with the
