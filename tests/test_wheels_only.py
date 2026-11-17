@@ -70,3 +70,16 @@ def test_a_dependency_with_no_wheel_fails_naming_it(steps, tmp_path):
         plugin_process.lock_dependencies("pkg", "1.0", {"source": "registry"}, A, tmp_path, ME, None)
     text = str(failed.value)
     assert "wheels only" in text and "oldlib==0.1" in text
+
+
+def test_uvs_own_wrapped_message_is_recognised(steps, tmp_path):
+    """uv wraps its message at the terminal width: the words that say a wheel is missing may span lines."""
+    steps["fail"] = (["uv", "pip", "compile"],
+                     "  x No solution found when resolving dependencies:\n  -> Because aisc-bed-oldlib==0.1 has no "
+                     "usable wheels and needs-oldlib==1.0\n      depends on aisc-bed-oldlib==0.1, we can conclude that "
+                     "needs-oldlib==1.0\n      cannot be used.\n\n      hint: Wheels are required for `aisc-bed-oldlib` "
+                     "because building from\n      source is disabled for all packages (i.e., with `--no-build`)\n")
+    with pytest.raises(plugin_process.InstallFailed) as failed:
+        plugin_process.lock_dependencies("needs-oldlib", "1.0", {"source": "registry"}, A, tmp_path, ME, None)
+    assert str(failed.value).startswith("a catalogue plugin installs from wheels only")
+    assert "aisc-bed-oldlib" in str(failed.value)

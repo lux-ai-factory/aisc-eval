@@ -366,7 +366,10 @@ def _failure(step: str, stderr: str | None, plugin_info: Mapping[str, Any]) -> "
     """A failed step's scrubbed message; for a catalogue plugin refused a source build, said plainly first (uv's
     own message names the package that has no wheel)."""
     text = scrub_text(stderr or "")
-    if plugin_info["source"] != "local" and "building from source is disabled" in text:
+    words = " ".join(text.split())
+    if plugin_info["source"] != "local" and (
+        "building from source is disabled" in words or "has no usable wheels" in words
+    ):
         text = ("a catalogue plugin installs from wheels only, and a package it needs has no wheel on the index "
                 f"(the publisher must provide one): {text}")
     return InstallFailed(step, text)
