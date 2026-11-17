@@ -242,7 +242,9 @@ def test_the_runs_processes_are_ended_before_its_user_is_given_back(
 
     monkeypatch.setattr(plugin_process, "end_processes_of", end)
     _run()
-    assert ended == leases["taken"] == leases["given_back"]
+    # the install steps end their own user's processes too: only the run's leased users are counted here
+    ran_as = [uid for uid in ended if uid in plugin_process.RUN_UIDS]
+    assert ran_as == leases["taken"] == leases["given_back"]
 
 
 # what a leased user leaves behind

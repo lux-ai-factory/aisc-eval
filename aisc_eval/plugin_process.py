@@ -12,10 +12,12 @@ A plugin starts in a session of its own, so it leads a process group: what it st
 server, a browser) is in that group, and the worker ends the group with the plugin, whether the
 plugin ended or the worker stops it.
 
-Installing a plugin runs its code too (a source package builds itself), so it is done as a third
-user, the install user, with nothing of the worker's environment. Not the plugin user: the install
-cache is the install user's, and a plugin able to write to it would plant a package in the next
-run's install. A run's environment is the install user's, so the plugin may run it but not change it.
+Installing a plugin runs its code too (a source package builds itself), so a root worker sandboxes each
+install as it does a test (celery_tasks._installer): a uid leased from the same pool, behind the same
+firewall, whose proxy token admits only the package index hosts, with a home and uv cache of its own and
+nothing of the worker's environment; every process it leaves is ended after each step. A worker that is
+not root installs as itself (install_user). Once built, a run's environment is handed to root (give_to_root): the plugin may run it, and
+neither it nor a later install may change it.
 """
 
 import contextlib
@@ -30,7 +32,8 @@ import stat
 import subprocess
 import threading
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+import urllib.parse
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
@@ -80,6 +83,8 @@ class PluginUser:
     home: str | None
     #: False when the worker is not root: it cannot change user, so the plugin runs as the worker
     switch: bool
+    #: an installer's way out: the egress proxy's variables with its install's token (egress.proxy_env)
+    proxy: Mapping[str, str] | None = field(default=None, compare=False)
 
 
 #: what an install sees of the world: the image's own tools, never /app (the worker's code and venv)
@@ -167,8 +172,8 @@ def _kill_everything_of_this_user() -> None:
 class RunFolders:
     """One test's folders. root (root's, others may only pass through) holds the rest: work (the
     plugin's working folder, with config.json and runtime/), input and output (in work, where the
-    runtime reads and writes them), home and tmp (the plugin user's own) and venv (the install
-    user's)."""
+    runtime reads and writes them), home and tmp (the plugin user's own) and venv (made by the
+    installer, then root's)."""
 
     root: Path
     work: Path
@@ -225,7 +230,8 @@ def write_for_run(path: Path, data: bytes, user: PluginUser) -> None:
 
 
 def install_user(name: str = env.PLUGIN_INSTALL_USER) -> PluginUser:
-    """Who installs plugins: neither root nor the plugin user."""
+    """The image's install user, neither root nor the plugin user: who a worker that is not root installs as (it
+    is then the worker itself). A root worker installs as a leased run user instead (celery_tasks._installer)."""
     user = _user(name, "install")
     if user.switch and user.uid == plugin_user().uid:
         raise RuntimeError(
@@ -239,8 +245,33 @@ def run_install(
 ) -> subprocess.CompletedProcess[str]:
     """One step of an install (uv venv, uv pip install) as the install user, in an environment of its own:
     the image's tools, its home and its own uv cache, started in its home. uv would otherwise read the
-    configuration of the folder it starts in, the worker's /app, which only root may read."""
+    configuration of the folder it starts in, the worker's /app, which only root may read. A step runs the
+    package's build code, which may leave a process behind (setsid): every process of the install user is
+    ended when the step ends, however it ends, as for a test's user."""
     home = user.home or os.path.expanduser("~")
+    try:
+        done = _run_install_step(argv, user, timeout, home)
+    finally:
+        end_processes_of(user)
+    for secret in _proxy_secrets(user):
+        done.stdout = (done.stdout or "").replace(secret, "[redacted]")
+        done.stderr = (done.stderr or "").replace(secret, "[redacted]")
+    return done
+
+
+def _proxy_secrets(user: PluginUser) -> set[str]:
+    """The token in an installer's proxy variables: a tool that names its proxy in an error would show it."""
+    tokens = set()
+    for value in (user.proxy or {}).values():
+        with contextlib.suppress(ValueError):
+            if password := urllib.parse.urlsplit(value).password:
+                tokens.add(password)
+    return tokens
+
+
+def _run_install_step(
+    argv: list[str], user: PluginUser, timeout: int, home: str
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         cwd=home,
@@ -249,6 +280,7 @@ def run_install(
             "HOME": home,
             "UV_CACHE_DIR": f"{home}/.cache/uv",
             "UV_NO_CONFIG": "1",
+            **(user.proxy or {}),
         },
         capture_output=True,
         text=True,
@@ -283,6 +315,24 @@ def prepare_install_folder(folder: Path, user: PluginUser) -> None:
     os.chmod(folder, 0o755)
 
 
+def give_to_root(folder: Path, installer: PluginUser) -> None:
+    """What an install made (a venv, a lock, a local plugin's copy), handed to root before anything runs from it:
+    every file and folder root's, folders 0755, files 0755 when they could run and 0644 otherwise, so a later step
+    of the installer (or of any user) cannot change what a test runs. A link is given to root and left as it
+    points. A worker that is not root (it installs as itself) keeps the files its own and only drops the write
+    bits of others."""
+    for path in [folder, *folder.rglob("*")]:
+        if installer.switch:
+            os.lchown(path, 0, 0)
+        if path.is_symlink():
+            continue
+        mode = stat.S_IMODE(path.lstat().st_mode)
+        if path.is_dir() or mode & 0o111:
+            os.chmod(path, 0o755)
+        else:
+            os.chmod(path, 0o644)
+
+
 class InstallFailed(RuntimeError):
     """A step of building a plugin's venv failed; the text is the step's scrubbed stderr."""
 
@@ -303,6 +353,26 @@ class Pins:
 
 #: the hashed lock of a plugin's dependencies, next to its venv
 LOCK_FILE = "requirements.lock"
+#: a catalogue plugin and its dependencies are resolved and installed from wheels only, so no build code runs at
+#: install time (building is the publisher's job); a local plugin, the operator's own code, keeps source builds
+WHEELS_ONLY = ["--only-binary", ":all:"]
+
+
+def _wheels_only(plugin_info: Mapping[str, Any]) -> list[str]:
+    return [] if plugin_info["source"] == "local" else list(WHEELS_ONLY)
+
+
+def _failure(step: str, stderr: str | None, plugin_info: Mapping[str, Any]) -> "InstallFailed":
+    """A failed step's scrubbed message; for a catalogue plugin refused a source build, said plainly first (uv's
+    own message names the package that has no wheel)."""
+    text = scrub_text(stderr or "")
+    words = " ".join(text.split())
+    if plugin_info["source"] != "local" and (
+        "building from source is disabled" in words or "has no usable wheels" in words
+    ):
+        text = ("a catalogue plugin installs from wheels only, and a package it needs has no wheel on the index "
+                f"(the publisher must provide one): {text}")
+    return InstallFailed(step, text)
 
 
 def _canonical(name: str) -> str:
@@ -368,13 +438,14 @@ def lock_dependencies(
         "--python-version",
         "3.12",
         "--quiet",
+        *_wheels_only(plugin_info),
     ]
     if index_url:
         argv.extend(["--extra-index-url", index_url])
     argv.extend([str(requirements), "-o", str(out)])
     compiled = run_install(argv, installer, timeout=INSTALL_TIMEOUT)
     if compiled.returncode != 0:
-        raise InstallFailed("lock", scrub_text(compiled.stderr or ""))
+        raise _failure("lock", compiled.stderr, plugin_info)
     lock = out.read_text()
     if not local and wheel_sha256.lower() not in locked_hashes(
         lock, package_name, version
@@ -384,6 +455,7 @@ def lock_dependencies(
             f"the index's wheel of {package_name} {version} is not the one recorded "
             f"(sha256 {wheel_sha256[:12]}...)",
         )
+    give_to_root(work, installer)
     return lock
 
 
@@ -442,7 +514,7 @@ def build_venv(
     # under the index for an offline resolver. The index is always passed: a probe of it was slow
     # (its root lists the whole PyPI mirror) and dropped it on a timeout, so a catalogue plugin was
     # "not found"; when it is down, uv says so.
-    install_cmd = ["uv", "pip", "install", "--python", str(venv)]
+    install_cmd = ["uv", "pip", "install", "--python", str(venv), *_wheels_only(plugin_info)]
     if pins is not None:
         lock = folder / LOCK_FILE
         lock.write_text(pins.lock)
@@ -456,7 +528,7 @@ def build_venv(
         install_cmd.append(install_target)
     installed = run_install(install_cmd, installer, timeout=INSTALL_TIMEOUT)
     if installed.returncode != 0:
-        text = scrub_text(installed.stderr or "")
+        text = str(_failure("install", installed.stderr, plugin_info))
         if pins is not None and "hash" in text.lower():
             # --require-hashes refused a file whose hash the lock does not list
             text = (
@@ -472,6 +544,9 @@ def build_venv(
         )
         if own.returncode != 0:
             raise InstallFailed("install", scrub_text(own.stderr or ""))
+    give_to_root(venv, installer)
+    if (folder / "source").is_dir():
+        give_to_root(folder / "source", installer)
     return Venv(venv, made, installed)
 
 
