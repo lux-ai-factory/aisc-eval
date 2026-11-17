@@ -15,7 +15,8 @@ plugin ended or the worker stops it.
 Installing a plugin runs its code too (a source package builds itself), so it is done as a third
 user, the install user, with nothing of the worker's environment. Not the plugin user: the install
 cache is the install user's, and a plugin able to write to it would plant a package in the next
-run's install. A run's environment is the install user's, so the plugin may run it but not change it.
+run's install. Once built, a run's environment is handed to root (give_to_root): the plugin may run it, and
+neither it nor a later install may change it.
 """
 
 import contextlib
@@ -167,8 +168,8 @@ def _kill_everything_of_this_user() -> None:
 class RunFolders:
     """One test's folders. root (root's, others may only pass through) holds the rest: work (the
     plugin's working folder, with config.json and runtime/), input and output (in work, where the
-    runtime reads and writes them), home and tmp (the plugin user's own) and venv (the install
-    user's)."""
+    runtime reads and writes them), home and tmp (the plugin user's own) and venv (made by the
+    installer, then root's)."""
 
     root: Path
     work: Path
@@ -294,6 +295,24 @@ def prepare_install_folder(folder: Path, user: PluginUser) -> None:
     os.chmod(folder, 0o755)
 
 
+def give_to_root(folder: Path, installer: PluginUser) -> None:
+    """What an install made (a venv, a lock, a local plugin's copy), handed to root before anything runs from it:
+    every file and folder root's, folders 0755, files 0755 when they could run and 0644 otherwise, so a later step
+    of the installer (or of any user) cannot change what a test runs. A link is given to root and left as it
+    points. A worker that is not root (it installs as itself) keeps the files its own and only drops the write
+    bits of others."""
+    for path in [folder, *folder.rglob("*")]:
+        if installer.switch:
+            os.lchown(path, 0, 0)
+        if path.is_symlink():
+            continue
+        mode = stat.S_IMODE(path.lstat().st_mode)
+        if path.is_dir() or mode & 0o111:
+            os.chmod(path, 0o755)
+        else:
+            os.chmod(path, 0o644)
+
+
 class InstallFailed(RuntimeError):
     """A step of building a plugin's venv failed; the text is the step's scrubbed stderr."""
 
@@ -395,6 +414,7 @@ def lock_dependencies(
             f"the index's wheel of {package_name} {version} is not the one recorded "
             f"(sha256 {wheel_sha256[:12]}...)",
         )
+    give_to_root(work, installer)
     return lock
 
 
@@ -483,6 +503,9 @@ def build_venv(
         )
         if own.returncode != 0:
             raise InstallFailed("install", scrub_text(own.stderr or ""))
+    give_to_root(venv, installer)
+    if (folder / "source").is_dir():
+        give_to_root(folder / "source", installer)
     return Venv(venv, made, installed)
 
 

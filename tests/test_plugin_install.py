@@ -132,6 +132,8 @@ def installs(monkeypatch):
         "install_user",
         lambda: PluginUser(os.getuid(), os.getgid(), None, switch=True),
     )
+    # what it installed is then given to root, which only a root worker can do
+    monkeypatch.setattr(plugin_process.os, "lchown", lambda *a: None)
 
     def run_install(argv, user, timeout):
         seen.append((argv, user))
@@ -373,3 +375,98 @@ def test_a_step_cut_short_by_its_time_limit_still_has_its_processes_ended(monkey
     with pytest.raises(plugin_process.subprocess.TimeoutExpired):
         plugin_process.run_install(["uv", "venv"], INSTALLER, timeout=5)
     assert ended == [INSTALLER]
+
+
+# Before a test starts, what it runs is root's: the user who installed it can no longer change it
+
+
+def _builds_files(monkeypatch):
+    """run_install faked: each step leaves files in the venv as an installer would, some writable by others."""
+
+    def run_install(argv, user, timeout):
+        if argv[:2] == ["uv", "venv"]:
+            venv = Path(argv[2])
+            (venv / "bin").mkdir(parents=True, exist_ok=True)
+            (venv / "bin" / "activate").write_text("")
+            os.chmod(venv / "bin" / "activate", 0o777)
+            (venv / "bin" / "python").symlink_to("/usr/local/bin/python")
+        elif argv[:3] == ["uv", "pip", "install"]:
+            site = Path(argv[argv.index("--python") + 1]) / "lib" / "site-packages" / "pkg"
+            site.mkdir(parents=True, exist_ok=True)
+            os.chmod(site, 0o777)
+            (site / "__init__.py").write_text("")
+            os.chmod(site / "__init__.py", 0o666)
+        return _Ok()
+
+    monkeypatch.setattr(plugin_process, "run_install", run_install)
+    owners = {}
+    monkeypatch.setattr(
+        plugin_process.os, "lchown", lambda path, uid, gid: owners.__setitem__(Path(path), (uid, gid))
+    )
+    monkeypatch.setattr(plugin_process.os, "chown", lambda path, uid, gid: None)
+    return owners
+
+
+def _assert_sealed(folder: Path, owners: dict):
+    paths = [folder, *folder.rglob("*")]
+    assert paths and all(owners.get(path) == (0, 0) for path in paths), "not every file was given to root"
+    for path in paths:
+        if path.is_symlink():
+            continue
+        mode = stat.S_IMODE(path.lstat().st_mode)
+        if path.is_dir():
+            assert mode == 0o755, path
+        else:
+            assert mode in (0o644, 0o755), (path, oct(mode))
+
+
+def test_a_built_venv_is_roots_and_closed_to_its_installer(monkeypatch, tmp_path):
+    owners = _builds_files(monkeypatch)
+    me = PluginUser(os.getuid(), os.getgid(), None, switch=True)
+    venv = plugin_process.build_venv(
+        "pkg", "1.0", {"source": "registry"}, tmp_path, me, None,
+        pins=plugin_process.Pins("a" * 64, "pkg==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"),
+    )
+    _assert_sealed(venv.path, owners)
+    # what could run keeps its execute bit, nothing else gains one
+    assert stat.S_IMODE((venv.path / "bin" / "activate").stat().st_mode) == 0o755
+    init = venv.path / "lib" / "site-packages" / "pkg" / "__init__.py"
+    assert stat.S_IMODE(init.stat().st_mode) == 0o644
+
+
+def test_a_local_plugins_copy_is_roots_too(monkeypatch, tmp_path):
+    owners = _builds_files(monkeypatch)
+    source = tmp_path / "pkg"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[project]\nname = 'pkg'\n")
+    me = PluginUser(os.getuid(), os.getgid(), None, switch=True)
+    (tmp_path / "run").mkdir()
+    plugin_process.build_venv(
+        "pkg", "1.0", {"source": "local", "pkg_root": source}, tmp_path / "run", me, None
+    )
+    _assert_sealed(tmp_path / "run" / "source", owners)
+
+
+def test_a_kept_environment_is_roots_once_it_is_built(monkeypatch, tmp_path):
+    """The environment a manifest and the form hooks run in is kept for every later call: its lock, venv and
+    copy are root's before it is marked ready."""
+    owners = _builds_files(monkeypatch)
+    real_run = plugin_process.run_install
+
+    def run_install(argv, user, timeout):
+        if argv[:3] == ["uv", "pip", "compile"]:
+            Path(argv[argv.index("-o") + 1]).write_text("pkg==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n")
+            return _Ok()
+        return real_run(argv, user, timeout)
+
+    monkeypatch.setattr(plugin_process, "run_install", run_install)
+    monkeypatch.setattr(
+        plugin_process, "install_user", lambda: PluginUser(os.getuid(), os.getgid(), None, switch=True)
+    )
+    monkeypatch.setattr(celery_tasks, "_envs_root", lambda: tmp_path)
+    monkeypatch.setattr(celery_tasks, "plugin_loader", _Loader())
+    with celery_tasks._plugin_env("pkg", "1.0", {"source": "registry"}, "a" * 64):
+        pass
+    folder = tmp_path / ("a" * 64)
+    for part in ("venv", "lock"):
+        _assert_sealed(folder / part, owners)

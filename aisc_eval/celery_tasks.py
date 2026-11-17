@@ -986,7 +986,7 @@ def _run_the_plugin(
 
     runtime_script = plugin_process.copy_runtime(work, user)
 
-    # Steps 1 and 2: the venv, made and filled by the install user: the plugin may run it but not change it
+    # Steps 1 and 2: the venv, made and filled by the installer, then root's: the plugin may run it but not change it
     logger.debug(f"Installing {package_name}=={version} into an isolated venv")
     installer = plugin_process.install_user()
     venv = plugin_process.build_venv(
@@ -1193,7 +1193,7 @@ HOOK_TIMEOUT_S = 30
 #: the largest answer a manifest or a hook may give
 ANSWER_MAX_BYTES = 2**20
 #: where each plugin version's environment is kept for its manifest and form hooks, by the hash of its wheel
-#: or of its local folder: root's, each environment the install user's, readable and runnable by run users
+#: or of its local folder: root's, each environment too once built, readable and runnable by run users
 PLUGIN_ENVS = Path("/var/cache/aisc-plugin-envs")
 #: the manifest command, copied next to each call: run users cannot read the worker's own files
 MANIFEST_SCRIPT = "plugin_manifest.py"
