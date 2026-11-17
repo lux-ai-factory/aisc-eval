@@ -227,6 +227,7 @@ def install_package(
                 text=True,
                 timeout=60,
                 check=True,
+                env=plugin_child_env(),
             )
             install_cmd = ["uv", "pip", "install", "--python", str(cache_venv)]
             extra_url = plugin_loader.devpi_client.simple_index_url
@@ -251,6 +252,7 @@ def install_package(
                 capture_output=True,
                 text=True,
                 timeout=1000,
+                env=plugin_child_env(),
             )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr)
@@ -451,6 +453,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             capture_output=True,
             text=True,
             timeout=1000,
+            env=plugin_child_env(),
         )
         if venv_result.returncode != 0:
             mark_plugin_failed(
@@ -473,6 +476,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             capture_output=True,
             text=True,
             timeout=1000,
+            env=plugin_child_env(),
         )
         if install_result.returncode != 0:
             mark_plugin_failed(
