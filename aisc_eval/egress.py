@@ -112,6 +112,20 @@ def run_egress(
     )
 
 
+#: the public package index an install may reach besides the stack's own: PyPI's pages and its files
+PUBLIC_INDEX_HOSTS = ("pypi.org:443", "files.pythonhosted.org:443")
+
+
+def index_egress(index_url: str | None) -> RunEgress:
+    """What one install may reach: the stack's package index (index_url) and PyPI, nothing else. The stack's index
+    is a service of this deployment, on an internal address: it is allowed by this rule, for this install only."""
+    own = [h for h in [_host_port(index_url)] if h] if index_url else []
+    return RunEgress(
+        frozenset([*own, *PUBLIC_INDEX_HOSTS]),
+        {"allowed_hosts": own, "denied_addresses": [], "floor_hosts": own},
+    )
+
+
 def operator_hosts() -> list[str]:
     """PLUGIN_EGRESS_ALLOWED_HOSTS, comma separated, lower case; DEFAULT_OPERATOR_HOSTS when it is not set
     (set empty, it narrows the list to none)."""

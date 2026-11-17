@@ -57,8 +57,8 @@ RUN groupadd --system --gid 10001 aisc-plugin \
     && useradd --system --uid 10001 --gid aisc-plugin --no-user-group \
         --create-home --home-dir /home/aisc-plugin --shell /usr/sbin/nologin aisc-plugin \
     && chmod 700 /home/aisc-plugin
-# Plugins are installed as this one, neither root nor the plugin user: an install runs the package's own
-# build code, and the install cache in its home must be out of a running plugin's reach.
+# The image's install user, neither root nor the plugin user. A root worker installs each plugin as a leased run
+# uid behind the firewall instead (aisc_eval/celery_tasks.py _installer): an install runs the package's own build code.
 RUN groupadd --system --gid 10002 aisc-install \
     && useradd --system --uid 10002 --gid aisc-install --no-user-group \
         --create-home --home-dir /home/aisc-install --shell /usr/sbin/nologin aisc-install \

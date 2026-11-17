@@ -1,3 +1,4 @@
+import dataclasses
 import fcntl
 import hashlib
 import re
@@ -425,14 +426,18 @@ def install_package(
     try:
         plugin_info = _versions_of(package_name, version)[version]
         recorded = run_pins(package_name, version, plugin_info, pins)
-        with tempfile.TemporaryDirectory(delete=True) as cache_tmp:
+        index_url = plugin_loader.devpi_client.simple_index_url
+        with (
+            tempfile.TemporaryDirectory(delete=True) as cache_tmp,
+            _installer(index_url) as installer,
+        ):
             plugin_process.build_venv(
                 package_name,
                 version,
                 plugin_info,
                 Path(cache_tmp),
-                plugin_process.install_user(),
-                plugin_loader.devpi_client.simple_index_url,
+                installer,
+                index_url,
                 pins=recorded,
             )
 
@@ -851,6 +856,30 @@ def _check_isolation() -> None:
         raise RuntimeError(NO_PROXY_RUNNING)
 
 
+@contextmanager
+def _installer(index_url: str | None) -> Iterator[plugin_process.PluginUser]:
+    """Who one install runs as, from its first step to its last. An install runs the package's build code, so a
+    root worker sandboxes it as it does a test: a uid leased from the run users' pool (behind the firewall, so
+    the egress proxy is its only way out), a token the proxy admits for the package index hosts only
+    (egress.index_egress), and a home and uv cache of its own, created here and removed with it. When it ends,
+    every process of that uid is ended before the uid goes back. A worker that is not root installs as itself,
+    with no proxy (it has none)."""
+    if os.geteuid() != 0:
+        yield plugin_process.install_user()
+        return
+    _check_isolation()
+    with ExitStack() as stack:
+        user = stack.enter_context(plugin_process.lease_run_user())
+        stack.callback(plugin_process.end_processes_of, user)
+        home = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="aisc-install-")))
+        os.chown(home, user.uid, user.gid)
+        os.chmod(home, 0o700)
+        token = secrets.token_urlsafe(32)
+        egress.register(token, egress.index_egress(index_url))
+        stack.callback(egress.unregister, token)
+        yield dataclasses.replace(user, home=str(home), proxy=egress.proxy_env(token))
+
+
 def _run_the_plugin(
     reporter: RunReporter,
     package_name: str,
@@ -988,20 +1017,21 @@ def _run_the_plugin(
 
     # Steps 1 and 2: the venv, made and filled by the installer, then root's: the plugin may run it but not change it
     logger.debug(f"Installing {package_name}=={version} into an isolated venv")
-    installer = plugin_process.install_user()
-    venv = plugin_process.build_venv(
-        package_name,
-        version,
-        plugin_info,
-        folders.root,
-        installer,
-        plugin_loader.devpi_client.simple_index_url,
-        pins=recorded,
-    )
+    index_url = plugin_loader.devpi_client.simple_index_url
+    with _installer(index_url) as installer:
+        venv = plugin_process.build_venv(
+            package_name,
+            version,
+            plugin_info,
+            folders.root,
+            installer,
+            index_url,
+            pins=recorded,
+        )
+        # what the run ran in, kept as a file of the run (the ledger records its sha256 with the upload)
+        environment = plugin_process.freeze(venv, installer).encode()
     venv_python = venv.python
     venv_result, install_result = venv.made, venv.installed
-    # what the run ran in, kept as a file of the run (the ledger records its sha256 with the upload)
-    environment = plugin_process.freeze(venv, installer).encode()
 
     # A pass to the platform for exactly the targets and connections this run names, all of the
     # run's own project: the platform pid the backend put in the run's aisc_run header
@@ -1253,20 +1283,20 @@ def _plugin_env(
                 shutil.rmtree(folder)
             folder.mkdir(mode=0o711, exist_ok=True)
             os.chmod(folder, 0o711)
-            installer = plugin_process.install_user()
             index_url = plugin_loader.devpi_client.simple_index_url
-            lock = plugin_process.lock_dependencies(
-                package_name, version, info, expected, folder, installer, index_url
-            )
-            plugin_process.build_venv(
-                package_name,
-                version,
-                info,
-                folder,
-                installer,
-                index_url,
-                pins=plugin_process.Pins(expected, lock),
-            )
+            with _installer(index_url) as installer:
+                lock = plugin_process.lock_dependencies(
+                    package_name, version, info, expected, folder, installer, index_url
+                )
+                plugin_process.build_venv(
+                    package_name,
+                    version,
+                    info,
+                    folder,
+                    installer,
+                    index_url,
+                    pins=plugin_process.Pins(expected, lock),
+                )
             ready.write_text("")
         yield folder / "venv" / "bin" / "python", (
             folder / plugin_process.LOCK_FILE

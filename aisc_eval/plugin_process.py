@@ -12,10 +12,11 @@ A plugin starts in a session of its own, so it leads a process group: what it st
 server, a browser) is in that group, and the worker ends the group with the plugin, whether the
 plugin ended or the worker stops it.
 
-Installing a plugin runs its code too (a source package builds itself), so it is done as a third
-user, the install user, with nothing of the worker's environment. Not the plugin user: the install
-cache is the install user's, and a plugin able to write to it would plant a package in the next
-run's install. Once built, a run's environment is handed to root (give_to_root): the plugin may run it, and
+Installing a plugin runs its code too (a source package builds itself), so a root worker sandboxes each
+install as it does a test (celery_tasks._installer): a uid leased from the same pool, behind the same
+firewall, whose proxy token admits only the package index hosts, with a home and uv cache of its own and
+nothing of the worker's environment; every process it leaves is ended after each step. A worker that is
+not root installs as itself (install_user). Once built, a run's environment is handed to root (give_to_root): the plugin may run it, and
 neither it nor a later install may change it.
 """
 
@@ -31,7 +32,8 @@ import stat
 import subprocess
 import threading
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+import urllib.parse
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
@@ -81,6 +83,8 @@ class PluginUser:
     home: str | None
     #: False when the worker is not root: it cannot change user, so the plugin runs as the worker
     switch: bool
+    #: an installer's way out: the egress proxy's variables with its install's token (egress.proxy_env)
+    proxy: Mapping[str, str] | None = field(default=None, compare=False)
 
 
 #: what an install sees of the world: the image's own tools, never /app (the worker's code and venv)
@@ -226,7 +230,8 @@ def write_for_run(path: Path, data: bytes, user: PluginUser) -> None:
 
 
 def install_user(name: str = env.PLUGIN_INSTALL_USER) -> PluginUser:
-    """Who installs plugins: neither root nor the plugin user."""
+    """The image's install user, neither root nor the plugin user: who a worker that is not root installs as (it
+    is then the worker itself). A root worker installs as a leased run user instead (celery_tasks._installer)."""
     user = _user(name, "install")
     if user.switch and user.uid == plugin_user().uid:
         raise RuntimeError(
@@ -245,9 +250,23 @@ def run_install(
     ended when the step ends, however it ends, as for a test's user."""
     home = user.home or os.path.expanduser("~")
     try:
-        return _run_install_step(argv, user, timeout, home)
+        done = _run_install_step(argv, user, timeout, home)
     finally:
         end_processes_of(user)
+    for secret in _proxy_secrets(user):
+        done.stdout = (done.stdout or "").replace(secret, "[redacted]")
+        done.stderr = (done.stderr or "").replace(secret, "[redacted]")
+    return done
+
+
+def _proxy_secrets(user: PluginUser) -> set[str]:
+    """The token in an installer's proxy variables: a tool that names its proxy in an error would show it."""
+    tokens = set()
+    for value in (user.proxy or {}).values():
+        with contextlib.suppress(ValueError):
+            if password := urllib.parse.urlsplit(value).password:
+                tokens.add(password)
+    return tokens
 
 
 def _run_install_step(
@@ -261,6 +280,7 @@ def _run_install_step(
             "HOME": home,
             "UV_CACHE_DIR": f"{home}/.cache/uv",
             "UV_NO_CONFIG": "1",
+            **(user.proxy or {}),
         },
         capture_output=True,
         text=True,

@@ -81,7 +81,7 @@ Read from the environment (`aisc_eval/utils/env.py`, `aisc_eval/deployment.py`, 
 | `PACKAGE_REGISTRY_URL`, `PACKAGE_REGISTRY_INDEX`, `PACKAGE_REGISTRY_USER`, `PACKAGE_REGISTRY_PASSWORD` | package index tests are installed from | empty | `http://devpi:3141`, `root/public`, no login |
 | `PLATFORM_URL` | the platform, for run passes and helper models | empty | `http://platform:8000` |
 | `PLATFORM_CONNECTIONS_TOKEN` | the worker's service token to the platform; never given to a plugin | empty | from the secrets |
-| `PLUGIN_USER`, `PLUGIN_INSTALL_USER` | the image's plugin user (kept apart from the install user) and the user a root worker installs plugins as; each test runs as a uid of its own (see Users) | `aisc-plugin`, `aisc-install` | defaults |
+| `PLUGIN_USER`, `PLUGIN_INSTALL_USER` | the image's plugin user (kept apart from the install user) and the image's install user (a root worker installs each plugin as a leased run uid instead); each test runs as a uid of its own (see Users) | `aisc-plugin`, `aisc-install` | defaults |
 | `PLUGIN_RUN_UIDS` | this worker's pool of run uids, `first-last`, above 10003; the run worker and the declarations worker each have their own, never overlapping (the kernel counts a uid's processes across containers) | `10100-10199` | `10100-10199` (run worker), `10200-10209` (declarations worker) |
 | `PLUGIN_EGRESS_ALLOWED_HOSTS` | hosts every plugin test may reach besides the platform and its helpers: `host`, `host:port` or `.domain` (the domain and every host under it, public addresses only), comma separated; set empty for none | `raw.githubusercontent.com` | `raw.githubusercontent.com` |
 
@@ -218,8 +218,12 @@ Please do not push your local changes, except if necessary. For instance, DEBUG 
 - **Start-up check**: the worker (not Flower) stops when `INTERNAL_API_KEY` is unset.
 - **Task time limits**: 400 minutes soft, 405 hard (`aisc_eval/celery_app.py`), for long
   first runs that download a model.
-- **Users**: a root worker installs plugins as `aisc-install` (`PLUGIN_INSTALL_USER`), with an
-  environment and a uv cache of its own, and runs each test as a uid of its own, leased from `PLUGIN_RUN_UIDS`
+- **Users**: a root worker installs each plugin as a uid leased from `PLUGIN_RUN_UIDS`, as a test runs: behind
+  the same firewall, with a proxy token that admits only the package index hosts (the stack's index, `pypi.org`,
+  `files.pythonhosted.org`), a home and uv cache of its own removed when the install ends, and every process it
+  left ended after each step. What it built (the venv, the lock, a local plugin's copy, the kept environments
+  under `/var/cache/aisc-plugin-envs`) is then root's, 0755/0644. A worker that is not root installs as itself.
+  Each test runs as a uid of its own, leased from `PLUGIN_RUN_UIDS`
   (10100-10199 by default, at most 100 tests at once), which can run the installed venv but not change it, and cannot read the
   worker's environment, `/app` or another test's folders. A test's home and tmp are its own; its working
   folder and inputs are read-only to it; whatever it leaves running is killed before its uid is leased again
