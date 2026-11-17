@@ -56,6 +56,7 @@ def test_an_install_runs_as_its_user_with_its_own_cache_and_none_of_the_workers_
         "run",
         lambda argv, **kw: calls.append((argv, kw)) or "done",
     )
+    monkeypatch.setattr(plugin_process, "end_processes_of", lambda user: None)
     monkeypatch.setenv("DJANGO_SECRET_KEY", "canary")
     monkeypatch.setenv("INTERNAL_API_KEY", "canary")
     assert (
@@ -344,3 +345,31 @@ def test_a_version_the_index_does_not_have_is_still_refused(installs, monkeypatc
     assert [(evaluation, tests, reason) for evaluation, tests, reason, _task in stops] == [
         ("eval", ["ep"], "Version '9.9' of package 'pkg' not found.")
     ]
+
+
+# What an install step leaves running (a build backend may start a daemon) is ended with the step
+
+
+def test_every_process_an_install_step_left_is_ended_when_the_step_ends(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        plugin_process.subprocess, "run", lambda argv, **kw: events.append("step") or _Ok()
+    )
+    monkeypatch.setattr(
+        plugin_process, "end_processes_of", lambda user: events.append(("ended", user))
+    )
+    plugin_process.run_install(["uv", "pip", "install", "x"], INSTALLER, timeout=5)
+    assert events == ["step", ("ended", INSTALLER)]
+
+
+def test_a_step_cut_short_by_its_time_limit_still_has_its_processes_ended(monkeypatch):
+    ended = []
+
+    def too_slow(argv, **kw):
+        raise plugin_process.subprocess.TimeoutExpired(argv, kw["timeout"])
+
+    monkeypatch.setattr(plugin_process.subprocess, "run", too_slow)
+    monkeypatch.setattr(plugin_process, "end_processes_of", ended.append)
+    with pytest.raises(plugin_process.subprocess.TimeoutExpired):
+        plugin_process.run_install(["uv", "venv"], INSTALLER, timeout=5)
+    assert ended == [INSTALLER]

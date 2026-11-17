@@ -239,8 +239,19 @@ def run_install(
 ) -> subprocess.CompletedProcess[str]:
     """One step of an install (uv venv, uv pip install) as the install user, in an environment of its own:
     the image's tools, its home and its own uv cache, started in its home. uv would otherwise read the
-    configuration of the folder it starts in, the worker's /app, which only root may read."""
+    configuration of the folder it starts in, the worker's /app, which only root may read. A step runs the
+    package's build code, which may leave a process behind (setsid): every process of the install user is
+    ended when the step ends, however it ends, as for a test's user."""
     home = user.home or os.path.expanduser("~")
+    try:
+        return _run_install_step(argv, user, timeout, home)
+    finally:
+        end_processes_of(user)
+
+
+def _run_install_step(
+    argv: list[str], user: PluginUser, timeout: int, home: str
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         cwd=home,
