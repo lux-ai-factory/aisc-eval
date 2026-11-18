@@ -45,3 +45,22 @@ def test_plugin_environment_holds_nothing_but_the_allowlist(monkeypatch):
     env = plugin_child_env()
 
     assert set(env) <= set(_PLUGIN_ENV_ALLOWLIST)
+
+
+def test_plugin_environment_withholds_aws_and_service_secrets(monkeypatch):
+    """A fake cloud key, service token and DB password in the worker's
+    environment never reach the child (SEC-01 #104)."""
+    worker_only = (
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AISC_SERVICE_TOKEN",
+        "POSTGRES_PASSWORD",
+    )
+    for name in worker_only:
+        monkeypatch.setenv(name, "worker-only-secret")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    env = plugin_child_env()
+
+    assert env["PATH"] == "/usr/bin"
+    assert not (set(worker_only) & set(env))
