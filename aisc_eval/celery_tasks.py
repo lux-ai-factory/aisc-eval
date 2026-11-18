@@ -13,25 +13,15 @@ import time
 import uuid
 from pathlib import Path
 
-from celery import group, chain
-
 from aisc_eval import plugin_runtime
 from aisc_eval.celery_app import celery_app, StopAwareTask
-from aisc_eval.data_model.evaluation import Evaluation
 from aisc_eval.service.api_client import (
-    mark_completed,
     mark_failed,
     mark_plugin_started,
     mark_plugin_finished,
     mark_plugin_failed,
     post_measures,
-    get_evaluation,
-    get_evaluation_plugins_status,
-    get_dataset_file_content,
-    get_model_file_content,
     upload_artifact,
-    get_project_settings_by_pid,
-    get_evaluation_inputs,
 )
 from aisc_eval.utils.logging import get_logger
 from aisc_eval.utils.scrub import scrub_bytes, scrub_secrets
@@ -125,19 +115,6 @@ def plugin_run_env(
         }
     child_env.update(run_secrets)
     return child_env
-
-
-def _embed_input_files(input_components: list[dict]) -> None:
-    """Fetch dataset/model bytes at dispatch so the run needs no mid-run call (I1)."""
-    for component in input_components:
-        component_type = component.get("component_type")
-        if component_type == "dataset":
-            content = get_dataset_file_content(component["data"])
-        elif component_type == "model":
-            content = get_model_file_content(component["data"])
-        else:
-            continue
-        component["content_b64"] = base64.b64encode(content).decode("ascii")
 
 
 def _decode_input_file(component: dict) -> bytes:
@@ -292,94 +269,6 @@ def install_package(
             # for chord/chain members, which would leave the eval Pending forever.
             mark_failed(evaluation_pid)
         raise
-
-
-@celery_app.task(bind=True)
-def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
-    logger.info(f"Running evaluation {evaluation_pid}")
-
-    plugin_loader.list_packages(refresh=True)
-
-    evaluation: Evaluation = get_evaluation(evaluation_pid)
-    inputs_by_plugin: dict[str, list[dict]] = get_evaluation_inputs(evaluation_pid)
-
-    # group plugins by package
-    plugins_by_pkg = {}
-    for evaluation_plugin in evaluation.evaluation_plugins:
-        pkg_key = f"{evaluation_plugin.package_name}=={evaluation_plugin.version}"
-        if pkg_key not in plugins_by_pkg:
-            plugins_by_pkg[pkg_key] = {
-                "package_name": evaluation_plugin.package_name,
-                "version": evaluation_plugin.version,
-                "plugins": [],
-            }
-        plugins_by_pkg[pkg_key]["plugins"].append(evaluation_plugin)
-
-    logger.info(
-        f"Found {len(plugins_by_pkg)} unique packages for {len(evaluation.evaluation_plugins)} plugins"
-    )
-
-    # build per-package chains: install_pkg -> group(run_plugin -> post_measurements)
-    package_chains = []
-    plugin_task_ids = []
-    for pkg_key, pkg_info in plugins_by_pkg.items():
-        install_sig = install_package.si(
-            pkg_info["package_name"],
-            pkg_info["version"],
-            evaluation_pid,
-            [ep.pid for ep in pkg_info["plugins"]],
-        )
-        # errback: chord body is skipped on task error, so this must mark the eval failed or it stays Pending forever.
-        install_sig.link_error(handle_error.s(evaluation_pid))
-
-        plugin_chain_list = []
-        for evaluation_plugin in pkg_info["plugins"]:
-            config = None
-            project_config_selections = []
-            if evaluation_plugin.plugin_config:
-                config = evaluation_plugin.plugin_config.config
-                project_config_selections = (
-                    evaluation_plugin.plugin_config.project_config_selections
-                )
-
-            input_components = inputs_by_plugin.get(str(evaluation_plugin.pid), [])
-            _embed_input_files(input_components)
-
-            run_plugin_sig = run_plugin.si(
-                evaluation_plugin.package_name,
-                evaluation_plugin.name,
-                evaluation_plugin.version,
-                config,
-                input_components,
-                get_project_settings_by_pid(
-                    evaluation.project.pid, project_config_selections
-                ),
-                evaluation_pid,
-                evaluation_plugin.pid,
-            )
-            # errback: mark evaluation failed if run_plugin ever errors
-            run_plugin_sig.link_error(handle_error.s(evaluation_pid))
-
-            # freeze to get a stable task id before dispatching
-            run_plugin_sig.freeze()
-            plugin_task_ids.append(str(run_plugin_sig.id))
-
-            post_measurements_sig = post_measurements.s(evaluation_pid, evaluation_plugin.pid)
-            post_measurements_sig.link_error(handle_error.s(evaluation_pid))
-            plugin_chain_list.append(chain(run_plugin_sig, post_measurements_sig))
-
-        package_chains.append(chain(install_sig, group(plugin_chain_list)))
-
-    # dispatch: each package's plugins start after its install, no waiting for other packages
-    workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
-    workflow.apply_async()
-
-    # store plugin task ids in redis so siblings can be revoked on failure
-    celery_app.backend.client.set(
-        f"eval_tasks:{evaluation_pid}", json.dumps(plugin_task_ids), ex=7200
-    )
-
-    return {"evaluation_pid": evaluation_pid, "plugin_task_ids": plugin_task_ids}
 
 
 @celery_app.task(bind=True, base=StopAwareTask)
@@ -640,28 +529,6 @@ def post_measurements(
     except Exception as e:
         mark_plugin_failed(evaluation_pid, evaluation_plugin_uuid, str(e))
         raise
-
-
-@celery_app.task
-def finalize_evaluation(evaluation_id: uuid.UUID) -> None:
-    logger.debug(f"Finalizing evaluation {evaluation_id}")
-    try:
-        # check if any plugins failed before marking as completed
-        plugin_status = get_evaluation_plugins_status(evaluation_id)
-
-        if plugin_status.get("has_failed_plugins", False):
-            logger.info(
-                f"Evaluation {evaluation_id} has failed plugins, marking as failed"
-            )
-            mark_failed(evaluation_id)
-        else:
-            response = mark_completed(evaluation_id)
-            logger.debug(
-                f"Evaluation {evaluation_id} marked as completed, status: {response.status_code}"
-            )
-    except Exception as e:
-        logger.error(f"Failed to finalize evaluation {evaluation_id}: {e}")
-        mark_failed(evaluation_id)
 
 
 @celery_app.task

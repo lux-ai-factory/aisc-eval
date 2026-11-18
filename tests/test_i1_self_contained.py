@@ -9,16 +9,16 @@ import base64
 
 import pytest
 
-from aisc_eval import celery_tasks
+from aisc_eval import celery_tasks, dispatch
 
 
 def test_dispatch_embeds_dataset_bytes(monkeypatch):
     monkeypatch.setattr(
-        celery_tasks, "get_dataset_file_content", lambda name: b"dataset-bytes"
+        dispatch, "get_dataset_file_content", lambda name: b"dataset-bytes"
     )
     components = [{"component_type": "dataset", "name": "train", "data": "train.csv"}]
 
-    celery_tasks._embed_input_files(components)
+    dispatch._embed_input_files(components)
 
     assert components[0]["content_b64"] == base64.b64encode(b"dataset-bytes").decode(
         "ascii"
@@ -26,12 +26,10 @@ def test_dispatch_embeds_dataset_bytes(monkeypatch):
 
 
 def test_dispatch_embeds_model_bytes(monkeypatch):
-    monkeypatch.setattr(
-        celery_tasks, "get_model_file_content", lambda name: b"model-bytes"
-    )
+    monkeypatch.setattr(dispatch, "get_model_file_content", lambda name: b"model-bytes")
     components = [{"component_type": "model", "name": "model", "data": "model.onnx"}]
 
-    celery_tasks._embed_input_files(components)
+    dispatch._embed_input_files(components)
 
     assert components[0]["content_b64"] == base64.b64encode(b"model-bytes").decode(
         "ascii"
@@ -41,7 +39,7 @@ def test_dispatch_embeds_model_bytes(monkeypatch):
 def test_dispatch_leaves_non_file_components_alone(monkeypatch):
     components = [{"component_type": "datashape", "name": "shape", "json_value": {}}]
 
-    celery_tasks._embed_input_files(components)
+    dispatch._embed_input_files(components)
 
     assert "content_b64" not in components[0]
 
