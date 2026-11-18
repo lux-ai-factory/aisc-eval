@@ -5,7 +5,11 @@ own environment (database, registry or signing credentials); it gets a small
 allowlist plus the run's own secrets, added by the caller.
 """
 
-from aisc_eval.celery_tasks import _PLUGIN_ENV_ALLOWLIST, plugin_child_env
+from aisc_eval.celery_tasks import (
+    _PLUGIN_ENV_ALLOWLIST,
+    plugin_child_env,
+    plugin_run_env,
+)
 
 WORKER_ONLY = (
     "DJANGO_SECRET_KEY",
@@ -64,3 +68,21 @@ def test_plugin_environment_withholds_aws_and_service_secrets(monkeypatch):
 
     assert env["PATH"] == "/usr/bin"
     assert not (set(worker_only) & set(env))
+
+
+def test_run_local_door_withholds_the_targets_credentials(monkeypatch):
+    """A run local to the assessed target must not carry that target's
+    credentials, while a normal run keeps the existing behaviour (EXEC-01 #120)."""
+    monkeypatch.setenv("PATH", "/usr/bin")
+    # the target's run credentials are in the worker environment and the
+    # dispatcher hands the child AISC_SECRET_ * entries under the SEC-01 rule.
+    monkeypatch.setenv("AISC_SECRET_CONNECTION_TARGET_KEY", "target-secret")
+    run_secrets = {"AISC_SECRET_CONNECTION_TARGET_KEY": "target-secret"}
+
+    normal = plugin_run_env(run_secrets)
+    assert normal["AISC_SECRET_CONNECTION_TARGET_KEY"] == "target-secret"
+    assert normal["PATH"] == "/usr/bin"
+
+    local = plugin_run_env(run_secrets, run_local=True)
+    assert "AISC_SECRET_CONNECTION_TARGET_KEY" not in local
+    assert local["PATH"] == "/usr/bin"

@@ -105,6 +105,28 @@ def plugin_child_env() -> dict[str, str]:
     }
 
 
+def plugin_run_env(
+    run_secrets: dict[str, str], *, run_local: bool = False
+) -> dict[str, str]:
+    """The child environment for a plugin run (EXEC-01 #120).
+
+    Always the SEC-01 allowlist (:func:`plugin_child_env`). A normal run adds the
+    per-run target secrets the dispatcher decrypted under ``AISC_SECRET_*``. A
+    *run-local* (native) run executes on the worker's own host, beside the system
+    it assesses, so it withholds those credentials: the run cannot exfiltrate the
+    target's key/secret.
+    """
+    child_env = plugin_child_env()
+    if run_local:
+        return {
+            name: value
+            for name, value in child_env.items()
+            if name not in run_secrets and not name.startswith(SECRET_ENV_PREFIX)
+        }
+    child_env.update(run_secrets)
+    return child_env
+
+
 def _embed_input_files(input_components: list[dict]) -> None:
     """Fetch dataset/model bytes at dispatch so the run needs no mid-run call (I1)."""
     for component in input_components:
@@ -364,7 +386,8 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
 def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_config: dict,
                input_components: list[dict], project_settings: list[dict],
                evaluation_pid: uuid.UUID,
-               evaluation_plugin_pid: uuid.UUID) -> list[dict]:
+               evaluation_plugin_pid: uuid.UUID,
+               run_local: bool = False) -> list[dict]:
 
     if not plugin_loader.discovered_packages:
         logger.debug("Worker cache empty. Fetching packages from Devpi...")
@@ -498,8 +521,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         stderr_content = ""
         try:
             with open(stderr_path, "w+") as stderr_file:
-                child_env = plugin_child_env()
-                child_env.update(run_secrets)
+                child_env = plugin_run_env(run_secrets, run_local=run_local)
                 process = subprocess.Popen(
                     [str(venv_python), str(runtime_script)],
                     cwd=str(workspace_path),
