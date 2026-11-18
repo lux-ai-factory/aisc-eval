@@ -5,7 +5,7 @@ own environment (database, registry or signing credentials); it gets a small
 allowlist plus the run's own secrets, added by the caller.
 """
 
-from aisc_eval.celery_tasks import plugin_child_env
+from aisc_eval.celery_tasks import _PLUGIN_ENV_ALLOWLIST, plugin_child_env
 
 WORKER_ONLY = (
     "DJANGO_SECRET_KEY",
@@ -34,3 +34,14 @@ def test_plugin_environment_is_a_closed_allowlist(monkeypatch):
     env = plugin_child_env()
 
     assert "AISC_SOMETHING_UNEXPECTED" not in env
+
+
+def test_plugin_environment_holds_nothing_but_the_allowlist(monkeypatch):
+    """The child environment is exactly the allowlist — a name is present only
+    if it is on it (SEC-01 #104)."""
+    for name in ("PATH", "HOME", "LANG", "DJANGO_SECRET_KEY", "AISC_ANYTHING"):
+        monkeypatch.setenv(name, "value")
+
+    env = plugin_child_env()
+
+    assert set(env) <= set(_PLUGIN_ENV_ALLOWLIST)
