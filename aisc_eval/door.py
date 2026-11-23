@@ -47,7 +47,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from aisc_plugin_interface.adapters import BUILTIN_ADAPTERS, EndpointAdapter, Secret, Turn
+from aisc_plugin_interface.adapters import BUILTIN_ADAPTERS, EndpointAdapter, Secret
 from aisc_plugin_interface.adapters import faces
 from aisc_plugin_interface.adapters import hosts as host_rules
 

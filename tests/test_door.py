@@ -14,7 +14,6 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import httpx
-import pytest
 
 from aisc_eval import door
 
