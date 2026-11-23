@@ -473,6 +473,10 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
             "input_adapters": input_adapters,
+            "input_kinds": {
+                component["name"]: component["component_type"]
+                for component in input_components
+            },
             "project_settings": build_project_settings(project_settings),
             "plugin_config": plugin_config or {},
         }

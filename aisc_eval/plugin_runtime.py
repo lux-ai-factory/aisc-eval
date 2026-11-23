@@ -125,6 +125,7 @@ def main():
 
         input_mapping = config.get("input_mapping", {})
         input_adapters = config.get("input_adapters", {})
+        input_kinds = config.get("input_kinds", {})
         for name, path in input_mapping.items():
             # Resolve input paths relative to working directory
             file_path = Path(path)
@@ -136,13 +137,20 @@ def main():
                 continue
 
             print(f"📥 Loading input '{name}' from {path}")
+            raw = file_path.read_bytes()
             spec = input_adapters.get(name)
             resolved = resolve_data_adapter(plugin, name, spec) if spec else None
             if resolved is not None:
+                # A data adapter (standard, or one the plugin ships) produces the
+                # value the slot declared it accepts (ADR 0009 D-22).
                 adapter, produce = resolved
-                plugin.set_input_content(name, adapter.load(file_path.read_bytes(), produce))
+                plugin.set_input_content(name, adapter.load(raw, produce))
+            elif input_kinds.get(name) in ("endpoint", "datashape", "resource"):
+                # The runtime wrote a JSON document (a config, a datashape, an
+                # endpoint); hand the plugin the parsed value.
+                plugin.set_input_content(name, json.loads(raw))
             else:
-                plugin.set_input_content(name, file_path.read_bytes())
+                plugin.set_input_content(name, raw)
 
         print("🚀 Running evaluation...")
         plugin_config = config.get("plugin_config", {})
