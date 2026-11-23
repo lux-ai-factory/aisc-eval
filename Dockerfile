@@ -47,5 +47,5 @@ ENV VIRTUAL_ENV=/app/.venv \
 CMD ["uv", "run", "celery", "-A", "aisc_eval.celery_worker:celery_app", "worker", "--loglevel=debug"]
 
 # Health check endpoint
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD uv run celery --app aisc_eval.celery_app inspect ping -d "celery@$$HOSTNAME"
+HEALTHCHECK --interval=30s --timeout=15s --start-period=30s --retries=5 \
+  CMD celery --app aisc_eval.celery_app inspect ping --timeout 10
