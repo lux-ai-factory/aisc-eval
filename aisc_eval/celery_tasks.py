@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import io
+import secrets as pysecrets
 import ssl
 import subprocess
 import tempfile
@@ -13,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from aisc_eval import plugin_runtime
+from aisc_eval import door, plugin_runtime
 from aisc_eval.celery_app import celery_app, StopAwareTask
 from aisc_eval.service.api_client import (
     mark_failed,
@@ -21,6 +22,7 @@ from aisc_eval.service.api_client import (
     mark_plugin_finished,
     mark_plugin_failed,
     post_measures,
+    post_provenance,
     upload_artifact,
 )
 from aisc_eval.utils.logging import get_logger
@@ -115,6 +117,135 @@ def plugin_run_env(
         }
     child_env.update(run_secrets)
     return child_env
+
+
+def _decrypt_or_empty(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return decrypt_value(value)
+    except Exception:
+        return ""
+
+
+def _adapter_spec(component: dict) -> dict:
+    """How the plugin runtime resolves a data adapter for one input (ADR 0009)."""
+    target = component.get("install_target") or {}
+    return {
+        "adapter": component.get("adapter") or "",
+        "config": component.get("adapter_config") or {},
+        "module": target.get("module", ""),
+        "class": target.get("class_name", ""),
+    }
+
+
+def _door_slots(input_components: list[dict]) -> tuple[dict, dict]:
+    """The door spec's slots, and the run tokens the plugin is handed (ADR 0009).
+
+    The real key is decrypted here only to put it on the door's stdin; it is never
+    added to the plugin's environment. Each slot gets its own run token.
+    """
+    slots: dict[str, dict] = {}
+    tokens: dict[str, str] = {}
+    for component in input_components:
+        if component.get("component_type") != "endpoint":
+            continue
+        name = component["name"]
+        token_key = f"door_{name}"
+        token = pysecrets.token_urlsafe(24)
+        tokens[token_key] = token
+        target = component.get("install_target") or {}
+        slots[name] = {
+            "adapter": component.get("adapter") or "",
+            "version": component.get("adapter_version") or "",
+            "module": target.get("module", ""),
+            "class": target.get("class_name", ""),
+            "face": component.get("face") or component.get("protocol") or "openai-chat",
+            "protocol": component.get("protocol") or "",
+            "url": component.get("url") or "",
+            "config": component.get("adapter_config") or {},
+            "secret": _decrypt_or_empty(component.get("secret_encrypted_value")),
+            "secret_headers": {
+                header: _decrypt_or_empty(value)
+                for header, value in (component.get("secret_headers") or {}).items()
+            },
+            "token": token,
+            "allowed": list(component.get("allowed_hosts") or []),
+            "floor": list(component.get("floor_hosts") or []),
+            "stack": list(component.get("stack_hosts") or []),
+            "config_hash": component.get("config_hash") or "",
+            "timeout_s": 60,
+            "max_concurrency": 8,
+        }
+    return slots, tokens
+
+
+def _endpoint_input_file(component: dict, door_url: str, token_key: str) -> dict:
+    """The input a plugin reads for an endpoint slot: a door URL and a run token."""
+    face = component.get("face") or component.get("protocol") or "openai-chat"
+    model = (
+        (component.get("value") or {}).get("model")
+        or (component.get("adapter_config") or {}).get("model")
+        or ""
+    )
+    if face == "openai-chat":
+        return {"endpoint_url": door_url, "secret_key": token_key, "model": model}
+    return {"url": door_url, "protocol": face, "model": model, "token_key": token_key}
+
+
+def _adapter_install_specs(input_components: list[dict], loader) -> list[str]:
+    """The extra packages a run's non-builtin adapters need, as uv install targets."""
+    specs: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for component in input_components:
+        target = component.get("install_target")
+        if not target:
+            continue
+        package, version = target.get("package"), target.get("version")
+        if not package or (package, version) in seen:
+            continue
+        seen.add((package, version))
+        if target.get("source") == "local":
+            info = (loader.discovered_adapters.get(package) or {}).get(version)
+            if info and info.get("pkg_root"):
+                specs.append(str(info["pkg_root"].resolve()))
+                continue
+        specs.append(f"{package}=={version}")
+    return specs
+
+
+def _start_door(venv_python, workspace_path, slots: dict, log_path) -> tuple[subprocess.Popen, int]:
+    """Start the run door in the plugin's venv and return it and its port."""
+    process = subprocess.Popen(
+        [str(venv_python), os.path.abspath(door.__file__)],
+        cwd=str(workspace_path),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=open(log_path, "w"),
+        env=plugin_child_env(),
+        text=True,
+        bufsize=1,
+    )
+    process.stdin.write(json.dumps({"workspace": str(workspace_path), "slots": slots}))
+    process.stdin.close()
+    line = process.stdout.readline()
+    if not line:
+        _terminate_process(process)
+        raise RuntimeError("the run door did not start")
+    return process, int(json.loads(line)["port"])
+
+
+def _send_door_provenance(evaluation_pid, evaluation_plugin_pid, workspace_path) -> None:
+    """Send the door's call counts (best-effort: the run has already finished)."""
+    path = Path(workspace_path) / "door_provenance.json"
+    if not path.exists():
+        return
+    try:
+        provenance = json.loads(path.read_text())
+        if provenance:
+            post_provenance(evaluation_pid, {str(evaluation_plugin_pid): provenance})
+    except Exception as exc:  # pragma: no cover - best-effort
+        logger.warning(f"Could not post door provenance: {exc}")
 
 
 def _decode_input_file(component: dict) -> bytes:
@@ -301,36 +432,27 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         output_dir.mkdir()
 
         input_mapping = {}
-        llm_secret_settings = []
+        input_adapters: dict[str, dict] = {}
+        pending_inputs: dict[str, bytes] = {}
         try:
             for component in input_components:
                 component_type = component["component_type"]
                 name = component["name"]
-                if component_type == "dataset":
-                    file_content = _decode_input_file(component)
-                    relative_path = component["data"]
-                elif component_type == "model":
-                    file_content = _decode_input_file(component)
-                    relative_path = component["data"]
-                elif component_type in {"datashape", "llm", "resource"}:
-                    payload = dict(component.get("json_value") or {})
-                    if component_type == "llm":
-                        run_model = (component.get("value") or {}).get("model")
-                        if run_model:
-                            payload["model"] = run_model
-                        if component.get("secret_key") and component.get("secret_encrypted_value"):
-                            llm_secret_settings.append({
-                                "category": "secrets",
-                                "key": component["secret_key"],
-                                "encrypted_value": component["secret_encrypted_value"],
-                            })
-                    file_content = json.dumps(payload).encode("utf-8")
-                    relative_path = f"{name}.json"
+                if component_type in ("dataset", "model"):
+                    pending_inputs[name] = _decode_input_file(component)
+                    input_mapping[name] = component["data"]
+                    if component.get("adapter"):
+                        input_adapters[name] = _adapter_spec(component)
+                elif component_type in ("datashape", "resource"):
+                    pending_inputs[name] = json.dumps(
+                        dict(component.get("json_value") or {})
+                    ).encode("utf-8")
+                    input_mapping[name] = f"{name}.json"
+                elif component_type == "endpoint":
+                    # written once the door's port is known
+                    input_mapping[name] = f"{name}.json"
                 else:
                     raise ValueError(f"Unsupported component type: {component_type}")
-
-                (input_dir / relative_path).write_bytes(file_content)
-                input_mapping[name] = relative_path
         except Exception as exc:
             _fail_plugin_and_revoke(
                 evaluation_pid, evaluation_plugin_pid,
@@ -338,9 +460,12 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             )
             raise
 
+        door_slots, door_tokens = _door_slots(input_components)
+
         config_data = {
             "plugin_source": f"{package_name}:{plugin_name}",
             "input_mapping": input_mapping,
+            "input_adapters": input_adapters,
             "project_settings": build_project_settings(project_settings),
             "plugin_config": plugin_config or {},
         }
@@ -374,6 +499,12 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             raise RuntimeError(f"Failed to create venv: {venv_result.stderr}")
 
         # Step 2: Install plugin and dependencies into the venv
+        adapter_specs = _adapter_install_specs(input_components, plugin_loader)
+        endpoint_extra = (
+            ["aisc-plugin-interface[endpoint]"]
+            if any(c.get("component_type") == "endpoint" for c in input_components)
+            else []
+        )
         logger.debug(f"Installing {install_target} into isolated venv")
         install_result = subprocess.run(
             [
@@ -384,6 +515,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                 str(venv_dir),
                 "--offline",
                 install_target,
+                *adapter_specs,
+                *endpoint_extra,
             ],
             capture_output=True,
             text=True,
@@ -396,12 +529,46 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             )
             raise RuntimeError(f"Failed to install plugin: {install_result.stderr}")
 
+        # The run door: started before the plugin, in the same venv, and stopped
+        # with it. Its spec (which carries the real key) goes on stdin, never the
+        # plugin's environment (ADR 0009, I2).
+        door_process: subprocess.Popen | None = None
+        door_port: int | None = None
+        try:
+            if door_slots:
+                door_process, door_port = _start_door(
+                    venv_python, workspace_path, door_slots, workspace_path / "door.tmp"
+                )
+            for component in input_components:
+                name = component["name"]
+                path = input_dir / input_mapping[name]
+                if component["component_type"] == "endpoint":
+                    door_url = f"http://127.0.0.1:{door_port}/{name}"
+                    path.write_bytes(
+                        json.dumps(
+                            _endpoint_input_file(component, door_url, f"door_{name}")
+                        ).encode("utf-8")
+                    )
+                else:
+                    path.write_bytes(pending_inputs[name])
+        except Exception as exc:
+            _terminate_process(door_process)
+            _fail_plugin_and_revoke(
+                evaluation_pid, evaluation_plugin_pid,
+                str(exc) or exc.__class__.__name__, str(self.request.id)
+            )
+            raise
+
         # Step 3: Run plugin script with the isolated venv's Python
         logger.debug(f"Running plugin with: {venv_python} {runtime_script}")
         start_time = time.perf_counter()
         mark_plugin_started(evaluation_pid, evaluation_plugin_pid)
 
-        run_secrets = build_secret_environment(project_settings + llm_secret_settings)
+        # The plugin's own secrets plus its run tokens; the target's real key is
+        # only ever in the door's stdin. A run-local run still gets the tokens (they
+        # are not the target's credential).
+        plugin_secrets = build_secret_environment(project_settings)
+        run_secrets = {**plugin_secrets, **door_tokens}
         secret_values = list(run_secrets.values())
         stdout_lines: list[str] = []
         stderr_path = workspace_path / "stderr.tmp"
@@ -410,7 +577,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         stderr_content = ""
         try:
             with open(stderr_path, "w+") as stderr_file:
-                child_env = plugin_run_env(run_secrets, run_local=run_local)
+                child_env = plugin_run_env(plugin_secrets, run_local=run_local)
+                child_env.update(door_tokens)
                 process = subprocess.Popen(
                     [str(venv_python), str(runtime_script)],
                     cwd=str(workspace_path),
@@ -440,6 +608,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                                 pass
 
                 returncode = process.wait()
+                _terminate_process(door_process)
+                _send_door_provenance(evaluation_pid, evaluation_plugin_pid, workspace_path)
 
                 stderr_file.seek(0)
                 stderr_content = stderr_file.read()
@@ -508,6 +678,7 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
             # subprocess before the base task converts the abort to a
             # serializable failure, otherwise it keeps running orphaned.
             _terminate_process(process)
+            _terminate_process(door_process)
             _fail_plugin_and_revoke(
                 evaluation_pid,
                 evaluation_plugin_pid,

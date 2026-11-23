@@ -63,6 +63,33 @@ def load_plugin(plugin_spec: str):
     return plugin_class
 
 
+def resolve_data_adapter(plugin, name: str, spec: dict):
+    """The registry data adapter for a slot, and the value type to produce.
+
+    A builtin adapter is resolved by id; an adapter a package ships is imported
+    from its module. The produce type is the first the adapter makes that the slot
+    accepts (ADR 0009). Returns ``(adapter, produce)`` or ``None``.
+    """
+    from aisc_plugin_interface.adapters import BUILTIN_ADAPTERS, DataAdapter
+
+    module_name = spec.get("module") or ""
+    if module_name:
+        cls = getattr(importlib.import_module(module_name), spec["class"])
+    else:
+        cls = next(
+            (c for c in BUILTIN_ADAPTERS if getattr(c, "id", "") == spec.get("adapter")),
+            None,
+        )
+    if cls is None or not issubclass(cls, DataAdapter):
+        return None
+    adapter = cls(spec.get("config") or {})
+    slot = next((d for d in plugin._input_definitions if d.name == name), None)
+    accepts = set(getattr(slot, "accepts", None) or [])
+    produces = tuple(getattr(adapter, "produces", ()) or ())
+    produce = next((p for p in produces if p in accepts), produces[0] if produces else "")
+    return adapter, produce
+
+
 def main():
     working_dir = Path.cwd()
 
@@ -97,6 +124,7 @@ def main():
             plugin._set_project_settings(config.get("project_settings", {}))
 
         input_mapping = config.get("input_mapping", {})
+        input_adapters = config.get("input_adapters", {})
         for name, path in input_mapping.items():
             # Resolve input paths relative to working directory
             file_path = Path(path)
@@ -108,7 +136,13 @@ def main():
                 continue
 
             print(f"📥 Loading input '{name}' from {path}")
-            plugin.set_input_content(name, file_path.read_bytes())
+            spec = input_adapters.get(name)
+            resolved = resolve_data_adapter(plugin, name, spec) if spec else None
+            if resolved is not None:
+                adapter, produce = resolved
+                plugin.set_input_content(name, adapter.load(file_path.read_bytes(), produce))
+            else:
+                plugin.set_input_content(name, file_path.read_bytes())
 
         print("🚀 Running evaluation...")
         plugin_config = config.get("plugin_config", {})

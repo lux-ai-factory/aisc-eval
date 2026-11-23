@@ -160,6 +160,15 @@ def get_evaluation_inputs(evaluation_pid: uuid.UUID) -> dict[str, Any]:
     return resp.json()
 
 
+def post_provenance(evaluation_pid: uuid.UUID, provenance: dict[str, Any]) -> None:
+    """Send the run door's call counts, merged into each input's provenance."""
+    requests.post(
+        f"{API_URL_PREFIX}/evaluations/{evaluation_pid}/provenance",
+        json={"provenance": provenance},
+        headers=headers,
+    )
+
+
 def get_evaluation(
     evaluation_pid: uuid.UUID,
 ) -> Evaluation:
