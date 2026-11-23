@@ -43,10 +43,19 @@ def test_door_slots_decrypts_the_key_and_mints_a_token():
     assert slot["allowed"] == ["10.0.0.5:11434"]
     assert slot["stack"] == ["postgres"]
     assert slot["config_hash"] == "abc"
-    # the token is minted here and handed to the plugin under its own key
-    assert set(tokens) == {"door_target"}
-    assert slot["token"] == tokens["door_target"]
-    assert len(tokens["door_target"]) > 16
+    # the token is minted here and handed to the plugin under the name
+    # `get_secret(llm.secret_key)` looks up (ADR 0009 D-16)
+    assert set(tokens) == {"AISC_SECRET_DOOR_TARGET"}
+    assert slot["token"] == tokens["AISC_SECRET_DOOR_TARGET"]
+    assert len(tokens["AISC_SECRET_DOOR_TARGET"]) > 16
+
+
+def test_the_door_token_is_reachable_by_get_secret():
+    from aisc_plugin_interface.base_evaluation_plugin import BaseEvaluationPlugin
+
+    _, tokens = celery_tasks._door_slots([_endpoint_component()])
+    env_name = BaseEvaluationPlugin._secret_environment_name("door_target")
+    assert env_name in tokens
 
 
 def test_the_door_spec_carries_no_token_for_a_data_input():

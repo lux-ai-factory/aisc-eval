@@ -153,7 +153,14 @@ def _door_slots(input_components: list[dict]) -> tuple[dict, dict]:
         name = component["name"]
         token_key = f"door_{name}"
         token = pysecrets.token_urlsafe(24)
-        tokens[token_key] = token
+        # The plugin reads the token with `self.get_secret(llm.secret_key)`, which
+        # looks up `AISC_SECRET_<normalized key>` — so the child env var must carry
+        # that name, not the bare key (ADR 0009 D-16).
+        token_env = SECRET_ENV_PREFIX + "".join(
+            character.upper() if character.isalnum() else "_"
+            for character in token_key
+        )
+        tokens[token_env] = token
         target = component.get("install_target") or {}
         slots[name] = {
             "adapter": component.get("adapter") or "",
