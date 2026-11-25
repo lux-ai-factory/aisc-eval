@@ -24,7 +24,10 @@ logger.debug("=== CELERY APP CREATED ===")
 #: the queue a plugin's manifest read and its form hooks go to: a worker process of its own serves it, one task at a
 #: time, so a configure page never waits behind the runs; the run worker reads only the default queue
 PLUGIN_DECLARATIONS_QUEUE = "plugin-declarations"
-PLUGIN_DECLARATION_TASKS = ("aisc_eval.celery_tasks.read_manifest", "aisc_eval.celery_tasks.plugin_hook")
+PLUGIN_DECLARATION_TASKS = (
+    "aisc_eval.celery_tasks.read_manifest",
+    "aisc_eval.celery_tasks.plugin_hook",
+)
 
 # Configure Celery settings for 30-minute task execution with heartbeat
 celery_config = {
@@ -44,7 +47,9 @@ celery_config = {
     "broker_use_ssl": env.MQ_USE_SSL,
     "results_extended": True,
     "task_track_started": True,
-    "task_routes": {name: {"queue": PLUGIN_DECLARATIONS_QUEUE} for name in PLUGIN_DECLARATION_TASKS},
+    "task_routes": {
+        name: {"queue": PLUGIN_DECLARATIONS_QUEUE} for name in PLUGIN_DECLARATION_TASKS
+    },
 }
 
 # Only add SSL configuration in production
@@ -67,7 +72,11 @@ logger.debug("=== CELERY CONFIGURATION COMPLETED ===")
 def _name_the_run_in_log_lines(task=None, args=(), kwargs=None, **_) -> None:
     """Every line a task logs names the run (evaluation pid) it serves, when its arguments name one."""
     try:
-        arguments = inspect.signature(task.run).bind_partial(*(args or ()), **(kwargs or {})).arguments
+        arguments = (
+            inspect.signature(task.run)
+            .bind_partial(*(args or ()), **(kwargs or {}))
+            .arguments
+        )
     except (TypeError, ValueError, AttributeError):
         arguments = {}
     pid = arguments.get("evaluation_pid")

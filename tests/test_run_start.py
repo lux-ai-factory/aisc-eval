@@ -138,7 +138,8 @@ def _deliver():
         [],
         [],
         EVALUATION,
-        uuid.UUID(EVALUATION_PLUGIN), pins=recorded_pins("aisc-plugin-strongreject-mijke", "0.1.3")
+        uuid.UUID(EVALUATION_PLUGIN),
+        pins=recorded_pins("aisc-plugin-strongreject-mijke", "0.1.3"),
     )
 
 

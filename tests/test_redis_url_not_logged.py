@@ -35,7 +35,9 @@ def test_the_worker_never_logs_the_redis_password(monkeypatch):
     the_app = celery_app_module.celery_app
     try:
         importlib.reload(env_module)
-        assert FAKE_PASSWORD in env_module.REDIS_BACKEND_URL, "the test password is not in the backend URL"
+        assert (
+            FAKE_PASSWORD in env_module.REDIS_BACKEND_URL
+        ), "the test password is not in the backend URL"
         importlib.reload(celery_app_module)
     finally:
         celery_app_module.celery_app = the_app
@@ -44,8 +46,12 @@ def test_the_worker_never_logs_the_redis_password(monkeypatch):
         monkeypatch.delenv("REDIS_PASSWORD")
         importlib.reload(env_module)
     logged = "\n".join(recorder.lines)
-    assert "redis" in logged.lower(), "nothing about Redis was logged: the check saw no line"
-    assert FAKE_PASSWORD not in logged, "the Redis backend URL, password and all, was logged"
+    assert (
+        "redis" in logged.lower()
+    ), "nothing about Redis was logged: the check saw no line"
+    assert (
+        FAKE_PASSWORD not in logged
+    ), "the Redis backend URL, password and all, was logged"
 
 
 def test_a_plugin_never_gets_the_redis_password():

@@ -74,7 +74,15 @@ def test_a_test_that_fails_stops_the_runs_other_tests(broker, monkeypatch):
     )
     with pytest.raises(RuntimeError):
         celery_tasks.run_plugin.run(
-            "pkg", "Plugin", "1.0", {}, [], [], EVALUATION, FAILING, pins=recorded_pins("pkg", "1.0")
+            "pkg",
+            "Plugin",
+            "1.0",
+            {},
+            [],
+            [],
+            EVALUATION,
+            FAILING,
+            pins=recorded_pins("pkg", "1.0"),
         )
     assert broker["failed"][0][:2] == (EVALUATION, FAILING)
     assert stopped(broker) == [PENDING, RUNNING]
@@ -99,7 +107,9 @@ def test_a_failed_install_stops_the_tests_of_the_runs_other_packages(
         ),
     )
     with pytest.raises(RuntimeError):
-        celery_tasks.install_package.run("pkg", "1.0", EVALUATION, [FAILING], pins=recorded_pins("pkg", "1.0"))
+        celery_tasks.install_package.run(
+            "pkg", "1.0", EVALUATION, [FAILING], pins=recorded_pins("pkg", "1.0")
+        )
     assert broker["failed"][0] == (EVALUATION, FAILING, "no such package")
     assert stopped(broker) == [PENDING, RUNNING]
     assert broker["revoked"] == TASKS
@@ -139,7 +149,15 @@ def test_a_test_that_starts_after_the_run_failed_is_marked_stopped(broker, monke
     )
     assert (
         celery_tasks.run_plugin.run(
-            "pkg", "Plugin", "1.0", {}, [], [], EVALUATION, FAILING, pins=recorded_pins("pkg", "1.0")
+            "pkg",
+            "Plugin",
+            "1.0",
+            {},
+            [],
+            [],
+            EVALUATION,
+            FAILING,
+            pins=recorded_pins("pkg", "1.0"),
         )
         == []
     )
@@ -156,7 +174,15 @@ def test_a_test_already_marked_stopped_keeps_its_mark_when_it_starts(
     )
     assert (
         celery_tasks.run_plugin.run(
-            "pkg", "Plugin", "1.0", {}, [], [], EVALUATION, FAILING, pins=recorded_pins("pkg", "1.0")
+            "pkg",
+            "Plugin",
+            "1.0",
+            {},
+            [],
+            [],
+            EVALUATION,
+            FAILING,
+            pins=recorded_pins("pkg", "1.0"),
         )
         == []
     )
@@ -207,6 +233,7 @@ def test_the_runs_task_list_names_every_install_and_test_and_lasts_as_long_as_th
     monkeypatch.setattr(
         celery_tasks.plugin_loader, "list_packages", lambda refresh=False: {}
     )
+
     def keep_the_task_list(key, value, ex, nx=False):
         # the run's registration for the sweep is set beside it
         if key.startswith("eval_tasks:"):
@@ -264,7 +291,8 @@ def test_an_input_that_cannot_be_fetched_fails_the_test_once_and_stops_the_run(
             [{"component_type": "dataset", "name": "data", "data": "data.csv"}],
             [],
             EVALUATION,
-            FAILING, pins=recorded_pins("pkg", "1.0")
+            FAILING,
+            pins=recorded_pins("pkg", "1.0"),
         )
     assert own_marks(broker) == ["404 for the dataset"]
     assert stopped(broker) == [PENDING, RUNNING]
@@ -281,7 +309,8 @@ def test_an_unsupported_input_fails_the_test_once_and_stops_the_run(broker):
             [{"component_type": "telepathy", "name": "x"}],
             [],
             EVALUATION,
-            FAILING, pins=recorded_pins("pkg", "1.0")
+            FAILING,
+            pins=recorded_pins("pkg", "1.0"),
         )
     assert own_marks(broker) == ["Unsupported component type: telepathy"]
     assert stopped(broker) == [PENDING, RUNNING]
@@ -297,7 +326,15 @@ def test_a_failed_venv_fails_the_test_once_and_stops_the_run(broker, monkeypatch
     )
     with pytest.raises(RuntimeError):
         celery_tasks.run_plugin.run(
-            "pkg", "Plugin", "1.0", {}, [], [], EVALUATION, FAILING, pins=recorded_pins("pkg", "1.0")
+            "pkg",
+            "Plugin",
+            "1.0",
+            {},
+            [],
+            [],
+            EVALUATION,
+            FAILING,
+            pins=recorded_pins("pkg", "1.0"),
         )
     assert own_marks(broker) == ["no python"]
     assert stopped(broker) == [PENDING, RUNNING]
@@ -340,7 +377,8 @@ def test_a_minted_pass_is_revoked_when_the_test_fails_before_its_plugin_starts(
                 ],
                 [],
                 EVALUATION,
-                FAILING, pins=recorded_pins("pkg", "1.0")
+                FAILING,
+                pins=recorded_pins("pkg", "1.0"),
             )
     finally:
         run_context._current.reset(token)

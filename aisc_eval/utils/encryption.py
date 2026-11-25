@@ -13,5 +13,7 @@ def decrypt_value(ciphertext: str) -> str:
     if own:
         keys.append(Fernet(own.encode()))
     secret = os.environ["DJANGO_SECRET_KEY"]
-    keys.append(Fernet(base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())))
+    keys.append(
+        Fernet(base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest()))
+    )
     return MultiFernet(keys).decrypt(ciphertext.encode()).decode()

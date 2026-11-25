@@ -65,7 +65,15 @@ def _plugin(monkeypatch, seen, *, stderr="", returncode=0):
 
 def _run(plugin_config, project_settings):
     return celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", plugin_config, [], project_settings, "eval", "ep", pins=recorded_pins("pkg", "1.0")
+        "pkg",
+        "Plugin",
+        "1.0",
+        plugin_config,
+        [],
+        project_settings,
+        "eval",
+        "ep",
+        pins=recorded_pins("pkg", "1.0"),
     )
 
 

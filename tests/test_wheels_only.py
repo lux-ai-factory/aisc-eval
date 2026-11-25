@@ -45,41 +45,74 @@ def _local(tmp_path):
 
 
 def test_a_catalogue_plugin_is_locked_and_installed_from_wheels_only(steps, tmp_path):
-    lock = plugin_process.lock_dependencies("pkg", "1.0", {"source": "registry"}, A, tmp_path, ME, None)
-    plugin_process.build_venv("pkg", "1.0", {"source": "registry"}, tmp_path, ME, None,
-                              pins=plugin_process.Pins(A, lock))
+    lock = plugin_process.lock_dependencies(
+        "pkg", "1.0", {"source": "registry"}, A, tmp_path, ME, None
+    )
+    plugin_process.build_venv(
+        "pkg",
+        "1.0",
+        {"source": "registry"},
+        tmp_path,
+        ME,
+        None,
+        pins=plugin_process.Pins(A, lock),
+    )
     (tmp_path / "unpinned").mkdir()
-    plugin_process.build_venv("pkg", "1.0", {"source": "registry"}, tmp_path / "unpinned", ME, None)
-    resolving = [a for a in steps["argv"] if a[:3] in (["uv", "pip", "compile"], ["uv", "pip", "install"])]
+    plugin_process.build_venv(
+        "pkg", "1.0", {"source": "registry"}, tmp_path / "unpinned", ME, None
+    )
+    resolving = [
+        a
+        for a in steps["argv"]
+        if a[:3] in (["uv", "pip", "compile"], ["uv", "pip", "install"])
+    ]
     assert len(resolving) == 3 and all(_wheels_only(a) for a in resolving)
 
 
 def test_a_local_plugin_keeps_its_source_builds(steps, tmp_path):
     info = _local(tmp_path)
-    lock = plugin_process.lock_dependencies("pkg", "1.0", info, None, tmp_path, ME, None)
+    lock = plugin_process.lock_dependencies(
+        "pkg", "1.0", info, None, tmp_path, ME, None
+    )
     (tmp_path / "run").mkdir()
-    plugin_process.build_venv("pkg", "1.0", info, tmp_path / "run", ME, None, pins=plugin_process.Pins(None, lock))
+    plugin_process.build_venv(
+        "pkg",
+        "1.0",
+        info,
+        tmp_path / "run",
+        ME,
+        None,
+        pins=plugin_process.Pins(None, lock),
+    )
     assert not any("--only-binary" in a for a in steps["argv"])
 
 
 def test_a_dependency_with_no_wheel_fails_naming_it(steps, tmp_path):
-    steps["fail"] = (["uv", "pip", "compile"],
-                     "  x No solution found when resolving dependencies:\n  Because oldlib==0.1 has no usable "
-                     "wheels and building from source is disabled, we can conclude that pkg==1.0 cannot be used.")
+    steps["fail"] = (
+        ["uv", "pip", "compile"],
+        "  x No solution found when resolving dependencies:\n  Because oldlib==0.1 has no usable "
+        "wheels and building from source is disabled, we can conclude that pkg==1.0 cannot be used.",
+    )
     with pytest.raises(plugin_process.InstallFailed) as failed:
-        plugin_process.lock_dependencies("pkg", "1.0", {"source": "registry"}, A, tmp_path, ME, None)
+        plugin_process.lock_dependencies(
+            "pkg", "1.0", {"source": "registry"}, A, tmp_path, ME, None
+        )
     text = str(failed.value)
     assert "wheels only" in text and "oldlib==0.1" in text
 
 
 def test_uvs_own_wrapped_message_is_recognised(steps, tmp_path):
     """uv wraps its message at the terminal width: the words that say a wheel is missing may span lines."""
-    steps["fail"] = (["uv", "pip", "compile"],
-                     "  x No solution found when resolving dependencies:\n  -> Because aisc-bed-oldlib==0.1 has no "
-                     "usable wheels and needs-oldlib==1.0\n      depends on aisc-bed-oldlib==0.1, we can conclude that "
-                     "needs-oldlib==1.0\n      cannot be used.\n\n      hint: Wheels are required for `aisc-bed-oldlib` "
-                     "because building from\n      source is disabled for all packages (i.e., with `--no-build`)\n")
+    steps["fail"] = (
+        ["uv", "pip", "compile"],
+        "  x No solution found when resolving dependencies:\n  -> Because aisc-bed-oldlib==0.1 has no "
+        "usable wheels and needs-oldlib==1.0\n      depends on aisc-bed-oldlib==0.1, we can conclude that "
+        "needs-oldlib==1.0\n      cannot be used.\n\n      hint: Wheels are required for `aisc-bed-oldlib` "
+        "because building from\n      source is disabled for all packages (i.e., with `--no-build`)\n",
+    )
     with pytest.raises(plugin_process.InstallFailed) as failed:
-        plugin_process.lock_dependencies("needs-oldlib", "1.0", {"source": "registry"}, A, tmp_path, ME, None)
+        plugin_process.lock_dependencies(
+            "needs-oldlib", "1.0", {"source": "registry"}, A, tmp_path, ME, None
+        )
     assert str(failed.value).startswith("a catalogue plugin installs from wheels only")
     assert "aisc-bed-oldlib" in str(failed.value)

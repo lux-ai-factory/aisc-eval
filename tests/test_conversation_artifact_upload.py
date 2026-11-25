@@ -2,6 +2,7 @@
 recorded calls and the plugin's execution log go to the engine with holds_conversation=true, so the engine
 shows them to the project's owners and editors only. Any other file goes unmarked (the engine still applies its
 own name rule)."""
+
 import uuid
 
 import http_fake
@@ -25,16 +26,27 @@ class _Ok:
 
 def _sent_forms(monkeypatch):
     sent = []
-    http_fake.route(monkeypatch, post=lambda url, data=None, files=None, **k: sent.append(data or {}) or _Ok())
+    http_fake.route(
+        monkeypatch,
+        post=lambda url, data=None, files=None, **k: sent.append(data or {}) or _Ok(),
+    )
     return sent
 
 
 def test_the_upload_says_when_a_file_holds_a_conversation(monkeypatch):
     sent = _sent_forms(monkeypatch)
     try:
-        api_client.upload_artifact(EVALUATION, PLUGIN_RUN, celery_tasks.CALLS_FILE, b"{}", holds_conversation=True)
+        api_client.upload_artifact(
+            EVALUATION,
+            PLUGIN_RUN,
+            celery_tasks.CALLS_FILE,
+            b"{}",
+            holds_conversation=True,
+        )
     except TypeError as exc:
-        raise AssertionError(f"the upload cannot say a file holds a conversation: {exc}") from None
+        raise AssertionError(
+            f"the upload cannot say a file holds a conversation: {exc}"
+        ) from None
     assert sent[0].get("holds_conversation") == "true"
 
 
@@ -46,9 +58,13 @@ def test_an_ordinary_file_is_uploaded_unmarked(monkeypatch):
 
 def test_the_runs_recorded_calls_are_uploaded_as_a_conversation(monkeypatch):
     uploads = []
-    monkeypatch.setattr(celery_tasks, "upload_artifact", lambda *a, **k: uploads.append((a, k)))
+    monkeypatch.setattr(
+        celery_tasks, "upload_artifact", lambda *a, **k: uploads.append((a, k))
+    )
     celery_tasks._keep_the_runs_calls(EVALUATION, PLUGIN_RUN, b'{"prompt": "hi"}\n', [])
     assert len(uploads) == 1
     args, kwargs = uploads[0]
     assert args[2] == celery_tasks.CALLS_FILE
-    assert kwargs.get("holds_conversation") is True, "the run's recorded calls are uploaded unmarked"
+    assert (
+        kwargs.get("holds_conversation") is True
+    ), "the run's recorded calls are uploaded unmarked"

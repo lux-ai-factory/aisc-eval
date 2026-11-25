@@ -70,7 +70,15 @@ def _plugin(
 
 def _run(project_settings):
     return celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", {}, [], project_settings, "eval", "ep", pins=recorded_pins("pkg", "1.0")
+        "pkg",
+        "Plugin",
+        "1.0",
+        {},
+        [],
+        project_settings,
+        "eval",
+        "ep",
+        pins=recorded_pins("pkg", "1.0"),
     )
 
 
@@ -139,7 +147,9 @@ def test_a_failed_install_is_reported_and_logged_with_its_key_redacted(
         lambda *a, **kw: _Failed("error: api_key=abcd1234efgh refused"),
     )
     with pytest.raises(RuntimeError):
-        celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0"))
+        celery_tasks.install_package.run(
+            "pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0")
+        )
     assert worker["failed"] == [("eval", "ep", "error: api_key=[redacted] refused")]
     assert "abcd1234efgh" not in caplog.text
 
@@ -180,7 +190,7 @@ def test_the_progress_a_plugin_reports_is_stored_without_secrets(
             store_result=lambda task_id, meta, state=None, **kw: stored.append(
                 json.dumps(meta, default=str)
             )
-        )
+        ),
     )
     monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
     line = json.dumps(
@@ -329,7 +339,7 @@ def test_a_secret_used_as_a_key_in_progress_is_stored_scrubbed(
             store_result=lambda task_id, meta, state=None, **kw: stored.append(
                 json.dumps(meta, default=str)
             )
-        )
+        ),
     )
     monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
     line = json.dumps(

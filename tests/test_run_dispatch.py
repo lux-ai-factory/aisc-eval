@@ -22,14 +22,19 @@ from aisc_eval.data_model.evaluation import Evaluation
 
 EVALUATION = "11111111-1111-1111-1111-111111111111"
 PROJECT = "22222222-2222-2222-2222-222222222222"
-FIRST, SECOND = "33333333-3333-3333-3333-333333333331", "33333333-3333-3333-3333-333333333332"
+FIRST, SECOND = (
+    "33333333-3333-3333-3333-333333333331",
+    "33333333-3333-3333-3333-333333333332",
+)
 
 
 def _registry():
     try:
         return importlib.import_module("aisc_eval.run_registry")
     except ModuleNotFoundError:
-        raise AssertionError("the worker keeps no registry of the runs it dispatched (aisc_eval.run_registry)") from None
+        raise AssertionError(
+            "the worker keeps no registry of the runs it dispatched (aisc_eval.run_registry)"
+        ) from None
 
 
 class FakeRedis:
@@ -56,11 +61,22 @@ class FakeRedis:
 
 def _run_of_three_tests():
     def test(package):
-        return {"pid": str(uuid.uuid4()), "name": "Plugin", "package_name": package, "version": "1.0",
-                "plugin_config": None, "evaluation_inputs": []}
+        return {
+            "pid": str(uuid.uuid4()),
+            "name": "Plugin",
+            "package_name": package,
+            "version": "1.0",
+            "plugin_config": None,
+            "evaluation_inputs": [],
+        }
 
-    return Evaluation.model_validate({"pid": EVALUATION, "project": {"pid": PROJECT, "name": "mijke"},
-                                      "evaluation_plugins": [test("pkg-a"), test("pkg-b"), test("pkg-c")]})
+    return Evaluation.model_validate(
+        {
+            "pid": EVALUATION,
+            "project": {"pid": PROJECT, "name": "mijke"},
+            "evaluation_plugins": [test("pkg-a"), test("pkg-b"), test("pkg-c")],
+        }
+    )
 
 
 class _Dispatch(types.SimpleNamespace):
@@ -69,8 +85,16 @@ class _Dispatch(types.SimpleNamespace):
 
 @pytest.fixture
 def dispatch(monkeypatch):
-    seen = _Dispatch(redis=FakeRedis(), applied=0, apply_raises=None, status="Pending", processing=[],
-                     processing_raises=None, failed=[], plugin_failed=[])
+    seen = _Dispatch(
+        redis=FakeRedis(),
+        applied=0,
+        apply_raises=None,
+        status="Pending",
+        processing=[],
+        processing_raises=None,
+        failed=[],
+        plugin_failed=[],
+    )
 
     class _Workflow:
         def __or__(self, other):
@@ -88,32 +112,52 @@ def dispatch(monkeypatch):
         return "Processing"
 
     run = _run_of_three_tests()
-    monkeypatch.setattr(celery_tasks.plugin_loader, "list_packages", lambda refresh=False: {})
+    monkeypatch.setattr(
+        celery_tasks.plugin_loader, "list_packages", lambda refresh=False: {}
+    )
     monkeypatch.setattr(celery_tasks, "get_evaluation", lambda pid: run)
-    monkeypatch.setattr(celery_tasks, "get_evaluation_request",
-                        lambda pid: {"status": seen.status,
-                                     "evaluation_plugins": [{"pid": str(t.pid), "status": "Pending"}
-                                                            for t in run.evaluation_plugins]})
+    monkeypatch.setattr(
+        celery_tasks,
+        "get_evaluation_request",
+        lambda pid: {
+            "status": seen.status,
+            "evaluation_plugins": [
+                {"pid": str(t.pid), "status": "Pending"} for t in run.evaluation_plugins
+            ],
+        },
+    )
     monkeypatch.setattr(celery_tasks, "get_evaluation_inputs", lambda pid: {})
     monkeypatch.setattr(celery_tasks, "get_project_settings_by_pid", lambda *a: [])
     monkeypatch.setattr(celery_tasks, "group", lambda *a: _Workflow())
     monkeypatch.setattr(celery_tasks, "chain", lambda *a: a)
     monkeypatch.setattr(celery_tasks, "mark_processing", mark_processing, raising=False)
-    monkeypatch.setattr(celery_tasks, "mark_failed", lambda pid: seen.failed.append(pid))
-    monkeypatch.setattr(celery_tasks, "mark_plugin_failed",
-                        lambda pid, ep, message: seen.plugin_failed.append((pid, ep, message)))
-    fake_app = types.SimpleNamespace(backend=types.SimpleNamespace(client=seen.redis),
-                                     conf=types.SimpleNamespace(task_time_limit=24300, task_soft_time_limit=24000))
+    monkeypatch.setattr(
+        celery_tasks, "mark_failed", lambda pid: seen.failed.append(pid)
+    )
+    monkeypatch.setattr(
+        celery_tasks,
+        "mark_plugin_failed",
+        lambda pid, ep, message: seen.plugin_failed.append((pid, ep, message)),
+    )
+    fake_app = types.SimpleNamespace(
+        backend=types.SimpleNamespace(client=seen.redis),
+        conf=types.SimpleNamespace(task_time_limit=24300, task_soft_time_limit=24000),
+    )
     monkeypatch.setattr(celery_tasks, "celery_app", fake_app)
     return seen
 
 
-def test_the_first_delivery_claims_the_run_dispatches_it_and_marks_it_processing(dispatch):
+def test_the_first_delivery_claims_the_run_dispatches_it_and_marks_it_processing(
+    dispatch,
+):
     out = celery_tasks._start_evaluation(EVALUATION)
     assert dispatch.applied == 1
     assert dispatch.processing == [EVALUATION], "the run is never shown Processing"
     [entry] = _registry().registered(dispatch.redis)
-    assert set(entry.tests.values()) == set(out["plugin_task_ids"]) and len(entry.installs) == 3
+    assert (
+        set(entry.tests.values()) == set(out["plugin_task_ids"])
+        and len(entry.installs) == 3
+    )
 
 
 def test_a_second_delivery_of_the_dispatcher_dispatches_nothing(dispatch):
@@ -136,7 +180,10 @@ def test_a_dispatch_that_fails_releases_the_claim_and_fails_the_run(dispatch):
     celery_tasks.run_evaluation.run(EVALUATION)
     assert dispatch.redis.get(f"eval_tasks:{EVALUATION}") is None
     assert dispatch.failed == [EVALUATION]
-    assert all(m.startswith("the run could not start: ConnectionError") for _, _, m in dispatch.plugin_failed)
+    assert all(
+        m.startswith("the run could not start: ConnectionError")
+        for _, _, m in dispatch.plugin_failed
+    )
     assert _registry().registered(dispatch.redis) == []
 
 
@@ -144,8 +191,12 @@ def test_the_deadline_is_before_the_runs_ticket_expires(dispatch):
     registry = _registry()
     expiry = int(time.time()) + 3600
     acting_for = getattr(run_context, "acting_for", None)
-    assert acting_for is not None, "the worker cannot act as a run outside a task (run_context.acting_for)"
-    with acting_for({"project": PROJECT, "evaluation": EVALUATION, "ticket": f"{expiry}.mac"}):
+    assert (
+        acting_for is not None
+    ), "the worker cannot act as a run outside a task (run_context.acting_for)"
+    with acting_for(
+        {"project": PROJECT, "evaluation": EVALUATION, "ticket": f"{expiry}.mac"}
+    ):
         celery_tasks._start_evaluation(EVALUATION)
     [entry] = registry.registered(dispatch.redis)
     assert entry.deadline <= expiry - registry.DEADLINE_MARGIN_S
@@ -155,12 +206,20 @@ def test_a_processing_mark_that_fails_does_not_stop_the_run(dispatch):
     dispatch.processing_raises = requests.ConnectionError("x")
     out = celery_tasks._start_evaluation(EVALUATION)
     assert out["plugin_task_ids"] and dispatch.applied == 1
-    assert _registry().registered(dispatch.redis), "the run was not registered for the sweep"
+    assert _registry().registered(
+        dispatch.redis
+    ), "the run was not registered for the sweep"
 
 
 def test_one_failed_mark_does_not_stop_the_others(dispatch, monkeypatch):
-    monkeypatch.setattr(celery_tasks, "get_evaluation_request",
-                        lambda pid: {"status": "Pending", "evaluation_plugins": [{"pid": FIRST}, {"pid": SECOND}]})
+    monkeypatch.setattr(
+        celery_tasks,
+        "get_evaluation_request",
+        lambda pid: {
+            "status": "Pending",
+            "evaluation_plugins": [{"pid": FIRST}, {"pid": SECOND}],
+        },
+    )
 
     def mark(pid, ep, message):
         if ep == FIRST:

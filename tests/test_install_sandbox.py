@@ -22,14 +22,18 @@ A = "a" * 64
 
 def test_the_index_hosts_are_all_an_install_may_reach():
     allowed = egress.index_egress(INDEX)
-    assert allowed.hosts == frozenset({"devpi:3141", "pypi.org:443", "files.pythonhosted.org:443"})
+    assert allowed.hosts == frozenset(
+        {"devpi:3141", "pypi.org:443", "files.pythonhosted.org:443"}
+    )
     # the stack's index is an internal address: allowed for this install, by its own rule
     assert allowed.rule["allowed_hosts"] == ["devpi:3141"]
     assert allowed.rule["denied_addresses"] == []
 
 
 def test_without_an_index_of_its_own_an_install_reaches_pypi_only():
-    assert egress.index_egress(None).hosts == frozenset({"pypi.org:443", "files.pythonhosted.org:443"})
+    assert egress.index_egress(None).hosts == frozenset(
+        {"pypi.org:443", "files.pythonhosted.org:443"}
+    )
 
 
 def test_an_install_step_goes_through_the_proxy_it_is_given(monkeypatch):
@@ -37,7 +41,8 @@ def test_an_install_step_goes_through_the_proxy_it_is_given(monkeypatch):
     monkeypatch.setattr(
         plugin_process.subprocess,
         "run",
-        lambda argv, **kw: calls.append(kw) or subprocess.CompletedProcess(argv, 0, "", ""),
+        lambda argv, **kw: calls.append(kw)
+        or subprocess.CompletedProcess(argv, 0, "", ""),
     )
     monkeypatch.setattr(plugin_process, "end_processes_of", lambda user: None)
     proxy = egress.proxy_env("t0ken")
@@ -45,7 +50,10 @@ def test_an_install_step_goes_through_the_proxy_it_is_given(monkeypatch):
     plugin_process.run_install(["uv", "pip", "install", "x"], user, timeout=5)
     env = calls[0]["env"]
     assert {name: env[name] for name in proxy} == proxy
-    assert env["HOME"] == "/tmp/install-home" and env["UV_CACHE_DIR"] == "/tmp/install-home/.cache/uv"
+    assert (
+        env["HOME"] == "/tmp/install-home"
+        and env["UV_CACHE_DIR"] == "/tmp/install-home/.cache/uv"
+    )
     assert (calls[0]["user"], calls[0]["group"]) == (10150, 10150)
 
 
@@ -64,7 +72,9 @@ def root_worker(monkeypatch, tmp_path):
     monkeypatch.setattr(plugin_process.os, "lchown", lambda *a: None)
     monkeypatch.setattr(egress, "in_force", lambda: True)
     monkeypatch.setattr(egress, "proxy_answers", lambda: True)
-    monkeypatch.setattr(egress.grp, "getgrnam", lambda name: type("G", (), {"gr_gid": os.getgid()}))
+    monkeypatch.setattr(
+        egress.grp, "getgrnam", lambda name: type("G", (), {"gr_gid": os.getgid()})
+    )
     policies = tmp_path / "policies"
     policies.mkdir()
     monkeypatch.setattr(egress, "POLICIES", policies)
@@ -82,21 +92,31 @@ def root_worker(monkeypatch, tmp_path):
 
     monkeypatch.setattr(plugin_process, "lease_run_user", lease)
     monkeypatch.setattr(
-        plugin_process, "install_user", lambda: pytest.fail("installed as the image's shared install user")
+        plugin_process,
+        "install_user",
+        lambda: pytest.fail("installed as the image's shared install user"),
     )
-    monkeypatch.setattr(plugin_process, "end_processes_of", lambda user: seen["ended"].append(user.uid))
+    monkeypatch.setattr(
+        plugin_process, "end_processes_of", lambda user: seen["ended"].append(user.uid)
+    )
 
     def run_install(argv, user, timeout):
         token = user.proxy["HTTP_PROXY"].split(":")[2].split("@")[0]
         rule = policies / (hashlib.sha256(token.encode()).hexdigest() + ".json")
-        seen["steps"].append({
-            "argv": argv,
-            "user": user,
-            "hosts": json.loads(rule.read_text())["hosts"] if rule.exists() else None,
-            "home_exists": Path(user.home).is_dir(),
-        })
+        seen["steps"].append(
+            {
+                "argv": argv,
+                "user": user,
+                "hosts": json.loads(rule.read_text())["hosts"]
+                if rule.exists()
+                else None,
+                "home_exists": Path(user.home).is_dir(),
+            }
+        )
         if argv[:3] == ["uv", "pip", "compile"]:
-            Path(argv[argv.index("-o") + 1]).write_text(f"pkg==1.0 \\\n    --hash=sha256:{A}\n")
+            Path(argv[argv.index("-o") + 1]).write_text(
+                f"pkg==1.0 \\\n    --hash=sha256:{A}\n"
+            )
         return _Ok()
 
     monkeypatch.setattr(plugin_process, "run_install", run_install)
@@ -116,7 +136,9 @@ def root_worker(monkeypatch, tmp_path):
 
 
 def _warm(seen):
-    celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0"))
+    celery_tasks.install_package.run(
+        "pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0")
+    )
 
 
 def _kept(seen):
@@ -124,14 +146,22 @@ def _kept(seen):
         pass
 
 
-@pytest.mark.parametrize("install", [_warm, _kept], ids=["cache warm-up", "kept environment"])
-def test_a_root_worker_installs_as_a_leased_user_that_reaches_only_the_index(root_worker, install):
+@pytest.mark.parametrize(
+    "install", [_warm, _kept], ids=["cache warm-up", "kept environment"]
+)
+def test_a_root_worker_installs_as_a_leased_user_that_reaches_only_the_index(
+    root_worker, install
+):
     install(root_worker)
     steps = root_worker["steps"]
     assert steps, "nothing was installed"
     for step in steps:
         assert step["user"].uid in root_worker["leased"]
-        assert sorted(step["hosts"]) == ["devpi:3141", "files.pythonhosted.org:443", "pypi.org:443"]
+        assert sorted(step["hosts"]) == [
+            "devpi:3141",
+            "files.pythonhosted.org:443",
+            "pypi.org:443",
+        ]
         # a home and uv cache of its own, not the shared install user's
         assert step["home_exists"] and not step["user"].home.startswith("/home/")
         assert step["user"].proxy["NO_PROXY"] == ""
@@ -144,7 +174,9 @@ def test_a_root_worker_installs_as_a_leased_user_that_reaches_only_the_index(roo
 def test_one_lease_covers_every_step_of_one_install(root_worker):
     _kept(root_worker)
     assert len(root_worker["leased"]) == 1
-    assert {step["user"].uid for step in root_worker["steps"]} == set(root_worker["leased"])
+    assert {step["user"].uid for step in root_worker["steps"]} == set(
+        root_worker["leased"]
+    )
 
 
 def test_a_root_worker_without_its_firewall_installs_nothing(root_worker, monkeypatch):
@@ -154,7 +186,9 @@ def test_a_root_worker_without_its_firewall_installs_nothing(root_worker, monkey
     assert root_worker["steps"] == [] and root_worker["leased"] == []
 
 
-def test_a_worker_that_is_not_root_installs_as_itself_without_a_proxy(monkeypatch, tmp_path):
+def test_a_worker_that_is_not_root_installs_as_itself_without_a_proxy(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(plugin_process.os, "geteuid", lambda: 4242)
     monkeypatch.setattr(plugin_process.os, "getegid", lambda: 4242)
     with celery_tasks._installer(INDEX) as user:
@@ -166,7 +200,9 @@ def test_the_proxy_token_of_an_install_is_kept_out_of_its_failure(monkeypatch):
     proxy = egress.proxy_env("s3cret-t0ken")
 
     def failed(argv, **kw):
-        return subprocess.CompletedProcess(argv, 1, "", f"error: proxy {proxy['HTTP_PROXY']} refused")
+        return subprocess.CompletedProcess(
+            argv, 1, "", f"error: proxy {proxy['HTTP_PROXY']} refused"
+        )
 
     monkeypatch.setattr(plugin_process.subprocess, "run", failed)
     user = PluginUser(10150, 10150, "/tmp/h", switch=True, proxy=proxy)

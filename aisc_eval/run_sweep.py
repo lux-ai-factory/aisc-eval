@@ -31,7 +31,9 @@ LOST = (
     "killed). It is not run again."
 )
 TIMED_OUT = "The test ran longer than its time limit ({limit} s) and no worker reported its end."
-NEVER_STARTED = "The test never started: no worker took it before the run's time ran out."
+NEVER_STARTED = (
+    "The test never started: no worker took it before the run's time ran out."
+)
 
 #: the states of a task that ended without its test ending: it can no longer report
 _ENDED_BADLY = ("FAILURE", "REVOKED")
@@ -86,7 +88,9 @@ def lost_reason(
         ):
             return TIMED_OUT.format(limit=time_limit)
     if now > deadline:
-        return NEVER_STARTED if status == "Pending" else TIMED_OUT.format(limit=time_limit)
+        return (
+            NEVER_STARTED if status == "Pending" else TIMED_OUT.format(limit=time_limit)
+        )
     return None
 
 
@@ -103,7 +107,9 @@ def _sweep_run(
     closed = []
     with run_context.acting_for(entry.run):
         state = get_evaluation_request(entry.evaluation)
-        tests = [t for t in state.get("evaluation_plugins") or [] if isinstance(t, dict)]
+        tests = [
+            t for t in state.get("evaluation_plugins") or [] if isinstance(t, dict)
+        ]
         for test in tests:
             pid = str(test.get("pid"))
             task, install = entry.tests.get(pid), entry.installs.get(pid)
@@ -148,7 +154,9 @@ def sweep(now: float | None = None) -> list[tuple[str, str, str]]:
 def sweep_runs() -> int:
     closed = sweep()
     for evaluation, test, reason in closed:
-        logger.warning(f"Evaluation {evaluation}: test {test} failed by the sweep: {reason}")
+        logger.warning(
+            f"Evaluation {evaluation}: test {test} failed by the sweep: {reason}"
+        )
     return len(closed)
 
 

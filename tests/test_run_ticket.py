@@ -141,9 +141,9 @@ def backend(monkeypatch):
     http_fake.route(
         monkeypatch,
         **{
-            verb: (lambda method: (lambda url, *a, **kw: fake.handle(method, url, **kw)))(
-                verb.upper()
-            )
+            verb: (
+                lambda method: (lambda url, *a, **kw: fake.handle(method, url, **kw))
+            )(verb.upper())
             for verb in ("get", "post", "put", "patch", "delete")
         },
     )
@@ -397,7 +397,9 @@ def test_configurator_finalize_and_post_measurements_send_the_project_and_the_ti
     assert posts, "no post_measurements dispatched"
     for leaf in posts:
         # a chained .s(): the previous task's result (the measures) comes first
-        celery_tasks.post_measurements.run(ONE_MEASURE_POSTED, *leaf.args, **leaf.kwargs)
+        celery_tasks.post_measurements.run(
+            ONE_MEASURE_POSTED, *leaf.args, **leaf.kwargs
+        )
     _assert_configurator_headers(backend.internal_calls(), "post_measurements")
 
 
@@ -513,5 +515,7 @@ def test_standalone_finalize_and_post_measurements_send_no_project_headers(
     posts = [leaf for leaf in leaves if leaf.task.endswith("post_measurements")]
     assert posts, "standalone: no post_measurements dispatched"
     for leaf in posts:
-        celery_tasks.post_measurements.run(ONE_MEASURE_POSTED, *leaf.args, **leaf.kwargs)
+        celery_tasks.post_measurements.run(
+            ONE_MEASURE_POSTED, *leaf.args, **leaf.kwargs
+        )
     _assert_standalone_headers(backend.internal_calls(), "post_measurements")

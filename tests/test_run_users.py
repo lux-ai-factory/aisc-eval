@@ -44,18 +44,28 @@ def test_a_worker_takes_its_pool_from_its_setting():
     assert pool(" 10200 - 10200 ") == range(10200, 10201)
 
 
-@pytest.mark.parametrize("value", ["10209-10200", "10000-10099", "10003-10010", "10200", "a-b", "10200-"])
-def test_a_pool_that_is_reversed_reaches_the_image_users_or_is_not_a_range_is_refused(value):
+@pytest.mark.parametrize(
+    "value", ["10209-10200", "10000-10099", "10003-10010", "10200", "a-b", "10200-"]
+)
+def test_a_pool_that_is_reversed_reaches_the_image_users_or_is_not_a_range_is_refused(
+    value,
+):
     with pytest.raises(ValueError, match=plugin_process.RUN_UIDS_SETTING):
         need("run_uid_pool")(value)
 
 
 def test_the_firewall_covers_the_pool_the_setting_names():
-    code = ("from aisc_eval import egress, plugin_process; "
-            "print(plugin_process.RUN_UIDS.start, plugin_process.RUN_UIDS.stop, "
-            "*{rule[rule.index('--uid-owner') + 1] for rule in egress.firewall_rules()})")
-    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                          env={**os.environ, "PLUGIN_RUN_UIDS": "10200-10209"})
+    code = (
+        "from aisc_eval import egress, plugin_process; "
+        "print(plugin_process.RUN_UIDS.start, plugin_process.RUN_UIDS.stop, "
+        "*{rule[rule.index('--uid-owner') + 1] for rule in egress.firewall_rules()})"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PLUGIN_RUN_UIDS": "10200-10209"},
+    )
     assert done.stdout.split() == ["10200", "10210", "10200-10209"], done.stderr
 
 
@@ -224,7 +234,17 @@ def test_the_lease_is_released_when_the_plugin_fails(leases, monkeypatch):
 
     monkeypatch.setattr(plugin_process.subprocess, "Popen", fail)
     with contextlib.suppress(Exception):
-        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
+        celery_tasks.run_plugin.run(
+            "pkg",
+            "Plugin",
+            "1.0",
+            {},
+            [],
+            [],
+            "eval",
+            "ep",
+            pins=recorded_pins("pkg", "1.0"),
+        )
     assert leases["taken"], "the run took no lease"
     assert leases["given_back"] == leases["taken"]
 

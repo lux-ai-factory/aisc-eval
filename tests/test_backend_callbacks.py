@@ -50,7 +50,9 @@ def calls(monkeypatch):
             seen.urls.append(url)
             queue = getattr(seen, name)
             if not queue:
-                raise AssertionError(f"one {name.upper()} more than the test expected: {url}")
+                raise AssertionError(
+                    f"one {name.upper()} more than the test expected: {url}"
+                )
             item = queue.pop(0)
             if isinstance(item, BaseException):
                 raise item
@@ -58,13 +60,19 @@ def calls(monkeypatch):
 
         return call
 
-    http_fake.route(monkeypatch, **{name: method(name) for name in ("put", "patch", "get", "post")})
+    http_fake.route(
+        monkeypatch, **{name: method(name) for name in ("put", "patch", "get", "post")}
+    )
     monkeypatch.setattr(api_client, "sleep", seen.sleeps.append, raising=False)
     return seen
 
 
 def test_a_callback_retries_when_the_backend_cannot_be_reached(calls):
-    calls.put = [http_fake.unreachable("refused"), http_fake.unreachable("refused"), ok("Done")]
+    calls.put = [
+        http_fake.unreachable("refused"),
+        http_fake.unreachable("refused"),
+        ok("Done"),
+    ]
     try:
         api_client.mark_completed("e1")
     except ServiceUnreachable:
@@ -111,7 +119,9 @@ def test_a_fail_mark_refused_while_the_backend_restarts_is_tried_again(calls, st
         api_client.mark_plugin_failed("e1", "ep", "boom")
     except ServiceRefused:
         pass
-    assert len(calls.urls) == 2, "the test stays Running: its failure was sent once and refused"
+    assert (
+        len(calls.urls) == 2
+    ), "the test stays Running: its failure was sent once and refused"
 
 
 def test_processing_is_asked_with_the_runs_status(calls):
@@ -123,5 +133,9 @@ def test_processing_is_asked_with_the_runs_status(calls):
 
 
 def test_a_test_is_never_failed_without_a_reason():
-    default = inspect.signature(api_client.mark_plugin_failed).parameters["error_message"].default
+    default = (
+        inspect.signature(api_client.mark_plugin_failed)
+        .parameters["error_message"]
+        .default
+    )
     assert default is inspect.Parameter.empty

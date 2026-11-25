@@ -32,12 +32,22 @@ def test_the_limits_come_from_the_settings(monkeypatch):
 
 
 def test_a_started_plugin_runs_under_its_limits(tmp_path):
-    assert "limits" in inspect.signature(plugin_process.start).parameters, "start() takes no limits"
+    assert (
+        "limits" in inspect.signature(plugin_process.start).parameters
+    ), "start() takes no limits"
     with open(tmp_path / "err", "w+") as err:
         process = plugin_process.start(
-            [sys.executable, "-c", "import resource; print(resource.getrlimit(resource.RLIMIT_FSIZE))"],
-            tmp_path, err, {"PATH": os.environ["PATH"]}, _me(),
-            limits={resource.RLIMIT_FSIZE: (4096, 4096)})
+            [
+                sys.executable,
+                "-c",
+                "import resource; print(resource.getrlimit(resource.RLIMIT_FSIZE))",
+            ],
+            tmp_path,
+            err,
+            {"PATH": os.environ["PATH"]},
+            _me(),
+            limits={resource.RLIMIT_FSIZE: (4096, 4096)},
+        )
         assert process.stdout.read().strip() == "(4096, 4096)"
         plugin_process.wait(process)
 
@@ -45,8 +55,9 @@ def test_a_started_plugin_runs_under_its_limits(tmp_path):
 def test_outputs_larger_than_the_total_cap_are_refused(tmp_path):
     for name in ("a.bin", "b.bin"):
         (tmp_path / name).write_bytes(b"x" * 600)
-    assert "max_total_bytes" in inspect.signature(plugin_process.read_outputs).parameters, \
-        "a plugin's outputs are read whatever their size"
+    assert (
+        "max_total_bytes" in inspect.signature(plugin_process.read_outputs).parameters
+    ), "a plugin's outputs are read whatever their size"
     with pytest.raises(RuntimeError, match="larger than"):
         plugin_process.read_outputs(tmp_path, _me(), max_total_bytes=1000)
 
@@ -55,14 +66,17 @@ def test_the_pass_lives_as_long_as_a_test_may_run(worker, platform):
     _run_with([_resource("target", TARGET)])
     _method, _url, _headers, body = platform["calls"][0]
     margin = getattr(celery_tasks, "RUN_PASS_MARGIN_S", 300)
-    assert body.get("ttl_s") == int(celery_tasks.celery_app.conf.task_time_limit) + margin, \
-        "the pass does not say how long it lasts, so the platform's default (12 h) outlives the test"
+    assert (
+        body.get("ttl_s") == int(celery_tasks.celery_app.conf.task_time_limit) + margin
+    ), "the pass does not say how long it lasts, so the platform's default (12 h) outlives the test"
 
 
 def test_the_worker_starts_its_plugin_under_the_limits(worker, platform):
     _run_with([_resource("target", TARGET)])
     [(_argv, kwargs)] = worker["popen"]
-    assert kwargs["preexec_fn"] is not None, "the worker starts its plugin with no limits"
+    assert (
+        kwargs["preexec_fn"] is not None
+    ), "the worker starts its plugin with no limits"
 
 
 def test_a_plugin_running_as_the_worker_is_not_given_the_process_cap(tmp_path):
@@ -71,15 +85,22 @@ def test_a_plugin_running_as_the_worker_is_not_given_the_process_cap(tmp_path):
     before = resource.getrlimit(resource.RLIMIT_NPROC)
     with open(tmp_path / "err", "w+") as err:
         process = plugin_process.start(
-            [sys.executable, "-c", script], tmp_path, err, {"PATH": os.environ["PATH"]}, _me(),
-            limits={resource.RLIMIT_NPROC: (1, 1)})
+            [sys.executable, "-c", script],
+            tmp_path,
+            err,
+            {"PATH": os.environ["PATH"]},
+            _me(),
+            limits={resource.RLIMIT_NPROC: (1, 1)},
+        )
         assert process.stdout.read().strip() == str(before)
         plugin_process.wait(process)
 
 
 def test_cpu_time_is_counted_for_each_core_a_plugin_may_keep_busy(monkeypatch):
     monkeypatch.setenv("PLUGIN_CPU_CORES", "2")
-    assert celery_tasks.plugin_cpu_seconds() == 2 * int(celery_tasks.celery_app.conf.task_soft_time_limit)
+    assert celery_tasks.plugin_cpu_seconds() == 2 * int(
+        celery_tasks.celery_app.conf.task_soft_time_limit
+    )
     monkeypatch.setenv("PLUGIN_CPU_CORES", "none")
     with pytest.raises(RuntimeError, match="PLUGIN_CPU_CORES"):
         celery_tasks.plugin_cpu_seconds()

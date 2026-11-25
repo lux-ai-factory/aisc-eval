@@ -320,6 +320,7 @@ def worker(monkeypatch, tmp_path):
             name, content
         ),
     )
+
     @contextlib.contextmanager
     def lease(*args, **kwargs):
         # the test's own user stands in for a leased one: its folders can be given to it for real
@@ -345,7 +346,17 @@ def worker(monkeypatch, tmp_path):
 
 
 def _run():
-    return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
+    return celery_tasks.run_plugin.run(
+        "pkg",
+        "Plugin",
+        "1.0",
+        {},
+        [],
+        [],
+        "eval",
+        "ep",
+        pins=recorded_pins("pkg", "1.0"),
+    )
 
 
 def test_run_plugin_starts_the_plugin_as_its_leased_user(worker):
@@ -463,7 +474,15 @@ TARGET = f"target:{PROJECT}/system"
 
 def _run_with(inputs):
     return celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep", pins=recorded_pins("pkg", "1.0")
+        "pkg",
+        "Plugin",
+        "1.0",
+        {},
+        inputs,
+        [],
+        "eval",
+        "ep",
+        pins=recorded_pins("pkg", "1.0"),
     )
 
 
@@ -488,8 +507,13 @@ def test_a_run_with_a_target_mints_a_pass_for_exactly_that_ref(worker, platform)
     method, url, headers, body = platform["calls"][0]
     assert (method, url) == ("POST", "http://platform:8000/internal/run-passes")
     assert headers["X-AISC-Service-Token"] == "stack-token"
-    assert body == {"refs": [TARGET], "evaluation_plugin": "ep", "project": PROJECT,
-                    "ttl_s": celery_tasks.celery_app.conf.task_time_limit + celery_tasks.RUN_PASS_MARGIN_S}
+    assert body == {
+        "refs": [TARGET],
+        "evaluation_plugin": "ep",
+        "project": PROJECT,
+        "ttl_s": celery_tasks.celery_app.conf.task_time_limit
+        + celery_tasks.RUN_PASS_MARGIN_S,
+    }
     [(_argv, kwargs)] = worker["popen"]
     assert kwargs["env"]["PLATFORM_RUN_PASS"] == "the-pass"
 

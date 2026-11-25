@@ -39,7 +39,9 @@ def installs(worker, monkeypatch):  # noqa: F811
 
 def run_with(pins=None, **kw):
     try:
-        return celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=pins, **kw)
+        return celery_tasks.run_plugin.run(
+            "pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=pins, **kw
+        )
     except TypeError as exc:
         pytest.fail(f"a run takes no recorded hashes: {exc}")
 
@@ -63,37 +65,61 @@ def test_the_runs_environment_is_kept_as_a_file(worker, installs):  # noqa: F811
     assert worker["uploads"].get("plugin-environment.txt") == FREEZE.encode()
 
 
-def test_a_local_run_reports_its_digest_commit_and_dirty_flag(worker, installs, monkeypatch, tmp_path):  # noqa: F811
+def test_a_local_run_reports_its_digest_commit_and_dirty_flag(
+    worker, installs, monkeypatch, tmp_path
+):  # noqa: F811
     source = tmp_path / "pkg"
     source.mkdir()
     (source / "pyproject.toml").write_text('[project]\nname = "pkg"\nversion = "1.0"\n')
-    monkeypatch.setattr(celery_tasks.plugin_loader, "discovered_packages",
-                        {"pkg": {"1.0": {"source": "local", "pkg_root": source, **CODE}}}, raising=False)
+    monkeypatch.setattr(
+        celery_tasks.plugin_loader,
+        "discovered_packages",
+        {"pkg": {"1.0": {"source": "local", "pkg_root": source, **CODE}}},
+        raising=False,
+    )
     started = []
-    monkeypatch.setattr(celery_tasks, "mark_plugin_started", lambda *a, **k: started.append((a, k)))
+    monkeypatch.setattr(
+        celery_tasks, "mark_plugin_started", lambda *a, **k: started.append((a, k))
+    )
     run_with(None)
     assert started, "the run never reported its start"
     args, kwargs = started[0]
     assert kwargs.get("code", args[2] if len(args) > 2 else None) == CODE, started
 
 
-def test_a_lock_that_does_not_name_the_recorded_wheel_is_refused_before_install(worker, installs):  # noqa: F811
+def test_a_lock_that_does_not_name_the_recorded_wheel_is_refused_before_install(
+    worker, installs
+):  # noqa: F811
     with pytest.raises(Exception, match="does not name its recorded wheel"):
         run_with({"wheel_sha256": "b" * 64, "dependency_lock": LOCK})
     assert not [argv for argv in installs if argv[:3] == ["uv", "pip", "install"]]
 
 
-def test_a_file_whose_hash_is_not_the_recorded_one_is_refused_naming_why(monkeypatch, tmp_path):
+def test_a_file_whose_hash_is_not_the_recorded_one_is_refused_naming_why(
+    monkeypatch, tmp_path
+):
     class Refused(_Ok):
         returncode = 1
         stderr = "error: Hash mismatch for `pkg==1.0`"
 
-    monkeypatch.setattr(plugin_process, "run_install",
-                        lambda argv, user, timeout: Refused() if argv[:3] == ["uv", "pip", "install"] else _Ok())
+    monkeypatch.setattr(
+        plugin_process,
+        "run_install",
+        lambda argv, user, timeout: Refused()
+        if argv[:3] == ["uv", "pip", "install"]
+        else _Ok(),
+    )
     me = plugin_process.PluginUser(0, 0, None, switch=False)
     with pytest.raises(plugin_process.InstallFailed, match="is not the one recorded"):
-        plugin_process.build_venv("pkg", "1.0", {"source": "registry"}, tmp_path, me, None,
-                                  pins=plugin_process.Pins(HASH, LOCK))
+        plugin_process.build_venv(
+            "pkg",
+            "1.0",
+            {"source": "registry"},
+            tmp_path,
+            me,
+            None,
+            pins=plugin_process.Pins(HASH, LOCK),
+        )
 
 
 def test_a_plugin_cannot_leave_a_file_named_as_the_runs_environment(worker, installs):  # noqa: F811

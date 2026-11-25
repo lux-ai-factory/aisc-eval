@@ -150,7 +150,9 @@ def installs(monkeypatch):
 
 
 def test_the_cache_warming_install_runs_as_the_install_user(installs):
-    celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0"))
+    celery_tasks.install_package.run(
+        "pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0")
+    )
     assert [argv[:3] for argv, _ in installs] == [
         ["uv", "venv", installs[0][0][2]],
         ["uv", "pip", "install"],
@@ -169,7 +171,17 @@ def test_a_runs_venv_is_made_and_filled_by_the_install_user(installs, monkeypatc
     monkeypatch.setattr(celery_tasks, "mark_plugin_failed", lambda *a: None)
     monkeypatch.setattr(celery_tasks, "_revoke_sibling_tasks", lambda *a: None)
     with pytest.raises(RuntimeError):
-        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
+        celery_tasks.run_plugin.run(
+            "pkg",
+            "Plugin",
+            "1.0",
+            {},
+            [],
+            [],
+            "eval",
+            "ep",
+            pins=recorded_pins("pkg", "1.0"),
+        )
     venv_cmd, install_cmd, freeze_cmd = (argv for argv, _ in installs)
     assert venv_cmd[:2] == ["uv", "venv"] and "--allow-existing" in venv_cmd
     assert install_cmd[:3] == ["uv", "pip", "install"]
@@ -284,7 +296,9 @@ def test_a_failed_step_is_refused_with_its_message_scrubbed(monkeypatch, tmp_pat
 
 def test_both_tasks_build_the_venv_the_same_way(installs, monkeypatch):
     seen = _recorded_installs(monkeypatch)
-    celery_tasks.install_package.run("pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0"))
+    celery_tasks.install_package.run(
+        "pkg", "1.0", "eval", ["ep"], pins=recorded_pins("pkg", "1.0")
+    )
     warmed = list(seen)
     seen.clear()
     monkeypatch.setattr(
@@ -298,7 +312,17 @@ def test_both_tasks_build_the_venv_the_same_way(installs, monkeypatch):
     monkeypatch.setattr(celery_tasks, "mark_plugin_failed", lambda *a: None)
     monkeypatch.setattr(celery_tasks, "_revoke_sibling_tasks", lambda *a: None)
     with pytest.raises(RuntimeError):
-        celery_tasks.run_plugin.run("pkg", "Plugin", "1.0", {}, [], [], "eval", "ep", pins=recorded_pins("pkg", "1.0"))
+        celery_tasks.run_plugin.run(
+            "pkg",
+            "Plugin",
+            "1.0",
+            {},
+            [],
+            [],
+            "eval",
+            "ep",
+            pins=recorded_pins("pkg", "1.0"),
+        )
 
     def shape(calls):
         return [(argv[:2], timeout) for argv, timeout in calls]
@@ -333,7 +357,9 @@ def test_a_version_published_after_the_worker_listed_the_index_is_found(
 ):
     loader = _LoaderThatLearns()
     monkeypatch.setattr(celery_tasks, "plugin_loader", loader)
-    celery_tasks.install_package.run("pkg", "1.1", "eval", ["ep"], pins=recorded_pins("pkg", "1.1"))
+    celery_tasks.install_package.run(
+        "pkg", "1.1", "eval", ["ep"], pins=recorded_pins("pkg", "1.1")
+    )
     assert loader.listed == 1
     assert [argv[:3] for argv, _ in installs][-1] == ["uv", "pip", "install"]
 
@@ -344,12 +370,14 @@ def test_a_version_the_index_does_not_have_is_still_refused(installs, monkeypatc
     stops = []
     monkeypatch.setattr(celery_tasks, "_stop_run", lambda *a: stops.append(a))
     with pytest.raises(KeyError, match="Version '9.9'"):
-        celery_tasks.install_package.run("pkg", "9.9", "eval", ["ep"], pins=recorded_pins("pkg", "9.9"))
+        celery_tasks.install_package.run(
+            "pkg", "9.9", "eval", ["ep"], pins=recorded_pins("pkg", "9.9")
+        )
     assert loader.listed == 1
     # the refusal fails the run's tests with its reason, as any failed install does
-    assert [(evaluation, tests, reason) for evaluation, tests, reason, _task in stops] == [
-        ("eval", ["ep"], "Version '9.9' of package 'pkg' not found.")
-    ]
+    assert [
+        (evaluation, tests, reason) for evaluation, tests, reason, _task in stops
+    ] == [("eval", ["ep"], "Version '9.9' of package 'pkg' not found.")]
 
 
 # What an install step leaves running (a build backend may start a daemon) is ended with the step
@@ -358,7 +386,9 @@ def test_a_version_the_index_does_not_have_is_still_refused(installs, monkeypatc
 def test_every_process_an_install_step_left_is_ended_when_the_step_ends(monkeypatch):
     events = []
     monkeypatch.setattr(
-        plugin_process.subprocess, "run", lambda argv, **kw: events.append("step") or _Ok()
+        plugin_process.subprocess,
+        "run",
+        lambda argv, **kw: events.append("step") or _Ok(),
     )
     monkeypatch.setattr(
         plugin_process, "end_processes_of", lambda user: events.append(("ended", user))
@@ -394,7 +424,9 @@ def _builds_files(monkeypatch):
             os.chmod(venv / "bin" / "activate", 0o777)
             (venv / "bin" / "python").symlink_to("/usr/local/bin/python")
         elif argv[:3] == ["uv", "pip", "install"]:
-            site = Path(argv[argv.index("--python") + 1]) / "lib" / "site-packages" / "pkg"
+            site = (
+                Path(argv[argv.index("--python") + 1]) / "lib" / "site-packages" / "pkg"
+            )
             site.mkdir(parents=True, exist_ok=True)
             os.chmod(site, 0o777)
             (site / "__init__.py").write_text("")
@@ -404,7 +436,9 @@ def _builds_files(monkeypatch):
     monkeypatch.setattr(plugin_process, "run_install", run_install)
     owners = {}
     monkeypatch.setattr(
-        plugin_process.os, "lchown", lambda path, uid, gid: owners.__setitem__(Path(path), (uid, gid))
+        plugin_process.os,
+        "lchown",
+        lambda path, uid, gid: owners.__setitem__(Path(path), (uid, gid)),
     )
     monkeypatch.setattr(plugin_process.os, "chown", lambda path, uid, gid: None)
     return owners
@@ -412,7 +446,9 @@ def _builds_files(monkeypatch):
 
 def _assert_sealed(folder: Path, owners: dict):
     paths = [folder, *folder.rglob("*")]
-    assert paths and all(owners.get(path) == (0, 0) for path in paths), "not every file was given to root"
+    assert paths and all(
+        owners.get(path) == (0, 0) for path in paths
+    ), "not every file was given to root"
     for path in paths:
         if path.is_symlink():
             continue
@@ -427,8 +463,15 @@ def test_a_built_venv_is_roots_and_closed_to_its_installer(monkeypatch, tmp_path
     owners = _builds_files(monkeypatch)
     me = PluginUser(os.getuid(), os.getgid(), None, switch=True)
     venv = plugin_process.build_venv(
-        "pkg", "1.0", {"source": "registry"}, tmp_path, me, None,
-        pins=plugin_process.Pins("a" * 64, "pkg==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"),
+        "pkg",
+        "1.0",
+        {"source": "registry"},
+        tmp_path,
+        me,
+        None,
+        pins=plugin_process.Pins(
+            "a" * 64, "pkg==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"
+        ),
     )
     _assert_sealed(venv.path, owners)
     # what could run keeps its execute bit, nothing else gains one
@@ -445,7 +488,12 @@ def test_a_local_plugins_copy_is_roots_too(monkeypatch, tmp_path):
     me = PluginUser(os.getuid(), os.getgid(), None, switch=True)
     (tmp_path / "run").mkdir()
     plugin_process.build_venv(
-        "pkg", "1.0", {"source": "local", "pkg_root": source}, tmp_path / "run", me, None
+        "pkg",
+        "1.0",
+        {"source": "local", "pkg_root": source},
+        tmp_path / "run",
+        me,
+        None,
     )
     _assert_sealed(tmp_path / "run" / "source", owners)
 
@@ -458,13 +506,17 @@ def test_a_kept_environment_is_roots_once_it_is_built(monkeypatch, tmp_path):
 
     def run_install(argv, user, timeout):
         if argv[:3] == ["uv", "pip", "compile"]:
-            Path(argv[argv.index("-o") + 1]).write_text("pkg==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n")
+            Path(argv[argv.index("-o") + 1]).write_text(
+                "pkg==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"
+            )
             return _Ok()
         return real_run(argv, user, timeout)
 
     monkeypatch.setattr(plugin_process, "run_install", run_install)
     monkeypatch.setattr(
-        plugin_process, "install_user", lambda: PluginUser(os.getuid(), os.getgid(), None, switch=True)
+        plugin_process,
+        "install_user",
+        lambda: PluginUser(os.getuid(), os.getgid(), None, switch=True),
     )
     monkeypatch.setattr(celery_tasks, "_envs_root", lambda: tmp_path)
     monkeypatch.setattr(celery_tasks, "plugin_loader", _Loader())

@@ -63,8 +63,10 @@ def run_uid_pool(value: str | None) -> range:
     except ValueError:
         pool = None
     if not sep or pool is None or len(pool) == 0 or pool.start <= HIGHEST_IMAGE_UID:
-        raise ValueError(f"{RUN_UIDS_SETTING} must be first-last, both above {HIGHEST_IMAGE_UID} and first <= "
-                         f"last, not {value!r}")
+        raise ValueError(
+            f"{RUN_UIDS_SETTING} must be first-last, both above {HIGHEST_IMAGE_UID} and first <= "
+            f"last, not {value!r}"
+        )
     return pool
 
 
@@ -362,7 +364,9 @@ def _wheels_only(plugin_info: Mapping[str, Any]) -> list[str]:
     return [] if plugin_info["source"] == "local" else list(WHEELS_ONLY)
 
 
-def _failure(step: str, stderr: str | None, plugin_info: Mapping[str, Any]) -> "InstallFailed":
+def _failure(
+    step: str, stderr: str | None, plugin_info: Mapping[str, Any]
+) -> "InstallFailed":
     """A failed step's scrubbed message; for a catalogue plugin refused a source build, said plainly first (uv's
     own message names the package that has no wheel)."""
     text = scrub_text(stderr or "")
@@ -370,8 +374,10 @@ def _failure(step: str, stderr: str | None, plugin_info: Mapping[str, Any]) -> "
     if plugin_info["source"] != "local" and (
         "building from source is disabled" in words or "has no usable wheels" in words
     ):
-        text = ("a catalogue plugin installs from wheels only, and a package it needs has no wheel on the index "
-                f"(the publisher must provide one): {text}")
+        text = (
+            "a catalogue plugin installs from wheels only, and a package it needs has no wheel on the index "
+            f"(the publisher must provide one): {text}"
+        )
     return InstallFailed(step, text)
 
 
@@ -514,7 +520,14 @@ def build_venv(
     # under the index for an offline resolver. The index is always passed: a probe of it was slow
     # (its root lists the whole PyPI mirror) and dropped it on a timeout, so a catalogue plugin was
     # "not found"; when it is down, uv says so.
-    install_cmd = ["uv", "pip", "install", "--python", str(venv), *_wheels_only(plugin_info)]
+    install_cmd = [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(venv),
+        *_wheels_only(plugin_info),
+    ]
     if pins is not None:
         lock = folder / LOCK_FILE
         lock.write_text(pins.lock)
@@ -538,7 +551,15 @@ def build_venv(
         raise InstallFailed("install", text)
     if pins is not None and plugin_info["source"] == "local":
         own = run_install(
-            ["uv", "pip", "install", "--python", str(venv), "--no-deps", install_target],
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(venv),
+                "--no-deps",
+                install_target,
+            ],
             installer,
             timeout=INSTALL_TIMEOUT,
         )
@@ -756,8 +777,12 @@ def run_for_answer(
     out, err = bytearray(), bytearray()
     threads = [
         threading.Thread(target=_feed, args=(process.stdin, stdin), daemon=True),
-        threading.Thread(target=_drain, args=(process.stdout, out, max_bytes), daemon=True),
-        threading.Thread(target=_drain, args=(process.stderr, err, _REASON_BYTES), daemon=True),
+        threading.Thread(
+            target=_drain, args=(process.stdout, out, max_bytes), daemon=True
+        ),
+        threading.Thread(
+            target=_drain, args=(process.stderr, err, _REASON_BYTES), daemon=True
+        ),
     ]
     for thread in threads:
         thread.start()

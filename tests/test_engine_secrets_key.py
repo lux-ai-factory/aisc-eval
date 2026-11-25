@@ -36,5 +36,7 @@ def test_the_worker_still_reads_a_value_stored_under_the_django_key(monkeypatch)
 
 
 def test_a_plugin_never_gets_the_engine_secrets_key():
-    got = celery_tasks.plugin_environment({"ENGINE_SECRETS_KEY": NEW, "PATH": "/bin"}, {})
+    got = celery_tasks.plugin_environment(
+        {"ENGINE_SECRETS_KEY": NEW, "PATH": "/bin"}, {}
+    )
     assert "ENGINE_SECRETS_KEY" not in got

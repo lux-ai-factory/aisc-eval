@@ -84,7 +84,15 @@ def run(worker, platform, monkeypatch):  # noqa: F811
     worker["leave"] = leave
     seen["worker"] = worker
     seen["go"] = lambda inputs: celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", {}, inputs, [], "eval", "ep", pins=recorded_pins("pkg", "1.0")
+        "pkg",
+        "Plugin",
+        "1.0",
+        {},
+        inputs,
+        [],
+        "eval",
+        "ep",
+        pins=recorded_pins("pkg", "1.0"),
     )
     return seen
 

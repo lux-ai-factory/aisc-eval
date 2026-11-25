@@ -271,11 +271,11 @@ NO_ISOLATION = (
     "plugin network isolation is not in force on this worker (its firewall is not set: does the container have"
     " NET_ADMIN?), so the test did not start"
 )
-NO_PROXY_RUNNING = "the egress proxy is not running on this worker, so the test did not start"
-NO_MEASURES = "The plugin finished without any measure."
-NO_RECORDED_HASH = (
-    "this test has no recorded hash: open its page once so its declarations are read, then run it again"
+NO_PROXY_RUNNING = (
+    "the egress proxy is not running on this worker, so the test did not start"
 )
+NO_MEASURES = "The plugin finished without any measure."
+NO_RECORDED_HASH = "this test has no recorded hash: open its page once so its declarations are read, then run it again"
 #: the file of a run that lists what its plugin's environment held (uv pip freeze)
 ENVIRONMENT_FILE = "plugin-environment.txt"
 
@@ -305,7 +305,9 @@ def run_pins(
         return plugin_process.Pins(None, lock) if lock else None
     if not wheel_sha256 or not lock:
         raise RuntimeError(NO_RECORDED_HASH)
-    if wheel_sha256.lower() not in plugin_process.locked_hashes(lock, package_name, version):
+    if wheel_sha256.lower() not in plugin_process.locked_hashes(
+        lock, package_name, version
+    ):
         raise RuntimeError(
             f"the recorded lock of {package_name} {version} does not name its recorded wheel "
             f"(sha256 {wheel_sha256[:12]}...), so the test did not start"
@@ -318,7 +320,9 @@ def local_code(plugin_info: dict) -> dict | None:
     None for a catalogue plugin, whose code is its wheel."""
     if plugin_info.get("source") != "local":
         return None
-    return {name: plugin_info.get(name) for name in ("digest", "git_commit", "git_dirty")}
+    return {
+        name: plugin_info.get(name) for name in ("digest", "git_commit", "git_dirty")
+    }
 
 
 #: seconds a plugin's run pass outlives the test's hard time limit: the worker still reads the run's
@@ -335,7 +339,9 @@ def plugin_cpu_seconds() -> int:
     try:
         cores = int(raw) if raw else PLUGIN_CPU_CORES
     except ValueError:
-        raise RuntimeError(f"PLUGIN_CPU_CORES must be a whole number, not {raw!r}") from None
+        raise RuntimeError(
+            f"PLUGIN_CPU_CORES must be a whole number, not {raw!r}"
+        ) from None
     if cores <= 0:
         raise RuntimeError(f"PLUGIN_CPU_CORES must be above 0, not {cores}")
     return int(celery_app.conf.task_soft_time_limit) * cores
@@ -871,7 +877,9 @@ def _installer(index_url: str | None) -> Iterator[plugin_process.PluginUser]:
     with ExitStack() as stack:
         user = stack.enter_context(plugin_process.lease_run_user())
         stack.callback(plugin_process.end_processes_of, user)
-        home = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="aisc-install-")))
+        home = Path(
+            stack.enter_context(tempfile.TemporaryDirectory(prefix="aisc-install-"))
+        )
         os.chown(home, user.uid, user.gid)
         os.chmod(home, 0o700)
         token = secrets.token_urlsafe(32)
@@ -942,9 +950,7 @@ def _run_the_plugin(
             endpoints.append(resolved["endpoint_url"])
             helper_rules.append(resolved)
             if resolved.get("api_key"):
-                helper_secret_env[_secret_env_name(secret_key)] = resolved[
-                    "api_key"
-                ]
+                helper_secret_env[_secret_env_name(secret_key)] = resolved["api_key"]
                 payload = {"secret_key": secret_key}
             else:
                 payload = {}
@@ -996,7 +1002,9 @@ def _run_the_plugin(
         except Exception as exc:
             # the person reads this: the answer's status, never the backend's address
             status = getattr(getattr(exc, "response", None), "status_code", None)
-            not_stored = f"{MARKER_NOT_STORED} ({f'HTTP {status}' if status else 'no answer'})"
+            not_stored = (
+                f"{MARKER_NOT_STORED} ({f'HTTP {status}' if status else 'no answer'})"
+            )
         if not_stored:
             # raised outside the except: the backend's error, which names its address, is not chained
             raise RuntimeError(not_stored)
@@ -1114,18 +1122,14 @@ def _run_the_plugin(
     stdout_content = "".join(stdout_lines)
 
     log_stdout_content = (
-        "====== Step 1: Venv Creation ======\n"
-        + (venv_result.stdout or "")
-        + "\n\n"
+        "====== Step 1: Venv Creation ======\n" + (venv_result.stdout or "") + "\n\n"
         "====== Step 2: Plugin Install ======\n"
         + (install_result.stdout or "")
         + "\n\n"
         "====== Step 3: Plugin Run ======\n" + stdout_content + "\n\n"
     )
     log_stderr_content = (
-        "====== Step 1: Venv Creation ======\n"
-        + (venv_result.stderr or "")
-        + "\n\n"
+        "====== Step 1: Venv Creation ======\n" + (venv_result.stderr or "") + "\n\n"
         "====== Step 2: Plugin Install ======\n"
         + (install_result.stderr or "")
         + "\n\n"
@@ -1147,8 +1151,13 @@ def _run_the_plugin(
             (ENVIRONMENT_FILE, environment),
         ):
             try:
-                upload_artifact(evaluation_pid, evaluation_plugin_pid, name, content,
-                                holds_conversation=name in _CONVERSATION_FILES)
+                upload_artifact(
+                    evaluation_pid,
+                    evaluation_plugin_pid,
+                    name,
+                    content,
+                    holds_conversation=name in _CONVERSATION_FILES,
+                )
             except Exception as exc:
                 logger.warning(
                     f"The failed run's {name} was not kept as a file ({exc.__class__.__name__})"
@@ -1243,12 +1252,16 @@ def _listed(package_name: str, version: str) -> dict:
     return found
 
 
-def _expected_hash(package_name: str, version: str, info: dict, recorded: str | None) -> str | None:
+def _expected_hash(
+    package_name: str, version: str, info: dict, recorded: str | None
+) -> str | None:
     """The wheel hash a catalogue plugin must be installed from: the one recorded, else the index's. A
     local plugin has none (it is installed from its folder)."""
     if info.get("source") == "local":
         return None
-    expected = recorded or plugin_loader.devpi_client.wheel_sha256(package_name, version)
+    expected = recorded or plugin_loader.devpi_client.wheel_sha256(
+        package_name, version
+    )
     if not expected:
         raise RuntimeError(NO_WHEEL_HASH.format(package=package_name, version=version))
     return expected.lower()
@@ -1256,7 +1269,11 @@ def _expected_hash(package_name: str, version: str, info: dict, recorded: str | 
 
 def _envs_root() -> Path:
     """PLUGIN_ENVS, or a folder under the temporary one for a worker that is not root."""
-    root = PLUGIN_ENVS if os.geteuid() == 0 else Path(tempfile.gettempdir()) / "aisc-plugin-envs"
+    root = (
+        PLUGIN_ENVS
+        if os.geteuid() == 0
+        else Path(tempfile.gettempdir()) / "aisc-plugin-envs"
+    )
     root.mkdir(mode=0o711, parents=True, exist_ok=True)
     return root
 
@@ -1298,12 +1315,15 @@ def _plugin_env(
                     pins=plugin_process.Pins(expected, lock),
                 )
             ready.write_text("")
-        yield folder / "venv" / "bin" / "python", (
-            folder / plugin_process.LOCK_FILE
-        ).read_text()
+        yield (
+            folder / "venv" / "bin" / "python",
+            (folder / plugin_process.LOCK_FILE).read_text(),
+        )
 
 
-def _sandboxed(venv_python: Path, argv: list[str], stdin: bytes, timeout_s: int) -> bytes:
+def _sandboxed(
+    venv_python: Path, argv: list[str], stdin: bytes, timeout_s: int
+) -> bytes:
     """The manifest command run as a leased run user, in folders of its own, with no network (no proxy
     token: the firewall lets a run user reach only the proxy), no pass and none of the worker's secrets."""
     _check_isolation()
@@ -1336,7 +1356,9 @@ def _json_answer(answer: bytes, what: str):
 
 
 @celery_app.task
-def read_manifest(package_name: str, version: str, wheel_sha256: str | None = None) -> dict:
+def read_manifest(
+    package_name: str, version: str, wheel_sha256: str | None = None
+) -> dict:
     """What the engine stores of a plugin version: {"wheel_sha256", "dependency_lock", "manifest", "code"}.
     The plugin is installed from a hashed lock that must name the recorded wheel (or the index's, when none
     is recorded; a catalogue plugin with neither is refused before anything is installed), then describes
@@ -1344,14 +1366,21 @@ def read_manifest(package_name: str, version: str, wheel_sha256: str | None = No
     info = _listed(package_name, version)
     expected = _expected_hash(package_name, version, info, wheel_sha256)
     with _plugin_env(package_name, version, info, expected) as (python, lock):
-        answer = _sandboxed(python, ["describe", info["module_name"]], b"", MANIFEST_TIMEOUT_S)
+        answer = _sandboxed(
+            python, ["describe", info["module_name"]], b"", MANIFEST_TIMEOUT_S
+        )
     manifest = _json_answer(answer, "manifest")
     if not isinstance(manifest, dict) or not isinstance(manifest.get("plugins"), dict):
         raise plugin_process.NoAnswer("the plugin's manifest names no plugin class")
     code = None
     if info.get("source") == "local":
         code = {name: info.get(name) for name in ("digest", "git_commit", "git_dirty")}
-    return {"wheel_sha256": expected, "dependency_lock": lock, "manifest": manifest, "code": code}
+    return {
+        "wheel_sha256": expected,
+        "dependency_lock": lock,
+        "manifest": manifest,
+        "code": code,
+    }
 
 
 @celery_app.task
@@ -1363,8 +1392,17 @@ def plugin_hook(
     if hook not in plugin_manifest.HOOKS:
         raise ValueError(f"{hook} is not a form hook")
     info = _listed(package_name, version)
-    expected = _expected_hash(package_name, version, info, (pins or {}).get("wheel_sha256"))
-    asked = json.dumps({"module": info["module_name"], "plugin": plugin_name, "hook": hook, "args": args})
+    expected = _expected_hash(
+        package_name, version, info, (pins or {}).get("wheel_sha256")
+    )
+    asked = json.dumps(
+        {
+            "module": info["module_name"],
+            "plugin": plugin_name,
+            "hook": hook,
+            "args": args,
+        }
+    )
     with _plugin_env(package_name, version, info, expected) as (python, _lock):
         answer = _sandboxed(python, ["hook"], asked.encode(), HOOK_TIMEOUT_S)
     return _json_answer(answer, f"answer to {hook}")
@@ -1389,7 +1427,11 @@ def plugin_reason(stderr_text: str, returncode: int) -> str:
 #: the run's calls to the system under test, as the platform recorded them, kept with the run's files
 CALLS_FILE = "system-under-test-calls.jsonl"
 #: the names of the files the worker itself keeps with a run, which no plugin output may take
-_WORKERS_FILES = {CALLS_FILE.casefold(), "plugin_execution.log", ENVIRONMENT_FILE.casefold()}
+_WORKERS_FILES = {
+    CALLS_FILE.casefold(),
+    "plugin_execution.log",
+    ENVIRONMENT_FILE.casefold(),
+}
 #: the worker's files that hold the run's conversation with the system under test (its calls, and the plugin's
 #: output, which may print prompts and answers): uploaded marked, so only owners and editors open them
 _CONVERSATION_FILES = {CALLS_FILE, "plugin_execution.log"}
@@ -1411,7 +1453,11 @@ def platform_stop_reason(calls: bytes | None) -> str | None:
         error = row.get("error") if isinstance(row, dict) else None
         if isinstance(error, dict) and error.get("code") == RUN_STOPPED_CODE:
             detail = error.get("detail")
-            return detail if isinstance(detail, str) and detail.strip() else PLATFORM_STOPPED
+            return (
+                detail
+                if isinstance(detail, str) and detail.strip()
+                else PLATFORM_STOPPED
+            )
     return None
 
 

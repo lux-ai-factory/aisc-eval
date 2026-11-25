@@ -30,7 +30,15 @@ def run(worker, files, config=None, inputs=(), settings=SECRET_SETTING):
 
     worker["leave"] = leave
     celery_tasks.run_plugin.run(
-        "pkg", "Plugin", "1.0", config or {}, list(inputs), settings, "eval", "ep", pins=recorded_pins("pkg", "1.0")
+        "pkg",
+        "Plugin",
+        "1.0",
+        config or {},
+        list(inputs),
+        settings,
+        "eval",
+        "ep",
+        pins=recorded_pins("pkg", "1.0"),
     )
     return worker["uploads"]
 
