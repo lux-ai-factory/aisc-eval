@@ -9,3 +9,8 @@
 # Environment file
 /.env
 
+
+# Virtual environment and secrets
+/.venv
+**/*.key
+**/env.secrets
