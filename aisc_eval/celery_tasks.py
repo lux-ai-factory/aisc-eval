@@ -2,6 +2,7 @@ import json
 import os
 import io
 import ssl
+import signal
 import subprocess
 import tempfile
 import urllib
@@ -99,16 +100,33 @@ def progress_callback(task_progress: TaskProgress, plugin_name: str, task_id: st
     celery_app.backend.store_result(task_id, meta, state="RUNNING")
 
 
+def _abort_on_sigterm(signum: int, _frame: object) -> None:
+    """Turn revoke's SIGTERM into SystemExit so the task's cleanup (killpg) runs.
+
+    Without this, prefork terminate SIGTERMs the task process directly; Python
+    exits immediately and the plugin grandchild survives as an orphan.
+    """
+    raise SystemExit(f"SIGTERM ({signum}): task terminated")
+
+
 def _terminate_process(process: subprocess.Popen | None) -> None:
-    if process is not None and process.poll() is None:
+    """Kill the plugin's whole process tree.
+
+    The plugin runs with ``start_new_session=True``, so its pid is its own
+    process group: signal the group so grandchildren (the actual ExpliTest
+    compute) die too, not just the venv python wrapper.
+    """
+    if process is None or process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
         try:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-        except Exception:
-            pass
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+    except Exception:
+        logger.exception("Failed to terminate plugin process group")
 
 
 def _revoke_sibling_tasks(evaluation_pid: uuid.UUID, current_task_id: str) -> None:
@@ -268,9 +286,9 @@ def run_evaluation(self, evaluation_pid: uuid.UUID) -> dict:
     workflow = group(package_chains) | finalize_evaluation.si(evaluation_pid)
     workflow.apply_async()
 
-    # store plugin task ids in redis so siblings can be revoked on failure
+    # store plugin task ids for the stop endpoint to revoke (1-day TTL for long evals)
     celery_app.backend.client.set(
-        f"eval_tasks:{evaluation_pid}", json.dumps(plugin_task_ids), ex=7200
+        f"eval_tasks:{evaluation_pid}", json.dumps(plugin_task_ids), ex=1 * 24 * 3600
     )
 
     return {"evaluation_pid": evaluation_pid, "plugin_task_ids": plugin_task_ids}
@@ -405,11 +423,14 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
         returncode: int | None = None
         stderr_content = ""
         try:
+            signal.signal(signal.SIGTERM, _abort_on_sigterm)
             with open(stderr_path, "w+") as stderr_file:
                 child_env = os.environ.copy()
                 child_env.update(
                 build_secret_environment(project_settings + llm_secret_settings)
             )
+                # Own process group: lets the revoke cleanup kill the whole
+                # plugin tree (venv python + any grandchildren) with one killpg.
                 process = subprocess.Popen(
                     [str(venv_python), str(runtime_script)],
                     cwd=str(workspace_path),
@@ -417,7 +438,8 @@ def run_plugin(self, package_name: str, plugin_name: str, version: str, plugin_c
                     stderr=stderr_file,
                     env=child_env,
                     text=True,
-                    bufsize=1
+                    bufsize=1,
+                    start_new_session=True,
                 )
 
                 if (stdout := process.stdout) is not None:
