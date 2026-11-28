@@ -97,7 +97,7 @@ dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
 ]
 wheels = [
-    { filename = "aisc_identity-0.1.0-py3-none-any.whl", hash = "sha256:9d3c7537145e02133b44a7fb9c7b130b549b5fd8cf6dbabb8e0875854a3b34e1" },
+    { filename = "aisc_identity-0.1.0-py3-none-any.whl", hash = "sha256:74e3b05926e03053fd8de191f622cfb4e0bc61becdebadd63a646bb92b6c4abf" },
 ]
 
 [package.metadata]
